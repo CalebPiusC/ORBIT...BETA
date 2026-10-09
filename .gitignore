@@ -1,0 +1,30 @@
+# Local credentials and machine-specific configuration
+.env
+.env.*
+!.env.example
+
+# Python bytecode, caches, and local virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+audit.log
+logs/
+
+# Generated runtime/session state
+runtime/
+state/
+.orbit/
+notes.txt
+*.state
+*.state.json
+*.db
+*.sqlite
+*.sqlite3
