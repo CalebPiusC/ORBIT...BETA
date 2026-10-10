@@ -136,24 +136,48 @@
   }
 
   // --- chat bubble helpers ------------------------------------------------
+  // Local "HH:MM" for the time line under a bubble.
+  function nowLabel() {
+    var d = new Date();
+    var hh = String(d.getHours());
+    var mm = String(d.getMinutes());
+    return (hh.length < 2 ? "0" : "") + hh + ":" + (mm.length < 2 ? "0" : "") + mm;
+  }
+
+  // Every message gets its own row: the bubble, then a faint time line. The
+  // row, not the bubble, is what sits in the log, so bubbles are never merged.
+  function makeRow(log, side) {
+    var row = el("div", "chat-row " + side);
+    var bubble = el("div", "chat-bubble " + side);
+    row.appendChild(bubble);
+    row.appendChild(el("div", "chat-meta", nowLabel()));
+    log.appendChild(row);
+    return { row: row, bubble: bubble };
+  }
+
+  // User messages: right-aligned accent bubble. No name label.
   function makeUserBubble(log, text) {
-    var bubble = el("div", "chat-bubble");
-    bubble.appendChild(el("div", "who", "You · just now"));
+    var bubble = makeRow(log, "user").bubble;
     bubble.appendChild(el("div", "body", escapeHtml(text)));
-    log.appendChild(bubble);
     return bubble;
+  }
+
+  // Orbit's answer body: the brain icon sits in front of the text and is the
+  // only marker of who is speaking.
+  function makeOrbitBody(bubble) {
+    var parts = makeBody(bubble);
+    parts.body.insertAdjacentHTML("afterbegin", BRAIN_SVG);
+    return parts;
   }
 
   // Orbit bubble with its own mini thinking block + answer body.
   function makeOrbitBubble(log) {
-    var bubble = el("div", "chat-bubble orbit");
-    bubble.appendChild(el("div", "who", BRAIN_SVG + "Orbit"));
+    var bubble = makeRow(log, "orbit").bubble;
     var think = el("div", "thinking-block");
     var thinkText = el("span", "thinking-text", "");
     think.appendChild(thinkText);
     bubble.appendChild(think);
-    var parts = makeBody(bubble);
-    log.appendChild(bubble);
+    var parts = makeOrbitBody(bubble);
     log.scrollTop = log.scrollHeight;
     return { bubble: bubble, think: think, thinkText: thinkText, body: parts.body, reply: parts.reply };
   }
@@ -216,7 +240,7 @@
       if (!text) return;
       if (inflight) {
         // Leave the text in the box (nothing is lost) and say why it won't send.
-        var pending = thread.querySelector(".chat-bubble.orbit:last-child .body");
+        var pending = thread.querySelector(".chat-row.orbit:last-child .body");
         if (pending) showLine(pending, "Still waiting on the reply above — send this after it finishes.", "warn");
         return;
       }
@@ -224,13 +248,11 @@
       input.value = "";
       thread.classList.add("visible");
       makeUserBubble(thread, text);
-      var orbit = el("div", "chat-bubble orbit");
-      orbit.appendChild(el("div", "who", BRAIN_SVG + "Orbit"));
-      var parts = makeBody(orbit);
+      var orbit = makeRow(thread, "orbit").bubble;
+      var parts = makeOrbitBody(orbit);
       var body = parts.body;
       var reply = parts.reply;
       body.classList.add("streaming");
-      thread.appendChild(orbit);
       thread.scrollTop = thread.scrollHeight;
 
       postSSE(

@@ -29,7 +29,7 @@ from typing import Any, Callable
 from flask import Flask, Response, render_template, request, stream_with_context
 from providers.base import ChatMessage as ProvChatMessage, StreamChunk
 
-from app.store import Store
+from app.store import Store, now_label
 
 HOME_SYSTEM_PROMPT = (
     "You are ORBIT, a helpful assistant. Reply clearly and concisely. "
@@ -145,7 +145,8 @@ def create_app(provider: Any | None = None, store: Store | None = None) -> Flask
 
         from app.store import ChatMessage as StoreChatMessage
 
-        st.home_thread.append(StoreChatMessage(who="You", time="now", body=message, is_orbit=False))
+        sent_at = now_label()
+        st.home_thread.append(StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False))
         history = _history_from_thread(st.home_thread)
 
         def chunk_source() -> Iterator[StreamChunk]:
@@ -154,7 +155,7 @@ def create_app(provider: Any | None = None, store: Store | None = None) -> Flask
         def on_done(answer: str) -> None:
             if answer:
                 st.home_thread.append(
-                    StoreChatMessage(who="Orbit", time="now", body=answer, is_orbit=True)
+                    StoreChatMessage(who="Orbit", time=sent_at, body=answer, is_orbit=True)
                 )
 
         return _sse_response(chunk_source, on_done)
@@ -173,6 +174,7 @@ def create_app(provider: Any | None = None, store: Store | None = None) -> Flask
         from app.store import ChatMessage as StoreChatMessage
 
         extra_user: str | None = None
+        sent_at = now_label()  # message start time, shown under both bubbles
         if initial:
             extra_user = (
                 f"Start the task: {task_obj.title}. {task_obj.description} "
@@ -183,7 +185,7 @@ def create_app(provider: Any | None = None, store: Store | None = None) -> Flask
                 return Response(json.dumps({"error": "message is required"}), status=400, mimetype="application/json")
             st.add_chat(
                 task_id,
-                StoreChatMessage(who="You", time="now", body=message, is_orbit=False),
+                StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False),
             )
 
         history = _history_from_thread(task_obj.chat, extra_user=extra_user)
@@ -195,7 +197,7 @@ def create_app(provider: Any | None = None, store: Store | None = None) -> Flask
             if answer:
                 st.add_chat(
                     task_id,
-                    StoreChatMessage(who="Orbit", time="now", body=answer, is_orbit=True),
+                    StoreChatMessage(who="Orbit", time=sent_at, body=answer, is_orbit=True),
                 )
 
         return _sse_response(chunk_source, on_done)

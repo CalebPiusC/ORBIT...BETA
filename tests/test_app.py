@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 from providers.base import ChatMessage, StreamChunk
@@ -268,6 +270,127 @@ class SilentFailureTests(unittest.TestCase):
         detail = "".join(d for k, d in events if k == "error")
         self.assertIn("GEMINI_API_KEY", detail)
         self.assertFalse(any(m.is_orbit for m in store.home_thread))
+
+
+class ChatBubbleLayoutTests(unittest.TestCase):
+    """Speakers are told apart by position and surface, not by name labels.
+
+    Rule (UI request, chat area): no "You" / "Orbit" text labels. User bubbles
+    are right-aligned (class ``user``); Orbit bubbles are left-aligned (class
+    ``orbit``) with the brain icon in front of their text as the only marker.
+    """
+
+    def setUp(self) -> None:
+        from app.store import ChatMessage as StoreChatMessage
+
+        self.store = Store()
+        self.app = create_app(provider=FakeStreamingProvider(), store=self.store)
+        self.client = self.app.test_client()
+        self.store.add_chat(
+            "T1",
+            StoreChatMessage(who="Orbit", time="09:42", body="On it.", is_orbit=True),
+        )
+
+    def test_task_side_chat_has_no_name_labels(self) -> None:
+        body = self.client.get("/task/T1").get_data(as_text=True)
+        self.assertNotIn('class="who"', body)
+        self.assertNotIn("You · ", body)
+
+    def test_each_message_is_its_own_row_with_a_time_line(self) -> None:
+        body = self.client.get("/task/T1").get_data(as_text=True)
+        # One row per message; the time sits under the bubble, not beside a label.
+        self.assertRegex(
+            body,
+            r'(?s)<div class="chat-row orbit">\s*<div class="chat-bubble orbit">.*?</div>\s*'
+            r'<div class="chat-meta">09:42</div>\s*</div>',
+        )
+
+    def test_user_messages_are_right_aligned_accent_bubbles(self) -> None:
+        from app.store import ChatMessage as StoreChatMessage
+
+        self.store.add_chat(
+            "T1",
+            StoreChatMessage(who="You", time="09:41", body="Add order status tracking", is_orbit=False),
+        )
+        body = self.client.get("/task/T1").get_data(as_text=True)
+        self.assertIn('<div class="chat-row user">', body)
+        self.assertIn('class="chat-bubble user"', body)
+        self.assertRegex(body, r'<div class="chat-meta">09:41</div>')
+        self.assertIn("Add order status tracking", body)
+
+    def test_orbit_messages_are_left_aligned_with_brain_icon_in_text(self) -> None:
+        body = self.client.get("/task/T1").get_data(as_text=True)
+        self.assertIn('class="chat-bubble orbit"', body)
+        # The icon is inside the same body element as Orbit's text, before it.
+        self.assertRegex(body, r'<div class="body"><span class="brain-icon">.*?</span>On it\.</div>')
+
+    def test_script_builds_rows_and_time_lines(self) -> None:
+        from pathlib import Path
+
+        script = (Path(__file__).resolve().parent.parent / "app" / "static" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn('"who"', script)
+        self.assertNotIn("You · just now", script)
+        self.assertIn('"chat-row " + side', script)
+        self.assertIn('"chat-meta"', script)
+        self.assertIn('"chat-bubble " + side', script)
+        # The home thread's pending check must look at rows, not bare bubbles.
+        self.assertIn('".chat-row.orbit:last-child .body"', script)
+
+
+class ServerMessageTimeTests(unittest.TestCase):
+    """Messages created by the server carry the real local time, not a placeholder."""
+
+    def test_home_chat_stores_hh_mm_for_both_sides(self) -> None:
+        store = Store()
+        app = create_app(provider=FakeStreamingProvider(), store=store)
+        resp = app.test_client().post(
+            "/api/chat", json={"message": "Hello Orbit"}, content_type="application/json"
+        )
+        resp.get_data(as_text=True)
+        self.assertEqual(len(store.home_thread), 2)
+        for msg in store.home_thread:
+            self.assertRegex(msg.time, r"^\d{2}:\d{2}$")
+            self.assertNotEqual(msg.time, "now")
+        self.assertEqual(store.home_thread[0].time, store.home_thread[1].time)
+
+    def test_now_label_is_local_hh_mm(self) -> None:
+        from datetime import datetime
+
+        from app.store import now_label
+
+        self.assertRegex(now_label(), r"^\d{2}:\d{2}$")
+        self.assertEqual(now_label(), datetime.now().strftime("%H:%M"))
+
+
+class DesignMockupSyncTests(unittest.TestCase):
+    """design/orbit_mockup.html is the spec: its palette and chat markup must match the app."""
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def _root_vars(self, text: str) -> dict[str, str]:
+        block = re.search(r":root\s*\{(.*?)\}", text, re.S)
+        self.assertIsNotNone(block, "no :root block found")
+        return dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", block.group(1)))
+
+    def test_accent_tokens_match_between_app_and_mockup(self) -> None:
+        app_text = (self.ROOT / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
+        mock_text = (self.ROOT / "design" / "orbit_mockup.html").read_text(encoding="utf-8")
+        app_vars, mock_vars = self._root_vars(app_text), self._root_vars(mock_text)
+        for token in ("--accent", "--accent-bright", "--accent-dim", "--accent-wash", "--accent-soft"):
+            self.assertIn(token, app_vars)
+            self.assertEqual(
+                mock_vars.get(token), app_vars[token].strip(), f"{token} differs between app and mockup"
+            )
+
+    def test_mockup_chat_uses_rows_and_has_no_name_labels(self) -> None:
+        mock_text = (self.ROOT / "design" / "orbit_mockup.html").read_text(encoding="utf-8")
+        self.assertNotIn('class="who"', mock_text)
+        self.assertNotIn("You · ", mock_text)
+        self.assertIn('class="chat-row user"', mock_text)
+        self.assertIn('class="chat-row orbit"', mock_text)
+        self.assertIn('class="chat-meta"', mock_text)
 
 
 if __name__ == "__main__":
