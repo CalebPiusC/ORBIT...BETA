@@ -54,6 +54,38 @@ The previous build had `audit.py` and `confirm.py`. Here the same duties live in
 (`ConfirmationGate`, `ConsoleConfirmationGate`). The split is fine; the names are not the
 point. Do not create `audit.py`/`confirm.py` shims to match an old memory of the layout.
 
+### 0.4 The two chat entry points, and what was wrong with both
+
+There are two ways to talk to Orbit and they are not the same thing:
+
+| Entry point | Provider | Turn model | Notes |
+| --- | --- | --- | --- |
+| `python chat.py` | real `GeminiProvider.reply()` | one-shot before, **REPL now** | keeps history across turns, capped at `MAX_MESSAGES`; a provider error ends the turn, not the session; `/help` `/reset` `/quit`; goes through the gated tool registry, so `write_note` still asks for `yes` |
+| `python -m app.server` | real `reply_stream()` lazily | SSE, streaming | text only — **no tool dispatch**, by design (§1.3) |
+| `python run_demo.py` | `StubStreamingProvider` | SSE, streaming | canned replies. "Hello from Orbit — how can I help?" means you are looking at the stub, not your model |
+
+Three defects were found and fixed while diagnosing "the terminal replies and quits,
+the web box does nothing"; all three are silent-failure bugs, which is the pattern to
+watch for:
+
+1. **`chat.py` exited after one message.** It was written as a one-shot smoke test, so
+   replying and quitting was correct behavior that read like a crash.
+2. **Steering a task froze the bubble.** `streamTurn` pointed `targetThink` at `null` for
+   every non-initial turn, so the first `thinking` chunk threw and the answer never
+   rendered. Narration now lands in the bubble's own thinking block.
+3. **Failure paths printed nothing.** `postSSE` had no rejection handler, no content-type
+   check, and no empty-stream case, so a refused `fetch` or an empty reply looked exactly
+   like a slow model. Each now shows a line in the bubble, and `bootstrapHome`/
+   `bootstrapTask` report if `app.js` never loaded instead of leaving a dead input.
+
+Also fixed: `/task/<id>` used to re-run the opening model call on *every* page load,
+burning a call and appending a duplicate message. The route now passes `stream_initial`
+and the client obeys it (`tests/test_app.py::test_opening_turn_is_offered_once_not_once_per_refresh`).
+
+These are DOM/promise behaviors the Python suite could not see. `tests/test_app.py::
+SilentFailureTests` now pins the server half (empty stream and a provider that raises
+before the first chunk must both emit an `error` event before `done`).
+
 ---
 
 ## 1. The rules that are load-bearing
@@ -86,6 +118,15 @@ These are not style preferences. Each one exists because the previous build viol
 7. **Streaming never replaces gating.** `reply_stream()` is text-only, added *beside*
    `reply()`. Function-calling turns keep using `reply()` so the gate runs synchronously.
    Do not "improve" the UX by streaming a tool-using turn until the gate has a UI path.
+8. **Every turn ends visibly.** Each stream terminates in an `answer`, or an `error`
+   saying why there is none, then `done` — server-side (`_sse_response`) and client-side
+   (`postSSE`'s `onFinish`, including a rejected `fetch` and a non-event-stream response).
+   A silent stream is indistinguishable from a hung UI, and that ambiguity has already
+   cost this project a debugging session. Same rule in the terminal: a model error prints
+   and keeps the REPL open, it does not end the program.
+9. **Know which entry point you launched.** `run_demo.py` is the stub and says so in its
+   banner and in its replies; never conclude "the UI is broken" or "the model is broken"
+   before checking which of the two you started.
 
 ---
 
@@ -94,7 +135,8 @@ These are not style preferences. Each one exists because the previous build viol
 Everything below passes offline with the model stubbed. None of it has been proven against
 a live key in this checkout. Say so in any status report instead of implying otherwise.
 
-- A real Gemini call through `chat.py` (`python chat.py` with a key in `.env`).
+- A real Gemini call through `chat.py` (`python chat.py` with a key in `.env`, then several
+  turns — multi-turn history carrying is exercised only against a fake provider).
 - A real tool-call decision end-to-end: model proposes `write_note` → console prompt →
   `yes` → line appended → audit line.
 - A real decline path, and the non-interactive stdin decline (both are stub-tested).
@@ -104,6 +146,14 @@ a live key in this checkout. Say so in any status report instead of implying oth
   (`system_instruction`, `function_declarations`, no `temperature`/`top_p`/`top_k`/
   `thinking_budget` — several of those are being deprecated as parameters, so leaving
   them out is deliberate; do not add them back).
+- **Nothing in §0.4 has been seen in a real browser.** The client behavior was verified by
+  serving the app and driving the rendered pages in jsdom (Enter and click both reach
+  `/api/chat`, the reply lands in the thread, each failure prints a notice, the task view
+  steers without throwing). That proves the JS, not the network path. SSE through the
+  Arena preview proxy could not be probed from inside the sandbox at all — egress to the
+  preview host is blocked — so a "web box does nothing" report should be triaged by
+  checking whether the `POST /api/chat` line ever appears in the server log. No log line
+  means browser or proxy; a log line with no visible reply means streaming/buffering.
 
 ---
 

@@ -22,11 +22,30 @@ cp .env.example .env
 git config core.hooksPath .githooks
 ```
 
-Set `GEMINI_API_KEY` in `.env` to your own key. `GEMINI_MODEL` defaults to `gemini-3.8-flash` (`config.DEFAULT_GEMINI_MODEL`) and can be changed in `.env` — never in a provider file. Run the one-shot chat smoke test with:
+Set `GEMINI_API_KEY` in `.env` to your own key. `GEMINI_MODEL` defaults to `gemini-3.8-flash` (`config.DEFAULT_GEMINI_MODEL`) and can be changed in `.env` — never in a provider file.
+
+## Two ways to talk to Orbit
 
 ```sh
-python chat.py
+python chat.py          # terminal REPL
+python -m app.server    # web UI on http://localhost:5000
+python run_demo.py      # web UI on the STUB provider — layout only, not your model
 ```
+
+`chat.py` is a REPL: it keeps the connection open across turns, carries history,
+and a failed turn (bad key, quota, network) prints an error and lets you resend
+instead of ending the session. `/help`, `/reset` and `/quit` are the only commands.
+History is capped at `chat.MAX_MESSAGES` (20) so a long session cannot grow the
+request forever. The loop is covered offline by `tests/test_chat.py` with a fake
+provider; the live model call is a manual check.
+
+The web chat sends over `POST /api/chat` (home) and `POST /api/task/<id>/stream`
+(task view) as Server-Sent Events. If a turn produces nothing, the bubble says why
+(unreachable endpoint, non-stream response, empty reply) rather than leaving a
+blinking caret — a silent stream is indistinguishable from a hung UI. `run_demo.py`
+answers with canned text from `StubStreamingProvider`, and every stub reply starts with
+`STUB:` — if you can see that prefix in the browser, you are looking at the stub, not
+Gemini, and nothing is broken.
 
 When Gemini requests `write_note`, ORBIT displays the exact proposed arguments and waits for the person to type `yes`. Any other answer, unavailable input, or non-interactive stdin declines the call. Approval appends one UTC-timestamped line to local `notes.txt`; each registered tool call is recorded as a JSON line in `audit.log`, including its arguments, confirmation decision, execution status, and duration. Both files live at the repo root and are ignored by Git. That is a known trade-off, not an oversight: your notes are data you want to keep and ideally back up, so Phase 4 should move note storage into the versioned memory store (`runtime/` or a real database) and leave `audit.log` as disposable local state. Until then, nothing should "clean up" `notes.txt`.
 

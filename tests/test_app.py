@@ -202,6 +202,73 @@ class StreamingEndpointTests(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 400)
 
+    def test_opening_turn_is_offered_once_not_once_per_refresh(self) -> None:
+        """A refresh must not spend another model call to repeat itself.
+
+        The opening update is generated on page load, so without this flag every
+        reload would call the model again and append a duplicate message to the
+        task thread.
+        """
+        body = self.client.get("/task/T1").get_data(as_text=True)
+        self.assertIn("initialTurn: true", body)
+
+        # The opening turn only completes once the client reads the stream, so
+        # consume it here the way a browser would.
+        streamed = self.client.post(
+            "/api/task/T1/stream", json={"initial": True}, content_type="application/json"
+        )
+        self.assertIn("event: answer", streamed.get_data(as_text=True))
+        task = self.store.get_task("T1")
+        assert task is not None
+        self.assertTrue(any(m.is_orbit for m in task.chat), "opening reply was persisted")
+
+        body = self.client.get("/task/T1").get_data(as_text=True)
+        self.assertIn("initialTurn: false", body)
+
+
+class SilentFailureTests(unittest.TestCase):
+    """A turn that produces nothing must not look like an idle UI.
+
+    These are the two shapes the web chat took when it "just sat there": a
+    provider that yielded no chunks, and a provider that raised before its
+    first chunk. Both must reach the page as an event, not as silence.
+    """
+
+    def _events(self, provider: Any) -> tuple[list[tuple[str, str]], Store]:
+        store = Store()
+        app = create_app(provider=provider, store=store)
+        resp = app.test_client().post(
+            "/api/chat", json={"message": "Hello Orbit"}, content_type="application/json"
+        )
+        self.assertEqual(resp.status_code, 200)
+        return parse_sse(resp.get_data(as_text=True)), store
+
+    def test_empty_reply_is_reported_instead_of_streaming_nothing(self) -> None:
+        class EmptyProvider:
+            def reply_stream(self, history, system_prompt, *, think=False):
+                return iter(())
+
+        events, store = self._events(EmptyProvider())
+        kinds = [k for k, _ in events]
+        self.assertIn("error", kinds)
+        self.assertEqual(kinds[-1], "done")
+        detail = "".join(d for k, d in events if k == "error")
+        self.assertIn("empty reply", detail)
+        self.assertFalse(any(m.is_orbit for m in store.home_thread))
+
+    def test_provider_failure_before_first_chunk_reaches_the_ui(self) -> None:
+        class BrokenProvider:
+            def reply_stream(self, history, system_prompt, *, think=False):
+                raise RuntimeError("GEMINI_API_KEY is not configured.")
+
+        events, store = self._events(BrokenProvider())
+        kinds = [k for k, _ in events]
+        self.assertIn("error", kinds)
+        self.assertEqual(kinds[-1], "done")
+        detail = "".join(d for k, d in events if k == "error")
+        self.assertIn("GEMINI_API_KEY", detail)
+        self.assertFalse(any(m.is_orbit for m in store.home_thread))
+
 
 if __name__ == "__main__":
     unittest.main()

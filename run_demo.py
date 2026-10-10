@@ -19,22 +19,28 @@ from app.store import Store
 
 
 class StubStreamingProvider:
-    """Canned stand-in for GeminiProvider — no network, deterministic chunks."""
+    """Canned stand-in for GeminiProvider — no network, deterministic chunks.
+
+    Every reply is labelled STUB on purpose: the last thing this project needs is
+    someone reading a canned sentence and believing their model answered.
+    """
 
     def reply(self, history, system_prompt: str) -> str:
-        return "A canned one-shot reply."
+        return "STUB: canned one-shot reply. No model was called."
 
     def reply_stream(
         self, history, system_prompt: str, *, think: bool = False
     ) -> Iterator[StreamChunk]:
         if think:
-            yield StreamChunk(kind="thinking", text="I am checking the repository context before changing anything.")
-            yield StreamChunk(kind="answer", text="Here is my plan: add a status field, then wire it into the lookup reply.")
+            yield StreamChunk(kind="thinking", text="STUB: no model called — showing the thinking block.")
+            yield StreamChunk(kind="answer", text="STUB: this text is canned. Run `python -m app.server` with GEMINI_API_KEY in .env for your real model.")
         else:
-            yield StreamChunk(kind="answer", text="Hello from Orbit — how can I help?")
+            yield StreamChunk(kind="answer", text="STUB: this text is canned, not Gemini. Run `python -m app.server` with GEMINI_API_KEY in .env.")
 
 
 def main() -> None:
+    print("ORBIT demo UI · provider = StubStreamingProvider (no network, canned replies)")
+    print("For the real model: set GEMINI_API_KEY in .env and run  python -m app.server")
     app = create_app(provider=StubStreamingProvider(), store=Store())
     app.run(host="0.0.0.0", port=5000, debug=True)
 

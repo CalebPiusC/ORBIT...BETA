@@ -44,7 +44,7 @@
         <p>From first question to reviewed change. What are we building?</p>
       </div>
 
-      <div class="home-thread" id="homeThread"></div>
+      <div class="home-thread" id="homeThread" aria-live="polite" aria-atomic="false"></div>
 
       <div class="home-composer">
         <input type="text" id="homeInput" placeholder="Ask Orbit to review a PR, generate code, or explain a diff…" />
@@ -52,7 +52,7 @@
           <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
           <div class="spacer"></div>
           <div class="icon-btn-round" title="Voice">🎙</div>
-          <div class="send-btn-round" id="homeSend">➤</div>
+          <button type="button" class="send-btn-round" id="homeSend" aria-label="Send message">➤</button>
         </div>
       </div>
 
@@ -79,5 +79,25 @@
   </div>
 </div>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
-<script>Orbit.bootstrapHome();</script>
+<script>
+  // If app.js failed to load or threw, typing here would do nothing at all with
+  // no clue why. Say so in the page instead of leaving a dead input box.
+  (function () {
+    try {
+      if (typeof Orbit === "undefined" || !Orbit || typeof Orbit.bootstrapHome !== "function") {
+        throw new Error("app.js did not load (window.Orbit is missing).");
+      }
+      Orbit.bootstrapHome();
+    } catch (err) {
+      var box = document.getElementById("homeThread");
+      if (box) {
+        box.className = "home-thread visible";
+        var msg = document.createElement("div");
+        msg.className = "notice error";
+        msg.textContent = "The chat UI did not start: " + (err && err.message ? err.message : err);
+        box.appendChild(msg);
+      }
+    }
+  })();
+</script>
 {% endblock %}
