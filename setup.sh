@@ -13,7 +13,11 @@ echo "pre-commit hook -> .githooks (check_secrets.py runs on every commit)"
 if [ ! -f .venv/pyvenv.cfg ]; then
     python3 -m venv .venv
 fi
-. .venv/bin/python -m pip install -q -r requirements.txt
+# NB: '.venv/bin/python', not '. .venv/bin/python'. Sourcing the interpreter
+# binary as a shell script fails quietly enough that deps never install and the
+# suite never runs, which reads as "the tests are broken" rather than
+# "setup is broken".
+.venv/bin/python -m pip install -q -r requirements.txt
 echo "dependencies installed in .venv (activate with: . .venv/bin/activate)"
 
 if [ ! -f .env ]; then
@@ -21,5 +25,5 @@ if [ ! -f .env ]; then
     echo "created .env from .env.example — add your Gemini key before running chat.py"
 fi
 
-. .venv/bin/python -m unittest discover -s tests
+.venv/bin/python -m unittest discover -s tests
 echo "offline tests passed"
