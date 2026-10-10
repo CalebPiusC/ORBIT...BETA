@@ -24,6 +24,8 @@ git config core.hooksPath .githooks
 
 Set `GEMINI_API_KEY` in `.env` to your own key. `GEMINI_MODEL` defaults to `gemini-3.8-flash` (`config.DEFAULT_GEMINI_MODEL`) and can be changed in `.env` — never in a provider file.
 
+`ORBIT_HTTP_TIMEOUT` (default `60`, seconds) is the deadline for **every** request to the model. Leave it set. Without a deadline the SDK asks httpx to wait forever, so a firewalled or black-holed connection hangs with no reply and no error — "it is thinking" and "it is stuck" become the same thing. Raise it on a slow link; never remove it.
+
 ## Two ways to talk to Orbit
 
 ```sh
@@ -38,6 +40,43 @@ instead of ending the session. `/help`, `/reset` and `/quit` are the only comman
 History is capped at `chat.MAX_MESSAGES` (20) so a long session cannot grow the
 request forever. The loop is covered offline by `tests/test_chat.py` with a fake
 provider; the live model call is a manual check.
+
+### `chat.py` is a client, not a server
+
+It opens no port and a browser cannot use it. It reads your keyboard and writes
+to your terminal — that is the whole interface. If you want the UI, that is a
+different process: `python -m app.server`, then <http://localhost:5000>.
+(`run_demo.py` is the stub; a live preview of it is running in someone else's
+sandbox, never on your machine.)
+
+### When it seems to do nothing
+
+Every turn prints `waiting on <model> — Ctrl-C cancels this turn` before it
+blocks, so a long wait is never silent. Ctrl-C and provider errors end the
+**turn**, not the session: your message stays queued and you can resend it.
+
+If you get no reply at all, run the setup check rather than guessing:
+
+```sh
+python chat.py --check
+```
+
+It walks **config -> network -> model**, names the first layer that fails, and
+masks your key to its first four characters in every line. It makes no tool
+calls and never raises a traceback. Read the failing line:
+
+| Output | What it means | What to do |
+| --- | --- | --- |
+| `[config] FAIL` | No usable key in `.env` | `cp .env.example .env` and set `GEMINI_API_KEY` |
+| `[network] FAIL` | Cannot open a TCP connection to the API host | Firewall/DNS/offline. If your network needs a proxy, set `HTTPS_PROXY` (httpx reads it) |
+| `[model] FAIL after ~60.0s` | The request never came back — blocked or firewalled | Proxy in the environment. **Not** a key problem |
+| `[model] FAIL` mentioning TLS/SSL/EOF | Connection broken before the API answered | Proxy or TLS interception. **Not** a key problem |
+| `[model] FAIL` with `401`/`403` | Key rejected or restricted | Check the key is valid and enabled for this API |
+| `[model] FAIL` with `404` | `GEMINI_MODEL` is not available to your key | Compare with the current list on ai.google.dev, then update `config.py` **and** `.env.example` together |
+
+A key that is merely *rejected* is not quiet: it fails fast and prints
+`ORBIT: [error] …`. Silence means waiting, and waiting means the deadline has
+not arrived yet.
 
 The web chat sends over `POST /api/chat` (home) and `POST /api/task/<id>/stream`
 (task view) as Server-Sent Events. If a turn produces nothing, the bubble says why
