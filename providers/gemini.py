@@ -9,8 +9,24 @@ from google import genai
 from google.genai import types
 
 from config import DEFAULT_GEMINI_MODEL, load_settings
-from providers.base import ChatMessage, ChatProvider
+from providers.base import ChatMessage, ChatProvider, StreamChunk
 from tools.registry import ToolRegistry
+
+# Instructs the model to narrate its reasoning as plain language wrapped in
+# <thinking>…</thinking>, then give the final answer. We surface that
+# narration as the UI "thinking" block. This is honest model-generated
+# narration, not exposed internal reasoning tokens (see reply_stream).
+_THINK_INSTRUCTION = (
+    "Before your answer, write a short plain-language narration of your reasoning "
+    "for the user, wrapped in <thinking> and </thinking> tags. Then provide only "
+    "the final answer after the closing tag. Keep the narration to one or two "
+    "sentences."
+)
+
+# Tags used to separate the thinking narration from the answer in one streamed
+# generation. They are stripped before anything reaches the UI.
+_THINK_OPEN = "<thinking>"
+_THINK_CLOSE = "</thinking>"
 
 
 class GeminiProvider(ChatProvider):
@@ -114,6 +130,66 @@ class GeminiProvider(ChatProvider):
             contents.append(types.Content(role="user", parts=function_response_parts))
             tool_rounds += 1
 
+    def reply_stream(
+        self,
+        history: Sequence[ChatMessage],
+        system_prompt: str,
+        *,
+        think: bool = False,
+    ) -> Iterator[StreamChunk]:
+        """Stream the reply chunk by chunk instead of returning it all at once.
+
+        Yields :class:`StreamChunk` objects as Gemini generates them. When
+        ``think`` is True, the model is asked to narrate its reasoning first
+        (``kind="thinking"``) and then the final answer (``kind="answer"``); the
+        two are split out of the single streamed generation by
+        :func:`_split_thinking`. When ``think`` is False, every chunk is an
+        ``"answer"`` chunk.
+
+        Streaming is text-only on purpose: function-calling turns should keep
+        using the one-shot :meth:`reply` so the confirmation gate runs
+        synchronously. The ``system_instruction`` is still sent, so the model's
+        persona and constraints apply.
+        """
+        if not isinstance(system_prompt, str):
+            raise TypeError("system_prompt must be a string.")
+        if not system_prompt.strip():
+            raise ValueError("system_prompt must not be empty.")
+        if not history:
+            raise ValueError("history must contain at least one chat message.")
+
+        contents: list[types.Content] = []
+        for message in history:
+            if not isinstance(message, ChatMessage):
+                raise TypeError("history must contain ChatMessage instances.")
+            sdk_role = "user" if message.role == "user" else "model"
+            contents.append(
+                types.Content(
+                    role=sdk_role,
+                    parts=[types.Part.from_text(text=message.content)],
+                )
+            )
+
+        call_prompt = system_prompt
+        if think:
+            call_prompt = f"{system_prompt}\n\n{_THINK_INSTRUCTION}"
+
+        config = types.GenerateContentConfig(system_instruction=call_prompt)
+
+        response_iter = self._client.models.generate_content_stream(
+            model=self.model,
+            contents=contents,
+            config=config,
+        )
+
+        text_iter = (_chunk_text(response) for response in response_iter)
+        if think:
+            yield from _split_thinking(text_iter)
+        else:
+            for text in text_iter:
+                if text:
+                    yield StreamChunk(kind="answer", text=text)
+
     def _generation_config(self, system_prompt: str) -> types.GenerateContentConfig:
         config: dict[str, Any] = {"system_instruction": system_prompt}
         if self._tool_registry is not None and self._tool_registry.definitions:
@@ -132,3 +208,76 @@ class GeminiProvider(ChatProvider):
                 disable=True
             )
         return types.GenerateContentConfig(**config)
+
+
+def _chunk_text(response: Any) -> str:
+    """Pull the concatenated text out of one streamed Gemini response chunk."""
+    text = getattr(response, "text", None)
+    if isinstance(text, str) and text:
+        return text
+    parts = getattr(response, "parts", None) or []
+    return "".join(getattr(part, "text", "") or "" for part in parts)
+
+
+def _split_thinking(chunks: Iterator[str]) -> Iterator[StreamChunk]:
+    """Split a stream of text chunks into thinking/answer StreamChunks.
+
+    Expects the model to wrap its plain-language reasoning in
+    ``<thinking>…</thinking>`` and put the answer afterwards. Emits the
+    thinking portion as it arrives (progressive reveal) and flips to the
+    answer once the closing tag is seen. If no opening tag appears, the whole
+    stream is treated as the answer. If a tag opens but never closes, whatever
+    was emitted as thinking stays as thinking.
+    """
+    state: str = "unknown"  # "unknown" -> "thinking" -> "answer"
+    tail = ""
+    answer = ""
+
+    for chunk in chunks:
+        if not chunk:
+            continue
+        buf = tail + chunk
+
+        if state == "answer":
+            answer += buf
+            tail = ""
+            continue
+
+        if state == "unknown":
+            if buf.startswith(_THINK_OPEN):
+                buf = buf[len(_THINK_OPEN):]
+                state = "thinking"
+            elif _THINK_OPEN.startswith(buf):
+                # Partial opening tag; wait for more before deciding.
+                tail = buf
+                continue
+            else:
+                # No thinking tag at all -> straight to the answer.
+                state = "answer"
+                answer += buf
+                tail = ""
+                continue
+
+        # state == "thinking"
+        close_index = buf.find(_THINK_CLOSE)
+        if close_index != -1:
+            pre = buf[:close_index]
+            if pre:
+                yield StreamChunk(kind="thinking", text=pre)
+            answer = buf[close_index + len(_THINK_CLOSE):]
+            state = "answer"
+            tail = ""
+        else:
+            # Keep the last (len(close)-1) chars in case they begin the close tag.
+            keep = len(_THINK_CLOSE) - 1
+            if len(buf) > keep:
+                emit = buf[:-keep]
+                yield StreamChunk(kind="thinking", text=emit)
+                tail = buf[len(emit):]
+            else:
+                tail = buf
+
+    if state == "thinking" and tail:
+        yield StreamChunk(kind="thinking", text=tail)
+    if answer:
+        yield StreamChunk(kind="answer", text=answer)
