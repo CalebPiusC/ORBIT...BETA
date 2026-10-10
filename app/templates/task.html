@@ -15,9 +15,10 @@
     cursor: pointer; font-weight: 600;
   }
   .approve-btn {
-    background: var(--accent); border: none; color: #16110c;
+    background: var(--accent); border: none; color: #10131C;
   }
-  .approve-btn:disabled { background: var(--accent-dim); color: var(--text-faint); cursor: default; }
+  .approve-btn:hover:not(:disabled) { background: var(--accent-bright); }
+  .approve-btn:disabled { background: var(--bg-card); box-shadow: inset 0 0 0 1px var(--border); color: var(--text-faint); cursor: default; }
   .apply-btn {
     background: transparent; border: 1px solid var(--border); color: var(--text-dim);
   }
