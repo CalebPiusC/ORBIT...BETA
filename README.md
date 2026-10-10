@@ -22,7 +22,9 @@ cp .env.example .env
 git config core.hooksPath .githooks
 ```
 
-Set `GEMINI_API_KEY` in `.env` to your own key. `GEMINI_MODEL` defaults to `gemini-3.8-flash` (`config.DEFAULT_GEMINI_MODEL`) and can be changed in `.env` — never in a provider file.
+Set `GEMINI_API_KEY` in `.env` to your own key. `GEMINI_MODEL` defaults to `gemini-3-flash-preview` (`config.DEFAULT_GEMINI_MODEL`, checked 2026-10-10) and can be changed in `.env` — never in a provider file.
+
+`GEMINI_FALLBACK_MODEL` defaults to `gemini-3.8-flash` (`config.DEFAULT_GEMINI_FALLBACK_MODEL`). It is tried **once**, and only when the primary fails with 503/504 or a network error, and only before any tool has run. Leave it blank in `.env` to disable it. Every model that answers, and every failed attempt, is written to `audit.log` as a `model_answered` or `model_attempt_failed` line.
 
 `ORBIT_HTTP_TIMEOUT` (default `60`, seconds) is the deadline for **every** request to the model. Leave it set. Without a deadline the SDK asks httpx to wait forever, so a firewalled or black-holed connection hangs with no reply and no error — "it is thinking" and "it is stuck" become the same thing. Raise it on a slow link; never remove it.
 
@@ -73,7 +75,8 @@ calls and never raises a traceback. Read the failing line:
 | --- | --- | --- |
 | `[config] FAIL` | No usable key in `.env` | `cp .env.example .env` and set `GEMINI_API_KEY` |
 | `[network] FAIL` | Cannot open a TCP connection to the API host | Firewall/DNS/offline. If your network needs a proxy, set `HTTPS_PROXY` (httpx reads it) |
-| `[model] FAIL after ~60.0s` | The request never came back — blocked or firewalled | Proxy in the environment. **Not** a key problem |
+| `[model] FAIL` with `503` or `504` (any time, including near 60s) | Google's server is slow or overloaded | Wait a few minutes and retry. The fallback model was already tried. **Not** a key or firewall problem |
+| `[model] FAIL after ~60.0s` with no HTTP status | The request never came back — blocked or firewalled | Proxy in the environment. **Not** a key problem |
 | `[model] FAIL` mentioning TLS/SSL/EOF | Connection broken before the API answered | Proxy or TLS interception. **Not** a key problem |
 | `[model] FAIL` with `401`/`403` | Key rejected or restricted | Check the key is valid and enabled for this API |
 | `[model] FAIL` with `404` | `GEMINI_MODEL` is not available to your key | Compare with the current list on ai.google.dev, then update `config.py` **and** `.env.example` together |

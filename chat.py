@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import socket
 import sys
 import time
@@ -111,6 +112,9 @@ def run_session(
             continue
 
         history.append(ChatMessage(role="assistant", content=answer))
+        used = getattr(provider, "last_model_used", None)
+        if used and used != getattr(provider, "model", None):
+            write(f"(answered by fallback {used}; primary {provider.model} failed)")
         write(f"\nORBIT: {answer}")
 
 
@@ -154,10 +158,24 @@ def _proxy_note() -> str | None:
     return None
 
 
+# Google's own status text for the same two cases, in case the numeric code is
+# not on the exception.
+_OVERLOADED_RE = re.compile(r"\b(503|504)\b|\bUNAVAILABLE\b|\bDEADLINE_EXCEEDED\b")
+
+
 def _model_hint(exc: BaseException, elapsed: float, timeout: float) -> str:
     """Turn a model-layer failure into the next thing to try."""
     name = type(exc).__name__
     detail = str(exc)
+    # 503/504 mean Google answered and said it is slow or overloaded. Check this
+    # before the deadline test: a 504 that arrives near 60s is Google's answer,
+    # not a blocked connection.
+    if _OVERLOADED_RE.search(detail) or getattr(exc, "code", None) in (503, 504):
+        return (
+            "Google's server is slow or overloaded (503/504). ORBIT already tried the "
+            "fallback model if one is set, so wait a few minutes and try again. "
+            "This is not a key or firewall problem."
+        )
     # A failure that lands at or beyond the deadline means the request never
     # came back at all: the connection is being blocked or black-holed.
     if elapsed >= timeout * 0.9:
@@ -212,7 +230,8 @@ def run_check(
     key = resolved.gemini_api_key
     write(
         f"[config] ok — key {mask_key(key)} (masked), "
-        f"model {resolved.gemini_model}, timeout {resolved.request_timeout_seconds:g}s"
+        f"model {resolved.gemini_model}, fallback {resolved.gemini_fallback_model or 'none'}, "
+        f"timeout {resolved.request_timeout_seconds:g}s"
     )
 
     # 2. network — can this machine open a socket to the API endpoint?
@@ -258,7 +277,8 @@ def run_check(
 
     elapsed = time.monotonic() - started
     preview = " ".join(str(reply).split())[:80]
-    write(f"[model] ok after {elapsed:.1f}s — replied: {preview}")
+    answered_by = getattr(target, "last_model_used", None) or getattr(target, "model", "?")
+    write(f"[model] ok after {elapsed:.1f}s — answered by {answered_by} — replied: {preview}")
     write("All three layers passed. If the REPL still seems to hang, the wait is the model, not your setup.")
     return EXIT_OK
 

@@ -12,7 +12,13 @@ from dotenv import load_dotenv
 # Model choice lives here and in .env only — never hard-coded in a provider.
 # gemini-2.5-flash was retired-by-announcement on 2026-10-20, so it is no
 # longer the default. Keep this value in sync with .env.example.
-DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+# Checked 2026-10-10. The primary is the model that answered a live "pong"
+# check on this machine (about 24.6s). The fallback is tried once, only when
+# the primary fails with 503/504 or a transport error, before any tool runs.
+# Model ids live here and in .env only; never hard-code one in a provider.
+DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
+DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-3.8-flash"
+FALLBACK_ENV_VAR = "GEMINI_FALLBACK_MODEL"
 ENV_FILE = Path(__file__).resolve().parent / ".env"
 _PLACEHOLDER_KEYS = {"your-key-here", "your_api_key_here", "replace-me", "changeme"}
 
@@ -57,6 +63,8 @@ def read_timeout_seconds(raw: str | None) -> float:
 class Settings:
     gemini_api_key: str = field(repr=False)
     gemini_model: str = DEFAULT_GEMINI_MODEL
+    # "" means the fallback is disabled (blank in .env, or equal to the primary).
+    gemini_fallback_model: str = DEFAULT_GEMINI_FALLBACK_MODEL
     request_timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS
 
 
@@ -80,10 +88,18 @@ def load_settings() -> Settings:
     if not model:
         model = DEFAULT_GEMINI_MODEL
 
+    # Unset means the default fallback; set but blank means "no fallback".
+    # A fallback equal to the primary would just repeat the same request.
+    fallback_raw = os.getenv(FALLBACK_ENV_VAR)
+    fallback = DEFAULT_GEMINI_FALLBACK_MODEL if fallback_raw is None else fallback_raw.strip()
+    if fallback == model:
+        fallback = ""
+
     timeout = read_timeout_seconds(os.getenv(TIMEOUT_ENV_VAR))
 
     return Settings(
         gemini_api_key=api_key,
         gemini_model=model,
+        gemini_fallback_model=fallback,
         request_timeout_seconds=timeout,
     )

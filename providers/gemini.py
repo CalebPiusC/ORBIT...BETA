@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import time
+from collections.abc import Iterator, Sequence
 from typing import Any
 
+import httpx
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
 
-from config import DEFAULT_GEMINI_MODEL, load_settings
+from config import DEFAULT_GEMINI_FALLBACK_MODEL, DEFAULT_GEMINI_MODEL, load_settings
 from providers.base import ChatMessage, ChatProvider, StreamChunk
-from tools.registry import ToolRegistry
+from tools.registry import AuditLog, ToolRegistry
+
+# The only failures the fallback model is allowed to get past: the server
+# said it is slow or overloaded, or the connection broke before an answer.
+# Auth, quota, and bad-request errors are NOT retried. A different model would
+# fail the same way, and retrying would hide the real problem.
+FALLBACK_STATUS_CODES = (503, 504)
+
+_END = object()
 
 # Instructs the model to narrate its reasoning as plain language wrapped in
 # <thinking>…</thinking>, then give the final answer. We surface that
@@ -43,16 +54,41 @@ def timeout_millis(seconds: float) -> int:
     return int(seconds * 1000)
 
 
+def _fallback_reason(exc: BaseException) -> str | None:
+    """Name why a failed request may be retried on the fallback model, or None."""
+    if isinstance(exc, APIError) and exc.code in FALLBACK_STATUS_CODES:
+        return str(exc.code)
+    if isinstance(exc, httpx.TransportError):
+        return type(exc).__name__
+    return None
+
+
+def _failure_label(exc: BaseException) -> str:
+    """A short, key-free label for an audit line. Never the full message."""
+    if isinstance(exc, APIError):
+        return f"APIError {exc.code}"
+    return type(exc).__name__
+
+
 class GeminiProvider(ChatProvider):
-    """Send chat history to Gemini and run declared tools only through a gate."""
+    """Send chat history to Gemini and run declared tools only through a gate.
+
+    Two models are configured: the primary (``model``) and an optional fallback
+    (``fallback_model``). ``None`` means "use the configured fallback"; ``""``
+    disables the fallback. The fallback is tried once, and
+    only when the primary fails with 503/504 or a transport error. It is never
+    tried after a tool has run, so a tool call is never repeated.
+    """
 
     def __init__(
         self,
         *,
         model: str | None = None,
+        fallback_model: str | None = None,
         client: Any | None = None,
         tool_registry: ToolRegistry | None = None,
         max_tool_rounds: int = 5,
+        audit_log: AuditLog | None = None,
     ) -> None:
         if max_tool_rounds < 1:
             raise ValueError("max_tool_rounds must be at least 1.")
@@ -68,14 +104,136 @@ class GeminiProvider(ChatProvider):
                 ),
             )
             self.model = model or settings.gemini_model
+            configured_fallback = (
+                settings.gemini_fallback_model if fallback_model is None else fallback_model
+            )
+            # Real use writes model events to audit.log. Injected clients (tests)
+            # do not, unless a log is passed explicitly.
+            self._audit = audit_log if audit_log is not None else AuditLog()
         else:
             # Client injection keeps provider tests offline; normal use always
             # builds the SDK client from config.py and the local .env.
             self._client = client
             self.model = model or DEFAULT_GEMINI_MODEL
+            configured_fallback = (
+                DEFAULT_GEMINI_FALLBACK_MODEL if fallback_model is None else fallback_model
+            )
+            self._audit = audit_log
+
+        # "" or a fallback equal to the primary both mean "no fallback".
+        self.fallback_model: str | None = configured_fallback or None
+        if self.fallback_model == self.model:
+            self.fallback_model = None
+        # The model that produced the most recent answer. Set on success only.
+        self.last_model_used: str | None = None
 
         self._tool_registry = tool_registry
         self._max_tool_rounds = max_tool_rounds
+
+    # --- model calls with a single fallback ---------------------------------
+
+    def _audit_failure(self, model: str, role: str, exc: BaseException, started: float) -> None:
+        if self._audit is not None:
+            self._audit.record_model_event(
+                event="model_attempt_failed",
+                model=model,
+                role=role,
+                reason=_failure_label(exc),
+                duration_ms=round((time.monotonic() - started) * 1000, 1),
+            )
+
+    def _audit_answer(self, model: str, *, stream: bool) -> None:
+        self.last_model_used = model
+        if self._audit is not None:
+            self._audit.record_model_event(
+                event="model_answered",
+                model=model,
+                role="primary" if model == self.model else "fallback",
+                fallback_used=model != self.model,
+                stream=stream,
+            )
+
+    def _generate(
+        self,
+        contents: list[types.Content],
+        config: types.GenerateContentConfig,
+        *,
+        model: str,
+        allow_fallback: bool,
+    ) -> tuple[Any, str]:
+        """One generate_content call. Returns (response, model that answered)."""
+        started = time.monotonic()
+        try:
+            response = self._client.models.generate_content(
+                model=model, contents=contents, config=config
+            )
+        except Exception as exc:
+            reason = _fallback_reason(exc)
+            self._audit_failure(model, "primary" if model == self.model else "fallback", exc, started)
+            if not (allow_fallback and reason and model == self.model and self.fallback_model):
+                raise
+            fallback = self.fallback_model
+            started = time.monotonic()
+            try:
+                response = self._client.models.generate_content(
+                    model=fallback, contents=contents, config=config
+                )
+            except Exception as fallback_exc:
+                self._audit_failure(fallback, "fallback", fallback_exc, started)
+                raise
+            self._audit_answer(fallback, stream=False)
+            return response, fallback
+
+        self._audit_answer(model, stream=False)
+        return response, model
+
+    def _stream_responses(
+        self,
+        contents: list[types.Content],
+        config: types.GenerateContentConfig,
+    ) -> Iterator[Any]:
+        """Yield SDK stream responses, failing over only before the first chunk.
+
+        Once any chunk has reached the user, a failure is surfaced rather than
+        restarted on the fallback, because a restart would repeat the text
+        already shown.
+        """
+        model = self.model
+        started = time.monotonic()
+        try:
+            stream, first = self._open_stream(model, contents, config)
+        except Exception as exc:
+            reason = _fallback_reason(exc)
+            self._audit_failure(model, "primary", exc, started)
+            if not (reason and self.fallback_model):
+                raise
+            model = self.fallback_model
+            started = time.monotonic()
+            try:
+                stream, first = self._open_stream(model, contents, config)
+            except Exception as fallback_exc:
+                self._audit_failure(model, "fallback", fallback_exc, started)
+                raise
+
+        self._audit_answer(model, stream=True)
+        if first is not _END:
+            yield first
+        yield from stream
+
+    def _open_stream(
+        self,
+        model: str,
+        contents: list[types.Content],
+        config: types.GenerateContentConfig,
+    ) -> tuple[Iterator[Any], Any]:
+        """Start a stream and read its first chunk, so connection errors surface here."""
+        stream = iter(
+            self._client.models.generate_content_stream(
+                model=model, contents=contents, config=config
+            )
+        )
+        first = next(stream, _END)
+        return stream, first
 
     def reply(self, history: Sequence[ChatMessage], system_prompt: str) -> str:
         if not isinstance(system_prompt, str):
@@ -99,11 +257,16 @@ class GeminiProvider(ChatProvider):
 
         config = self._generation_config(system_prompt)
         tool_rounds = 0
+        model = self.model
         while True:
-            response = self._client.models.generate_content(
-                model=self.model,
-                contents=contents,
-                config=config,
+            # Fallback is allowed only before any tool has run. After a fallback
+            # answers, the rest of this turn stays on that model, because the
+            # function-call parts it produced belong to it.
+            response, model = self._generate(
+                contents,
+                config,
+                model=model,
+                allow_fallback=tool_rounds == 0,
             )
             function_calls = getattr(response, "function_calls", None) or []
             if not function_calls:
@@ -197,11 +360,7 @@ class GeminiProvider(ChatProvider):
 
         config = types.GenerateContentConfig(system_instruction=call_prompt)
 
-        response_iter = self._client.models.generate_content_stream(
-            model=self.model,
-            contents=contents,
-            config=config,
-        )
+        response_iter = self._stream_responses(contents, config)
 
         text_iter = (_chunk_text(response) for response in response_iter)
         if think:
