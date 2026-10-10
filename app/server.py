@@ -22,6 +22,7 @@ proposed changes can only be applied/pushed after an explicit approval call, and
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterable, Iterator
 from typing import Any, Callable
 
@@ -282,5 +283,26 @@ def create_app(provider: Any | None = None, store: Store | None = None) -> Flask
     return app
 
 
+def run_app(app: Flask) -> None:
+    """Run the Flask development server without exposing the debugger.
+
+    Loopback is the safe default for a local run. Set ``ORBIT_HOST=0.0.0.0``
+    explicitly when a container or sandbox preview needs an externally reachable
+    bind address. The Flask debugger stays disabled in either case.
+    """
+    host = os.environ.get("ORBIT_HOST", "").strip() or "127.0.0.1"
+    raw_port = os.environ.get("PORT", "").strip() or "5000"
+    try:
+        port = int(raw_port)
+    except ValueError:
+        raise RuntimeError(
+            f"PORT must be an integer between 1 and 65535, got {raw_port!r}."
+        ) from None
+    if not 1 <= port <= 65535:
+        raise RuntimeError(f"PORT must be between 1 and 65535, got {port}.")
+
+    app.run(host=host, port=port, debug=False)
+
+
 if __name__ == "__main__":
-    create_app().run(host="0.0.0.0", port=5000, debug=True)
+    run_app(create_app())

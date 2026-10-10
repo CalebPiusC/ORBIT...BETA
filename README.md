@@ -34,6 +34,10 @@ python -m app.server    # web UI on http://localhost:5000
 python run_demo.py      # web UI on the STUB provider — layout only, not your model
 ```
 
+Both web launchers default to `127.0.0.1:5000` with Flask's debugger disabled.
+For a container or sandbox preview that needs an external bind, opt in explicitly
+with `ORBIT_HOST=0.0.0.0`; `PORT` can override the port. The debugger remains off.
+
 `chat.py` is a REPL: it keeps the connection open across turns, carries history,
 and a failed turn (bad key, quota, network) prints an error and lets you resend
 instead of ending the session. `/help`, `/reset` and `/quit` are the only commands.
