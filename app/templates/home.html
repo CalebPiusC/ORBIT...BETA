@@ -1,0 +1,83 @@
+{% extends "layout.html" %}
+{% block title %}ORBIT — Home{% endblock %}
+{% block body %}
+<div class="screen screen--active" id="screen-home">
+  <div class="sidebar">
+    <div class="sidebar-brand"><span class="brand-mark"></span>ORBIT</div>
+    <div class="new-convo">+ New conversation</div>
+    <div class="sidebar-search">⌕ Search chats</div>
+
+    {% for group, items in conversations.items() %}
+    <div class="history-group">
+      <h4>{{ group }}</h4>
+      {% for conv in items %}
+      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}">{{ conv.title }}</div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-foot">
+      <div class="connected-apps-row"><span class="dot"></span>Connected apps · {{ connected_count }} active</div>
+      <div class="user-row">
+        <div class="user-avatar">{{ user.name[:2]|upper }}</div>
+        <div class="names">
+          <div class="name">{{ user.name }}</div>
+          <div class="sub">{{ user.workspace }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="home-main">
+    <div class="home-topbar">
+      <div class="mode-toggle">
+        <button class="{% if mode == 'chat' %}active{% endif %}" data-arena="mode-chat" data-mode="chat">◐ Chat</button>
+        <button class="{% if mode == 'agent' %}active{% endif %}" data-arena="mode-agent" data-mode="agent">⚙ Agent</button>
+      </div>
+      <div class="plus-badge">ORBIT</div>
+    </div>
+
+    <div class="home-center">
+      <div class="home-greeting">
+        <h1>{{ greeting }}</h1>
+        <p>From first question to reviewed change. What are we building?</p>
+      </div>
+
+      <div class="home-thread" id="homeThread"></div>
+
+      <div class="home-composer">
+        <input type="text" id="homeInput" placeholder="Ask Orbit to review a PR, generate code, or explain a diff…" />
+        <div class="composer-controls">
+          <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
+          <div class="spacer"></div>
+          <div class="icon-btn-round" title="Voice">🎙</div>
+          <div class="send-btn-round" id="homeSend">➤</div>
+        </div>
+      </div>
+
+      <div class="suggestion-chips">
+        <div class="chip" data-goto-task="T1">◫ Review a PR</div>
+        <div class="chip">⌁ Generate code</div>
+        <div class="chip">✓ Run branch tests</div>
+      </div>
+
+      <div class="connected-tools">
+        <div class="label">Your development tools, connected to Orbit</div>
+        <div class="tool-row">
+          {% for conn in connections %}
+          <div class="tool-pill {% if conn.status == 'connected' %}connected{% else %}not-connected{% endif %}">
+            <span class="status-dot"></span>{{ conn.name }}
+          </div>
+          {% endfor %}
+          <div class="manage-link">Manage →</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="home-footer">🔒 Just you and Orbit. Your conversations stay private.</div>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>Orbit.bootstrapHome();</script>
+{% endblock %}

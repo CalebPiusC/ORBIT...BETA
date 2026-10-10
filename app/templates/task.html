@@ -1,0 +1,154 @@
+{% extends "layout.html" %}
+{% block title %}ORBIT — {{ task.title }}{% endblock %}
+{% block body %}
+<style>
+  /* Task-view-only controls (approval gate). Additive; the reference CSS
+     above is unchanged. These make the "explicit approval" rule a real,
+     clickable action rather than decorative text. */
+  .approval-actions {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px; background: var(--bg-sunken);
+    border-top: 1px solid var(--border-soft);
+  }
+  .approve-btn, .apply-btn {
+    border-radius: var(--radius-sm); padding: 7px 14px; font-size: 12px;
+    cursor: pointer; font-weight: 600;
+  }
+  .approve-btn {
+    background: var(--accent); border: none; color: #16110c;
+  }
+  .approve-btn:disabled { background: var(--accent-dim); color: var(--text-faint); cursor: default; }
+  .apply-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+  }
+  .apply-btn.approved { border-color: var(--green); color: var(--green); }
+  .approval-state { font-size: 11px; color: var(--text-faint); margin-left: auto; }
+  .approval-state.ok { color: var(--green); }
+</style>
+<div class="screen screen--active" id="screen-task">
+  <div class="sidebar">
+    <div class="sidebar-brand"><span class="brand-mark"></span>ORBIT</div>
+    <div class="new-convo">+ New conversation</div>
+    <div class="sidebar-search">⌕ Search chats</div>
+    {% for group, items in conversations.items() %}
+    <div class="history-group">
+      <h4>{{ group }}</h4>
+      {% for conv in items %}
+      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}">{{ conv.title }}</div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-foot">
+      <div class="connected-apps-row"><span class="dot"></span>Connected apps · {{ connected_count }} active</div>
+      <div class="user-row">
+        <div class="user-avatar">{{ user.name[:2]|upper }}</div>
+        <div class="names"><div class="name">{{ user.name }}</div><div class="sub">{{ user.workspace }}</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="task-main">
+    <div class="task-topbar">
+      <div class="task-topbar-left">
+        <div class="task-breadcrumb">{{ task.breadcrumb }}</div>
+        <div class="task-title-row">{{ task.title }}</div>
+      </div>
+      <div class="task-topbar-right">
+        <div class="mode-toggle">
+          <button class="{% if mode == 'chat' %}active{% endif %}" data-arena="mode-chat" data-mode="chat">◐ Chat</button>
+          <button class="{% if mode == 'agent' %}active{% endif %}" data-arena="mode-agent" data-mode="agent">⚙ Agent</button>
+        </div>
+        <div class="working-indicator"><span class="dot"></span>Orbit is working</div>
+        <div class="pause-btn">⏸ Pause</div>
+      </div>
+    </div>
+
+    <div class="task-status-bar">
+      <span>{{ task.breadcrumb }} · {{ task.changes|length }} file(s) scanned · 1 approval required</span>
+      <span class="no-push-note">No pushes without approval</span>
+    </div>
+
+    <div class="task-body">
+      <div class="task-work">
+        <div class="task-work-eyebrow">CODING AGENT · IN PROGRESS</div>
+        <h2>{{ task.title }}</h2>
+        <p class="desc">{{ task.description }}</p>
+
+        <div class="step-row">
+          {% for step in task.steps %}
+          <div class="step {{ step.status }}">
+            <div class="step-title">
+              <span class="step-icon {{ step.status }}">{% if step.status == 'done' %}✓{% elif step.status == 'active' %}◐{% else %}○{% endif %}</span>
+              {{ step.title }}
+            </div>
+            <div class="step-detail">{{ step.detail }}</div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="thinking-block" id="thinkingBlock">
+          <span class="brain-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg>
+          </span>
+          <span class="thinking-text" id="thinkingText"></span>
+        </div>
+
+        <div class="changes-card">
+          <div class="changes-card-head">
+            <div><div class="title">Proposed changes</div><div class="sub">{{ task.changes|length }} file changed · 1 approval required</div></div>
+            <div class="draft-badge">Draft proposal</div>
+          </div>
+          {% for change in task.changes %}
+          <div class="change-row">
+            <div class="file">{{ change.file }}</div>
+            <div class="delta">{{ change.delta }}</div>
+            <div class="desc-cell">{{ change.desc|safe }}</div>
+            <div class="status-tag {{ change.status }}">{% if change.status == 'proposed' %}Proposed{% else %}Checking{% endif %}</div>
+          </div>
+          {% endfor %}
+          <div class="approval-note">🔒 No commits will be pushed without your explicit approval.</div>
+          <div class="approval-actions">
+            <button class="approve-btn" id="approveBtn" data-task="{{ task.id }}">Approve changes</button>
+            <button class="apply-btn" id="applyBtn" data-task="{{ task.id }}">Apply &amp; push</button>
+            <span class="approval-state" id="approvalState">
+              {% if task.approved %}✓ Approved — safe to apply{% else %}Awaiting your approval{% endif %}
+            </span>
+          </div>
+        </div>
+
+        <div class="activity-section">
+          <h4><span>Live activity</span><span>View full activity →</span></h4>
+          {% for act in task.activity %}
+          <div class="activity-row"><span>{{ act.text }}</span><span class="time">{{ act.time }}</span></div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="task-chat">
+        <div class="task-chat-head">With you, as I work</div>
+        <div class="task-chat-log" id="taskChatLog">
+          {% for msg in task.chat %}
+          <div class="chat-bubble{% if msg.is_orbit %} orbit{% endif %}">
+            <div class="who">
+              {% if msg.is_orbit %}
+              <span class="brain-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg></span>Orbit
+              {% else %}
+              {{ msg.who }} · {{ msg.time }}
+              {% endif %}
+            </div>
+            <div class="body">{{ msg.body }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="task-chat-input">
+          <input type="text" id="taskInput" placeholder="Add a thought or steer Orbit…" />
+          <div class="send-btn-round" id="taskSend" style="width:26px;height:26px;">➤</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>Orbit.bootstrapTask("{{ task.id }}");</script>
+{% endblock %}
