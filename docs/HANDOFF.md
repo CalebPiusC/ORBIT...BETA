@@ -43,7 +43,9 @@ logic is repo-independent.
 2. **The default model was a dead one.** `config.DEFAULT_GEMINI_MODEL` was
    `gemini-2.5-flash`, which Google announced for shutdown on 2026-10-20 — ten days from
    this writing. `.env.example` already said `gemini-3.8-flash`, so the template and the
-   code disagreed. Now both say `gemini-3.8-flash`. **This is the recurring lesson:** model
+   code disagreed. On 2026-10-10 the default changed to `gemini-3-flash-preview` (the model that
+   answered a live check on the builder's machine), with `gemini-3.8-flash` as the single
+   fallback (`GEMINI_FALLBACK_MODEL`). Both files must change together. **This is the recurring lesson:** model
    ids rot. They must live in exactly one place (`config.py`, overridable by `.env`) and a
    builder must never hard-code one in a provider, a route, or a test.
 

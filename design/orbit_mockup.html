@@ -36,23 +36,28 @@
    =========================================================== */
 
   :root {
-    --bg: #0a0e16;
-    --bg-raised: #131a26;
-    --bg-sunken: #070a10;
-    --bg-card: #111826;
-    --border: #232e3d;
-    --border-soft: #1a2129;
-    --text: #e6e9f0;
-    --text-dim: #8d96a6;
-    --text-faint: #5a6372;
-    --accent: #4a84c9;
-    --accent-bright: #7aa8e2;
-    --accent-dim: #2d4a73;
-    --accent-wash: rgba(74, 132, 201, 0.14);
-    --green: #6a9a6f;
-    --amber: #c9a24a;
-    --red: #c9534a;
-    --red-wash: rgba(201, 83, 74, 0.12);
+    /* Brand surfaces */
+    --bg: #10131C;            /* Midnight Navy — main background */
+    --bg-raised: #141925;     /* Sidebar Navy — sidebar */
+    --bg-sunken: #10131C;     /* inset surfaces (Midnight Navy) */
+    --bg-card: #1B202B;       /* Deep Slate — inputs, cards, panels */
+    --border: #2B303B;        /* Border Grey */
+    --border-soft: rgba(43, 48, 59, 0.6);  /* Border Grey, subtler separators */
+    /* Text */
+    --text: #F4F0EA;          /* Warm White — primary text, wordmark */
+    --text-dim: #A09FA8;      /* Ash Grey — secondary text */
+    --text-faint: #A09FA8;    /* Ash Grey — muted text (kept AA-readable) */
+    /* Brand accent — dark blue (values from the mockup) */
+    --accent: #4a84c9;        /* Blue — user bubble fill, primary buttons */
+    --accent-bright: #7aa8e2; /* Light blue — active labels, Orbit icon */
+    --accent-dim: #2d4a73;    /* Dark blue — borders, thinking-block edge */
+    --accent-wash: rgba(74, 132, 201, 0.14); /* selected background */
+    --accent-soft: rgba(74, 132, 201, 0.35); /* focus ring */
+    /* Functional status colors — kept distinct from brand */
+    --green: #78B88A;         /* Success */
+    --amber: #E5B567;         /* Warning */
+    --red: #E17D7D;           /* Error */
+    --red-wash: rgba(225, 125, 125, 0.12);
     --radius: 10px;
     --radius-sm: 7px;
     font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
@@ -62,18 +67,6 @@
   .screen { display: none; height: 100vh; }
   .screen--active { display: flex; }
 
-  /* shared: dev-switcher so this file is viewable standalone */
-  .dev-switcher {
-    position: fixed; top: 10px; right: 10px; z-index: 50;
-    display: flex; gap: 6px; background: var(--bg-raised);
-    border: 1px solid var(--border); border-radius: 999px; padding: 4px;
-  }
-  .dev-switcher button {
-    border: none; background: transparent; color: var(--text-faint);
-    padding: 5px 12px; border-radius: 999px; font-size: 11px; cursor: pointer;
-  }
-  .dev-switcher button.active { background: var(--accent-wash); color: var(--accent-bright); }
-
   /* ===================== shared: sidebar ===================== */
   .sidebar {
     width: 240px; flex-shrink: 0;
@@ -81,8 +74,9 @@
     display: flex; flex-direction: column; padding: 14px 10px;
   }
   .sidebar-brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 16px; font-weight: 700; letter-spacing: 0.05em; }
+  /* ORBIT orbital symbol: blue ring, Warm White center dot (geometry unchanged). */
   .brand-mark { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--accent); position: relative; flex-shrink: 0; }
-  .brand-mark::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--accent); }
+  .brand-mark::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--text); }
 
   .new-convo {
     display: flex; align-items: center; gap: 8px;
@@ -90,6 +84,7 @@
     color: var(--accent-bright); border-radius: var(--radius-sm);
     padding: 8px 10px; font-size: 13px; font-weight: 600; cursor: pointer; margin-bottom: 10px;
   }
+  .new-convo:hover { border-color: var(--accent); }
   .sidebar-search {
     display: flex; align-items: center; gap: 8px;
     color: var(--text-faint); font-size: 12px;
@@ -145,7 +140,8 @@
     padding: 6px 16px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
     display: flex; align-items: center; gap: 6px;
   }
-  .mode-toggle button.active { background: var(--accent); color: #16110c; font-weight: 600; }
+  .mode-toggle button.active { background: var(--accent); color: #10131C; font-weight: 600; }
+  .mode-toggle button.active:hover { background: var(--accent-bright); }
   .plus-badge {
     position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
     font-size: 11px; color: var(--accent-bright); border: 1px solid var(--accent-dim);
@@ -165,6 +161,7 @@
     background: var(--bg-card); border: 1px solid var(--border);
     border-radius: 14px; padding: 14px 16px;
   }
+  .home-composer:focus-within { border-color: var(--accent-dim); }
   .home-composer input {
     width: 100%; background: transparent; border: none; outline: none;
     color: var(--text); font-size: 14px; margin-bottom: 10px;
@@ -186,9 +183,15 @@
   }
   .send-btn-round {
     width: 32px; height: 32px; border-radius: 50%;
-    background: var(--accent); border: none; color: #16110c;
+    background: var(--accent); border: none; color: #10131C;
     display: flex; align-items: center; justify-content: center; cursor: pointer;
+    /* The mockup drew this as a div; as a real <button> it must not inherit
+       the browser's button font/padding, and it needs a visible focus ring. */
+    font: inherit; padding: 0;
   }
+  .send-btn-round:hover { background: var(--accent-bright); }
+  .send-btn-round:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-soft); }
+  button:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
 
   .suggestion-chips { display: flex; gap: 8px; margin-top: 16px; }
   .chip {
@@ -289,23 +292,34 @@
   }
   .task-chat-head { padding: 14px 16px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; font-weight: 600; }
   .task-chat-log { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
-  .chat-bubble { font-size: 12.5px; }
-  .chat-bubble .who { font-size: 10.5px; color: var(--text-faint); margin-bottom: 3px; }
-  .chat-bubble.orbit .who { color: var(--accent-bright); }
+  /* Speakers are told apart by position and surface, not by a name label.
+     User = right-aligned accent bubble. Orbit = left-aligned dark surface,
+     with the brain icon in front of its text as the only "who" marker.
+     Each message is a .chat-row: its bubble, then a faint time line. */
+  .chat-row { display: flex; flex-direction: column; max-width: 86%; }
+  .chat-row.user { align-self: flex-end; align-items: flex-end; }
+  .chat-row.orbit { align-self: flex-start; align-items: flex-start; }
+  .chat-bubble {
+    font-size: 12.5px; max-width: 100%;
+    padding: 9px 12px; border-radius: var(--radius);
+    display: flex; flex-direction: column;
+  }
+  .chat-bubble.user {
+    background: var(--accent); color: #10131C;
+    border-bottom-right-radius: 3px;
+  }
+  .chat-bubble.orbit {
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft); border-bottom-left-radius: 3px;
+  }
   .chat-bubble .body { color: var(--text); line-height: 1.5; }
-  .chat-bubble .meta { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; }
-  .task-chat-input { border-top: 1px solid var(--border-soft); padding: 10px 12px; display: flex; gap: 8px; align-items: center; }
+  .chat-bubble.user .body { color: #10131C; }
+  .chat-meta { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; padding: 0 2px; }
+  .task-chat-input { border-top: 1px solid var(--border-soft); padding: 10px 12px; display: flex; gap: 8px; align-items: center; background: var(--bg-card); }
   .task-chat-input input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 12.5px; }
   .task-chat-input input::placeholder { color: var(--text-faint); }
 
   /* ===================== brain icon + streaming thought/reply ===================== */
-  /* ARENA: this marks anything Orbit itself says or thinks — thinking
-     blocks AND ordinary chat replies both get the icon and the
-     streaming-in animation below. Requires reply_stream() on the
-     provider (chunked, not one-shot) — see Phase 1 note. The two
-     states (thinking vs. final answer) share the icon but differ in
-     styling: thinking is muted/italic and collapses once the answer
-     starts; the final answer is full-opacity normal text. */
   .brain-icon {
     width: 15px; height: 15px; flex-shrink: 0; color: var(--accent-bright);
     display: inline-block; vertical-align: -3px; margin-right: 5px;
@@ -325,10 +339,48 @@
   .thinking-block.done .thinking-text::after { content: ""; }
   @keyframes caret-blink { 50% { opacity: 0; } }
 
-  .chat-bubble.orbit .who .brain-icon { margin-right: 4px; }
+  .chat-bubble.orbit .body .brain-icon { margin-right: 6px; }
   .chat-bubble .body.streaming::after {
     content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
   }
+
+  /* home chat thread (revealed after the first message) */
+  .home-thread {
+    width: 560px; max-width: 100%;
+    display: none; flex-direction: column; gap: 14px;
+    margin-bottom: 14px; max-height: 40vh; overflow-y: auto;
+  }
+  .home-thread.visible { display: flex; }
+
+  /* failure and empty-turn lines — an unanswered turn must never look idle */
+  .chat-bubble .notice, .home-thread > .notice {
+    font-size: 11.5px; line-height: 1.45; color: var(--text-dim);
+    font-style: italic;
+  }
+  .chat-bubble .notice.error, .home-thread > .notice.error {
+    color: var(--red); font-style: normal;
+  }
+  .chat-bubble .notice.warn { color: var(--amber); font-style: normal; }
+
+  .screen { display: none; height: 100vh; }
+  .screen--active { display: flex; }
+
+  /* shared: dev-switcher so this file is viewable standalone */
+  .dev-switcher {
+    position: fixed; top: 10px; right: 10px; z-index: 50;
+    display: flex; gap: 6px; background: var(--bg-raised);
+    border: 1px solid var(--border); border-radius: 999px; padding: 4px;
+  }
+  .dev-switcher button {
+    border: none; background: transparent; color: var(--text-faint);
+    padding: 5px 12px; border-radius: 999px; font-size: 11px; cursor: pointer;
+  }
+  .dev-switcher button.active { background: var(--accent-wash); color: var(--accent-bright); }
+  /* demo-only: the streaming demo writes into the reply span, so its caret lives here. */
+  .chat-bubble .reply.streaming::after {
+    content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
+  }
+
 </style>
 </head>
 <body>
@@ -524,18 +576,19 @@
       <div class="task-chat">
         <div class="task-chat-head">With you, as I work</div>
         <div class="task-chat-log">
-          <div class="chat-bubble">
-            <div class="who">You · 09:41</div>
-            <div class="body">Add order status tracking. Keep the branch as main and don't push anything — I want to review the diff first.</div>
-          </div>
-          <div class="chat-bubble orbit">
-            <div class="who">
-              <span class="brain-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg>
-              </span>Orbit
+          <div class="chat-row user">
+            <div class="chat-bubble user">
+              <div class="body">Add order status tracking. Keep the branch as main and don't push anything — I want to review the diff first.</div>
             </div>
-            <div class="body" id="orbitReplyText"></div>
-            <div class="meta">✓ 6 files scanned · building the status helper</div>
+            <div class="chat-meta">09:41</div>
+          </div>
+          <div class="chat-row orbit">
+            <div class="chat-bubble orbit">
+              <div class="body"><span class="brain-icon">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg>
+</span><span class="reply" id="orbitReplyText"></span></div>
+            </div>
+            <div class="chat-meta">09:42</div>
           </div>
         </div>
         <div class="task-chat-input">

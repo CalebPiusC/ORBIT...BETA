@@ -67,6 +67,11 @@ class Activity:
     time: str
 
 
+def now_label() -> str:
+    """Local wall-clock "HH:MM" for a chat message's time line."""
+    return datetime.now().strftime("%H:%M")
+
+
 @dataclass
 class ChatMessage:
     who: str

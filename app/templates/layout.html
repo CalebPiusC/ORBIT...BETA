@@ -6,10 +6,10 @@
 <title>{% block title %}ORBIT{% endblock %}</title>
 <style>
   /* ===========================================================
-     ORBIT — home screen + coding-agent task view, in Midnight Navy
-     with Soft Copper accents and Warm White text. Layout and structure
-     are unchanged from the original build; only the palette was
-     refined. Do not redesign this CSS.
+     ORBIT — home screen + coding-agent task view, in dark blue.
+     Accent tokens match design/orbit_mockup.html exactly; keep them
+     in sync. Layout and structure are unchanged. Do not redesign
+     this CSS.
      =========================================================== */
 
   :root {
@@ -24,12 +24,12 @@
     --text: #F4F0EA;          /* Warm White — primary text, wordmark */
     --text-dim: #A09FA8;      /* Ash Grey — secondary text */
     --text-faint: #A09FA8;    /* Ash Grey — muted text (kept AA-readable) */
-    /* Brand accent — Soft Copper */
-    --accent: #D99A72;        /* Soft Copper */
-    --accent-bright: #E8AD86; /* Copper Hover — active/hover labels */
-    --accent-dim: rgba(217, 154, 114, 0.4);   /* copper border tint */
-    --accent-wash: rgba(217, 154, 114, 0.14); /* copper selected background */
-    --accent-soft: rgba(217, 154, 114, 0.35); /* focus ring */
+    /* Brand accent — dark blue (values from the mockup) */
+    --accent: #4a84c9;        /* Blue — user bubble fill, primary buttons */
+    --accent-bright: #7aa8e2; /* Light blue — active labels, Orbit icon */
+    --accent-dim: #2d4a73;    /* Dark blue — borders, thinking-block edge */
+    --accent-wash: rgba(74, 132, 201, 0.14); /* selected background */
+    --accent-soft: rgba(74, 132, 201, 0.35); /* focus ring */
     /* Functional status colors — kept distinct from brand */
     --green: #78B88A;         /* Success */
     --amber: #E5B567;         /* Warning */
@@ -51,7 +51,7 @@
     display: flex; flex-direction: column; padding: 14px 10px;
   }
   .sidebar-brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 16px; font-weight: 700; letter-spacing: 0.05em; }
-  /* ORBIT orbital symbol: copper ring, Warm White center dot (geometry unchanged). */
+  /* ORBIT orbital symbol: blue ring, Warm White center dot (geometry unchanged). */
   .brand-mark { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--accent); position: relative; flex-shrink: 0; }
   .brand-mark::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--text); }
 
@@ -269,11 +269,29 @@
   }
   .task-chat-head { padding: 14px 16px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; font-weight: 600; }
   .task-chat-log { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
-  .chat-bubble { font-size: 12.5px; }
-  .chat-bubble .who { font-size: 10.5px; color: var(--text-faint); margin-bottom: 3px; }
-  .chat-bubble.orbit .who { color: var(--accent-bright); }
+  /* Speakers are told apart by position and surface, not by a name label.
+     User = right-aligned accent bubble. Orbit = left-aligned dark surface,
+     with the brain icon in front of its text as the only "who" marker.
+     Each message is a .chat-row: its bubble, then a faint time line. */
+  .chat-row { display: flex; flex-direction: column; max-width: 86%; }
+  .chat-row.user { align-self: flex-end; align-items: flex-end; }
+  .chat-row.orbit { align-self: flex-start; align-items: flex-start; }
+  .chat-bubble {
+    font-size: 12.5px; max-width: 100%;
+    padding: 9px 12px; border-radius: var(--radius);
+    display: flex; flex-direction: column;
+  }
+  .chat-bubble.user {
+    background: var(--accent); color: #10131C;
+    border-bottom-right-radius: 3px;
+  }
+  .chat-bubble.orbit {
+    background: var(--bg-card);
+    border: 1px solid var(--border-soft); border-bottom-left-radius: 3px;
+  }
   .chat-bubble .body { color: var(--text); line-height: 1.5; }
-  .chat-bubble .meta { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; }
+  .chat-bubble.user .body { color: #10131C; }
+  .chat-meta { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; padding: 0 2px; }
   .task-chat-input { border-top: 1px solid var(--border-soft); padding: 10px 12px; display: flex; gap: 8px; align-items: center; background: var(--bg-card); }
   .task-chat-input input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 12.5px; }
   .task-chat-input input::placeholder { color: var(--text-faint); }
@@ -298,7 +316,7 @@
   .thinking-block.done .thinking-text::after { content: ""; }
   @keyframes caret-blink { 50% { opacity: 0; } }
 
-  .chat-bubble.orbit .who .brain-icon { margin-right: 4px; }
+  .chat-bubble.orbit .body .brain-icon { margin-right: 6px; }
   .chat-bubble .body.streaming::after {
     content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
   }

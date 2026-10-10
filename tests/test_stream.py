@@ -51,6 +51,29 @@ class SplitThinkingTests(unittest.TestCase):
             [("thinking", "Line one.\nLine two."), ("answer", "Final words")],
         )
 
+    def test_answer_streams_chunk_by_chunk_not_at_the_end(self):
+        # The answer must reach the caller while the model is still generating.
+        # Record how many source pieces had been read when each answer piece came out.
+        pulled = []
+
+        def source():
+            for piece in ["<thinking>r</thinking>", "Hel", "lo ", "there"]:
+                pulled.append(piece)
+                yield piece
+
+        answers = []
+        for chunk in _split_thinking(source()):
+            if chunk.kind == "answer":
+                answers.append((chunk.text, len(pulled)))
+        self.assertEqual([text for text, _ in answers], ["Hel", "lo ", "there"])
+        # "Hel" left before the stream was finished (4 pieces in total).
+        self.assertLess(answers[0][1], 4)
+        self.assertLess(answers[1][1], 4)
+
+    def test_text_held_back_for_a_tag_is_not_lost_at_the_end(self):
+        # "<th" could have been an opening tag; when the stream ends it was plain text.
+        self.assertEqual(self._run(["<th"]), [("answer", "<th")])
+
     def test_no_closing_tag_keeps_thinking(self):
         # If the model never closes the tag, what streamed stays as thinking.
         out = self._run(["<thinking>some narration that never closes"])

@@ -92,6 +92,23 @@ class AuditLog:
             "execution": execution,
             "duration_ms": round(duration_seconds * 1000, 3),
         }
+        self._write(event)
+
+    def record_model_event(self, **fields: Any) -> None:
+        """Append one model-level event: which model answered, or why an attempt failed.
+
+        These carry model ids, roles, reasons and timings only. They never carry
+        prompts, replies, or credentials.
+        """
+        event = {
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
+                "+00:00", "Z"
+            ),
+            **fields,
+        }
+        self._write(event)
+
+    def _write(self, event: Mapping[str, Any]) -> None:
         line = json.dumps(event, ensure_ascii=False, separators=(",", ":"), default=str)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock, self.path.open("a", encoding="utf-8") as audit_file:

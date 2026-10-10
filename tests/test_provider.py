@@ -19,6 +19,7 @@ from config import (
 )
 from providers.base import ChatMessage
 from providers.gemini import GeminiProvider, timeout_millis
+from tools.registry import AuditLog
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -133,9 +134,13 @@ class GeminiProviderTests(unittest.TestCase):
     def test_builds_sdk_client_from_loaded_settings(self) -> None:
         settings = Settings(gemini_api_key="local-test-key", gemini_model="configured-model")
         client = FakeClient()
-        with patch("providers.gemini.load_settings", return_value=settings), patch(
-            "providers.gemini.genai.Client", return_value=client
-        ) as make_client:
+        # The real-client path writes model events to audit.log by default. Point
+        # it at a temp file so this offline test never touches the repo's log.
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "providers.gemini.load_settings", return_value=settings
+        ), patch("providers.gemini.genai.Client", return_value=client) as make_client, patch(
+            "providers.gemini.AuditLog", return_value=AuditLog(Path(temp_dir) / "audit.log")
+        ):
             provider = GeminiProvider()
             provider.reply([ChatMessage(role="user", content="ping")], "Test prompt.")
 
