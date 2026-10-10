@@ -140,6 +140,10 @@ These are not style preferences. Each one exists because the previous build viol
    `waiting on <model> — Ctrl-C cancels this turn`, and `python chat.py --check` walks
    config → network → model and names the first failing layer. `--check` masks the key to
    its first four characters and never raises a traceback.
+11. **The web launchers never expose Werkzeug's debugger.** `run_app()` defaults to
+   `127.0.0.1` and always sets `debug=False`. A container or sandbox preview may opt into
+   an external bind with `ORBIT_HOST=0.0.0.0` (and `PORT` for the port); do not turn on
+   debug mode, especially on an externally reachable address.
 
 ---
 

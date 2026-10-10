@@ -14,7 +14,7 @@ from collections.abc import Iterator
 
 from providers.base import StreamChunk
 
-from app.server import create_app
+from app.server import create_app, run_app
 from app.store import Store
 
 
@@ -42,7 +42,7 @@ def main() -> None:
     print("ORBIT demo UI · provider = StubStreamingProvider (no network, canned replies)")
     print("For the real model: set GEMINI_API_KEY in .env and run  python -m app.server")
     app = create_app(provider=StubStreamingProvider(), store=Store())
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    run_app(app)
 
 
 if __name__ == "__main__":
