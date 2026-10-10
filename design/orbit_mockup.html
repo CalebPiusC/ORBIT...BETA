@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ORBIT</title>
+<style>
+  /* ===========================================================
+     ORBIT — home screen + coding-agent task view, in dark blue.
+
+     This REPLACES the earlier node-graph dashboard mockup as the
+     front door. Structure follows two reference screens Caleb
+     found/built in Figma: (1) a chat-first home with a sidebar of
+     past conversations/tasks, (2) a dedicated "coding agent"
+     working view for a single task, with a step checklist,
+     proposed-changes-awaiting-approval card, live activity log,
+     and a side chat to steer it mid-task.
+
+     Two "screens" in one file, switched by .screen--active — no
+     routing framework, just a visibility toggle. ARENA: wire real
+     navigation (and real data behind every data-arena="..." spot)
+     on top of this; the two screens and their CSS are the final
+     structure and palette, don't redesign them.
+
+     Carries over, unchanged, from everything already verified:
+       - the approval gate: a proposed change is never applied
+         without an explicit yes — "No commits will be pushed
+         without your explicit approval" is not decorative text,
+         it's the actual rule from Phase 2.
+       - Chat mode / Agent mode is the SAME toggle built in
+         Phase 1/2's provider work — this UI is just where it
+         becomes visible.
+       - only GitHub is a real, built connection right now
+         (github_tools.py). Linear/Vercel/etc. are shown as
+         available-not-connected, not faked as active.
+   =========================================================== */
+
+  :root {
+    --bg: #0a0e16;
+    --bg-raised: #131a26;
+    --bg-sunken: #070a10;
+    --bg-card: #111826;
+    --border: #232e3d;
+    --border-soft: #1a2129;
+    --text: #e6e9f0;
+    --text-dim: #8d96a6;
+    --text-faint: #5a6372;
+    --accent: #4a84c9;
+    --accent-bright: #7aa8e2;
+    --accent-dim: #2d4a73;
+    --accent-wash: rgba(74, 132, 201, 0.14);
+    --green: #6a9a6f;
+    --amber: #c9a24a;
+    --red: #c9534a;
+    --red-wash: rgba(201, 83, 74, 0.12);
+    --radius: 10px;
+    --radius-sm: 7px;
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; font-size: 14px; }
+  .screen { display: none; height: 100vh; }
+  .screen--active { display: flex; }
+
+  /* shared: dev-switcher so this file is viewable standalone */
+  .dev-switcher {
+    position: fixed; top: 10px; right: 10px; z-index: 50;
+    display: flex; gap: 6px; background: var(--bg-raised);
+    border: 1px solid var(--border); border-radius: 999px; padding: 4px;
+  }
+  .dev-switcher button {
+    border: none; background: transparent; color: var(--text-faint);
+    padding: 5px 12px; border-radius: 999px; font-size: 11px; cursor: pointer;
+  }
+  .dev-switcher button.active { background: var(--accent-wash); color: var(--accent-bright); }
+
+  /* ===================== shared: sidebar ===================== */
+  .sidebar {
+    width: 240px; flex-shrink: 0;
+    background: var(--bg-raised); border-right: 1px solid var(--border-soft);
+    display: flex; flex-direction: column; padding: 14px 10px;
+  }
+  .sidebar-brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 16px; font-weight: 700; letter-spacing: 0.05em; }
+  .brand-mark { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--accent); position: relative; flex-shrink: 0; }
+  .brand-mark::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--accent); }
+
+  .new-convo {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--accent-wash); border: 1px solid var(--accent-dim);
+    color: var(--accent-bright); border-radius: var(--radius-sm);
+    padding: 8px 10px; font-size: 13px; font-weight: 600; cursor: pointer; margin-bottom: 10px;
+  }
+  .sidebar-search {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--text-faint); font-size: 12px;
+    padding: 7px 10px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border-soft); margin-bottom: 14px;
+  }
+
+  .history-group { margin-bottom: 14px; }
+  .history-group h4 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-faint); margin: 0 0 6px 8px; font-weight: 600;
+  }
+  .history-item {
+    padding: 7px 8px; border-radius: var(--radius-sm);
+    font-size: 12.5px; color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: pointer;
+  }
+  .history-item:hover { background: var(--bg-sunken); color: var(--text); }
+  .history-item.active { background: var(--accent-wash); color: var(--accent-bright); }
+
+  .sidebar-spacer { flex: 1; }
+  .sidebar-foot {
+    border-top: 1px solid var(--border-soft); padding-top: 10px; margin-top: 6px;
+  }
+  .connected-apps-row {
+    font-size: 11px; color: var(--text-faint); padding: 4px 8px 10px; display: flex; align-items: center; gap: 6px;
+  }
+  .connected-apps-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+  .user-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; }
+  .user-avatar {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--accent-wash); border: 1px solid var(--accent-dim);
+    color: var(--accent-bright); display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+  }
+  .user-row .names { line-height: 1.3; }
+  .user-row .name { font-size: 12.5px; color: var(--text); }
+  .user-row .sub { font-size: 11px; color: var(--text-faint); }
+
+  /* ===================== screen 1: home ===================== */
+  .home-main { flex: 1; display: flex; flex-direction: column; }
+  .home-topbar {
+    display: flex; align-items: center; justify-content: center; position: relative;
+    padding: 16px 20px; border-bottom: 1px solid var(--border-soft);
+  }
+  .mode-toggle {
+    display: flex; background: var(--bg-sunken); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px;
+  }
+  .mode-toggle button {
+    border: none; background: transparent; color: var(--text-faint);
+    padding: 6px 16px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .mode-toggle button.active { background: var(--accent); color: #16110c; font-weight: 600; }
+  .plus-badge {
+    position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
+    font-size: 11px; color: var(--accent-bright); border: 1px solid var(--accent-dim);
+    border-radius: 999px; padding: 3px 10px;
+  }
+
+  .home-center {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .home-greeting { text-align: center; margin-bottom: 26px; }
+  .home-greeting h1 { font-size: 26px; font-weight: 600; margin: 0 0 6px; }
+  .home-greeting p { color: var(--text-faint); font-size: 13.5px; margin: 0; }
+
+  .home-composer {
+    width: 560px; max-width: 100%;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 14px 16px;
+  }
+  .home-composer input {
+    width: 100%; background: transparent; border: none; outline: none;
+    color: var(--text); font-size: 14px; margin-bottom: 10px;
+  }
+  .home-composer input::placeholder { color: var(--text-faint); }
+  .composer-controls { display: flex; align-items: center; gap: 10px; }
+  .model-select {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-dim);
+    border: 1px solid var(--border); border-radius: 999px; padding: 5px 10px;
+    cursor: pointer;
+  }
+  .model-select .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .composer-controls .spacer { flex: 1; }
+  .icon-btn-round {
+    width: 30px; height: 30px; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--bg-sunken);
+    color: var(--text-dim); display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .send-btn-round {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--accent); border: none; color: #16110c;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+
+  .suggestion-chips { display: flex; gap: 8px; margin-top: 16px; }
+  .chip {
+    font-size: 12.5px; color: var(--text-dim);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 7px 14px; cursor: pointer; display: flex; align-items: center; gap: 6px;
+  }
+  .chip:hover { border-color: var(--accent-dim); color: var(--text); }
+
+  .connected-tools { text-align: center; margin-top: 40px; }
+  .connected-tools .label { font-size: 11px; color: var(--text-faint); margin-bottom: 10px; }
+  .tool-row { display: flex; align-items: center; justify-content: center; gap: 16px; }
+  .tool-pill {
+    display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim);
+  }
+  .tool-pill.connected { color: var(--text); }
+  .tool-pill .status-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .tool-pill.connected .status-dot { background: var(--green); }
+  .tool-pill.not-connected .status-dot { background: var(--text-faint); }
+  .manage-link { color: var(--accent-bright); cursor: pointer; }
+
+  .home-footer { text-align: center; padding: 16px; font-size: 11px; color: var(--text-faint); }
+
+  /* ===================== screen 2: coding agent task ===================== */
+  .task-main { flex: 1; display: grid; grid-template-rows: auto auto 1fr; overflow: hidden; }
+  .task-topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 22px; border-bottom: 1px solid var(--border-soft);
+  }
+  .task-topbar-left { display: flex; flex-direction: column; gap: 2px; }
+  .task-breadcrumb { font-size: 11px; color: var(--text-faint); }
+  .task-title-row { font-size: 15px; font-weight: 600; }
+  .task-topbar-right { display: flex; align-items: center; gap: 10px; }
+  .working-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--accent-bright); }
+  .working-indicator .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1.3s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .pause-btn {
+    display: flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border); background: var(--bg-sunken);
+    color: var(--text-dim); border-radius: var(--radius-sm); padding: 6px 12px; font-size: 12px; cursor: pointer;
+  }
+
+  .task-status-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 22px; border-bottom: 1px solid var(--border-soft);
+    font-size: 11.5px; color: var(--text-faint); background: var(--bg-sunken);
+  }
+  .no-push-note { color: var(--accent-bright); }
+
+  .task-body { display: grid; grid-template-columns: 1fr 320px; overflow: hidden; }
+  .task-work { overflow-y: auto; padding: 22px; }
+  .task-work-eyebrow { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-bright); margin-bottom: 8px; }
+  .task-work h2 { font-size: 20px; margin: 0 0 8px; }
+  .task-work p.desc { color: var(--text-dim); font-size: 13px; line-height: 1.5; margin: 0 0 20px; }
+
+  .step-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 22px; }
+  .step {
+    border-top: 2px solid var(--border); padding-top: 10px;
+  }
+  .step.done { border-top-color: var(--green); }
+  .step.active { border-top-color: var(--accent); }
+  .step .step-title { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .step .step-detail { font-size: 11px; color: var(--text-faint); line-height: 1.4; }
+  .step-icon.done { color: var(--green); }
+  .step-icon.active { color: var(--accent-bright); }
+  .step-icon.pending { color: var(--text-faint); }
+
+  .changes-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); margin-bottom: 20px; overflow: hidden;
+  }
+  .changes-card-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid var(--border-soft);
+  }
+  .changes-card-head .title { font-size: 13.5px; font-weight: 600; }
+  .changes-card-head .sub { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+  .draft-badge { font-size: 10.5px; color: var(--accent-bright); border: 1px solid var(--accent-dim); border-radius: 999px; padding: 3px 10px; }
+
+  .change-row { display: grid; grid-template-columns: 120px 70px 1fr 90px; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border-soft); font-size: 12px; }
+  .change-row:last-of-type { border-bottom: none; }
+  .change-row .file { color: var(--text); font-family: ui-monospace, monospace; }
+  .change-row .delta { color: var(--text-faint); font-family: ui-monospace, monospace; }
+  .change-row .desc-cell { color: var(--text-dim); }
+  .change-row .status-tag { font-size: 10.5px; text-align: right; }
+  .status-tag.proposed { color: var(--accent-bright); }
+  .status-tag.checking { color: var(--amber); }
+
+  .approval-note { display: flex; align-items: center; gap: 8px; padding: 10px 16px; font-size: 11.5px; color: var(--text-faint); background: var(--bg-sunken); }
+
+  .activity-section h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); margin: 0 0 10px; display: flex; justify-content: space-between; }
+  .activity-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); padding: 6px 0; border-bottom: 1px solid var(--border-soft); }
+  .activity-row .time { color: var(--text-faint); }
+
+  .task-chat {
+    border-left: 1px solid var(--border-soft);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .task-chat-head { padding: 14px 16px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; font-weight: 600; }
+  .task-chat-log { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+  .chat-bubble { font-size: 12.5px; }
+  .chat-bubble .who { font-size: 10.5px; color: var(--text-faint); margin-bottom: 3px; }
+  .chat-bubble.orbit .who { color: var(--accent-bright); }
+  .chat-bubble .body { color: var(--text); line-height: 1.5; }
+  .chat-bubble .meta { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; }
+  .task-chat-input { border-top: 1px solid var(--border-soft); padding: 10px 12px; display: flex; gap: 8px; align-items: center; }
+  .task-chat-input input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 12.5px; }
+  .task-chat-input input::placeholder { color: var(--text-faint); }
+
+  /* ===================== brain icon + streaming thought/reply ===================== */
+  /* ARENA: this marks anything Orbit itself says or thinks — thinking
+     blocks AND ordinary chat replies both get the icon and the
+     streaming-in animation below. Requires reply_stream() on the
+     provider (chunked, not one-shot) — see Phase 1 note. The two
+     states (thinking vs. final answer) share the icon but differ in
+     styling: thinking is muted/italic and collapses once the answer
+     starts; the final answer is full-opacity normal text. */
+  .brain-icon {
+    width: 15px; height: 15px; flex-shrink: 0; color: var(--accent-bright);
+    display: inline-block; vertical-align: -3px; margin-right: 5px;
+  }
+  .brain-icon svg { width: 100%; height: 100%; }
+
+  .thinking-block {
+    display: flex; align-items: flex-start; gap: 0;
+    font-size: 12px; font-style: italic; color: var(--text-faint);
+    line-height: 1.6; margin-bottom: 14px; padding: 10px 12px;
+    background: var(--bg-sunken); border-radius: var(--radius-sm);
+    border-left: 2px solid var(--accent-dim);
+  }
+  .thinking-block .thinking-text::after {
+    content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
+  }
+  .thinking-block.done .thinking-text::after { content: ""; }
+  @keyframes caret-blink { 50% { opacity: 0; } }
+
+  .chat-bubble.orbit .who .brain-icon { margin-right: 4px; }
+  .chat-bubble .body.streaming::after {
+    content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
+  }
+</style>
+</head>
+<body>
+
+<div class="dev-switcher">
+  <button class="active" onclick="showScreen('home')">Home</button>
+  <button onclick="showScreen('task')">Coding agent task</button>
+</div>
+
+<!-- ===================== SCREEN 1: HOME ===================== -->
+<div class="screen screen--active" id="screen-home">
+  <div class="sidebar">
+    <div class="sidebar-brand"><span class="brand-mark"></span>ORBIT</div>
+    <div class="new-convo">+ New conversation</div>
+    <div class="sidebar-search">⌕ Search chats</div>
+
+    <div class="history-group">
+      <h4>Today</h4>
+      <div class="history-item active">Add order tracking to WhatsApp bot</div>
+      <div class="history-item">Review portfolio site PR</div>
+    </div>
+    <div class="history-group">
+      <h4>Yesterday</h4>
+      <div class="history-item">Sync SEN106 issues with plan</div>
+      <div class="history-item">Explain this diff before merge</div>
+    </div>
+    <div class="history-group">
+      <h4>Previous 7 days</h4>
+      <div class="history-item">Run branch tests for ordering bot</div>
+      <div class="history-item">Draft pricing page copy</div>
+    </div>
+
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-foot">
+      <div class="connected-apps-row"><span class="dot"></span>Connected apps · 1 active</div>
+      <div class="user-row">
+        <div class="user-avatar">CP</div>
+        <div class="names">
+          <div class="name">Caleb</div>
+          <div class="sub">Personal workspace</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="home-main">
+    <div class="home-topbar">
+      <div class="mode-toggle">
+        <button class="active" data-arena="mode-chat">◐ Chat</button>
+        <button data-arena="mode-agent">⚙ Agent</button>
+      </div>
+      <div class="plus-badge">ORBIT</div>
+    </div>
+
+    <div class="home-center">
+      <div class="home-greeting">
+        <h1>Good morning, Caleb.</h1>
+        <p>From first question to reviewed change. What are we building?</p>
+      </div>
+
+      <div class="home-composer">
+        <input type="text" placeholder="Ask Orbit to review a PR, generate code, or explain a diff…" />
+        <div class="composer-controls">
+          <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
+          <div class="spacer"></div>
+          <div class="icon-btn-round" title="Voice">🎙</div>
+          <div class="send-btn-round">➤</div>
+        </div>
+      </div>
+
+      <div class="suggestion-chips">
+        <div class="chip" onclick="showScreen('task')">◫ Review a PR</div>
+        <div class="chip">⌁ Generate code</div>
+        <div class="chip">✓ Run branch tests</div>
+      </div>
+
+      <div class="connected-tools">
+        <div class="label">Your development tools, connected to Orbit</div>
+        <div class="tool-row">
+          <div class="tool-pill connected"><span class="status-dot"></span>GitHub</div>
+          <div class="tool-pill not-connected"><span class="status-dot"></span>Linear</div>
+          <div class="tool-pill not-connected"><span class="status-dot"></span>Vercel</div>
+          <div class="manage-link">Manage →</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="home-footer">🔒 Just you and Orbit. Your conversations stay private.</div>
+  </div>
+</div>
+
+<!-- ===================== SCREEN 2: CODING AGENT TASK ===================== -->
+<div class="screen" id="screen-task">
+  <div class="sidebar">
+    <div class="sidebar-brand"><span class="brand-mark"></span>ORBIT</div>
+    <div class="new-convo">+ New conversation</div>
+    <div class="sidebar-search">⌕ Search chats</div>
+    <div class="history-group">
+      <h4>Today</h4>
+      <div class="history-item active">Add order tracking to WhatsApp bot</div>
+    </div>
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-foot">
+      <div class="connected-apps-row"><span class="dot"></span>Connected apps · 1 active</div>
+      <div class="user-row">
+        <div class="user-avatar">CP</div>
+        <div class="names"><div class="name">Caleb</div><div class="sub">Personal workspace</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="task-main">
+    <div class="task-topbar">
+      <div class="task-topbar-left">
+        <div class="task-breadcrumb">GitHub / whatsapp-ordering-bot / main</div>
+        <div class="task-title-row">Add order tracking to WhatsApp bot</div>
+      </div>
+      <div class="task-topbar-right">
+        <div class="mode-toggle">
+          <button data-arena="mode-chat">◐ Chat</button>
+          <button class="active" data-arena="mode-agent">⚙ Agent</button>
+        </div>
+        <div class="working-indicator"><span class="dot"></span>Orbit is working</div>
+        <div class="pause-btn">⏸ Pause</div>
+      </div>
+    </div>
+
+    <div class="task-status-bar">
+      <span>GitHub / whatsapp-ordering-bot / main · 6 files scanned · 1 approval required</span>
+      <span class="no-push-note">No pushes without approval</span>
+    </div>
+
+    <div class="task-body">
+      <div class="task-work">
+        <div class="task-work-eyebrow">CODING AGENT · IN PROGRESS</div>
+        <h2>Add order tracking to WhatsApp bot</h2>
+        <p class="desc">Add a status field to each order, expose it through the existing order-lookup command, and update the vendor-facing summary so a customer can ask "where's my order" and get a real answer.</p>
+
+        <div class="step-row">
+          <div class="step done">
+            <div class="step-title"><span class="step-icon done">✓</span>Read repository context</div>
+            <div class="step-detail">6 files scanned · order model located</div>
+          </div>
+          <div class="step done">
+            <div class="step-title"><span class="step-icon done">✓</span>Extract order status logic</div>
+            <div class="step-detail">1 shared status helper created</div>
+          </div>
+          <div class="step active">
+            <div class="step-title"><span class="step-icon active">◐</span>Run tests</div>
+            <div class="step-detail">4 tests passing · 2 in progress</div>
+          </div>
+          <div class="step">
+            <div class="step-title"><span class="step-icon pending">○</span>Ready for your review</div>
+            <div class="step-detail">1 file changed · 1 approval required</div>
+          </div>
+        </div>
+
+        <div class="thinking-block" id="thinkingBlock">
+          <span class="brain-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg>
+          </span>
+          <span class="thinking-text" id="thinkingText"></span>
+        </div>
+
+        <div class="changes-card">
+          <div class="changes-card-head">
+            <div><div class="title">Proposed changes</div><div class="sub">1 file changed · 1 approval required</div></div>
+            <div class="draft-badge">Draft proposal</div>
+          </div>
+          <div class="change-row">
+            <div class="file">orders.py</div>
+            <div class="delta">38 → 61</div>
+            <div class="desc-cell">Added <code>status</code> field and lookup-by-status helper</div>
+            <div class="status-tag proposed">Proposed</div>
+          </div>
+          <div class="change-row">
+            <div class="file">bot.py</div>
+            <div class="delta">22 → 30</div>
+            <div class="desc-cell">Wired status into the "where's my order" reply</div>
+            <div class="status-tag checking">Checking</div>
+          </div>
+          <div class="approval-note">🔒 No commits will be pushed without your explicit approval.</div>
+        </div>
+
+        <div class="activity-section">
+          <h4><span>Live activity</span><span>View full activity →</span></h4>
+          <div class="activity-row"><span>Running tests against the updated order lookup…</span><span class="time">just now</span></div>
+          <div class="activity-row"><span>Added status field to the order model.</span><span class="time">1m ago</span></div>
+          <div class="activity-row"><span>Read orders.py and bot.py for current structure.</span><span class="time">3m ago</span></div>
+        </div>
+      </div>
+
+      <div class="task-chat">
+        <div class="task-chat-head">With you, as I work</div>
+        <div class="task-chat-log">
+          <div class="chat-bubble">
+            <div class="who">You · 09:41</div>
+            <div class="body">Add order status tracking. Keep the branch as main and don't push anything — I want to review the diff first.</div>
+          </div>
+          <div class="chat-bubble orbit">
+            <div class="who">
+              <span class="brain-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg>
+              </span>Orbit
+            </div>
+            <div class="body" id="orbitReplyText"></div>
+            <div class="meta">✓ 6 files scanned · building the status helper</div>
+          </div>
+        </div>
+        <div class="task-chat-input">
+          <input type="text" placeholder="Add a thought or steer Orbit…" />
+          <div class="send-btn-round" style="width:26px;height:26px;">➤</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function showScreen(name) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('screen--active'));
+    document.getElementById('screen-' + name).classList.add('screen--active');
+    document.querySelectorAll('.dev-switcher button').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+  }
+
+  /* ===================== streaming-text demo =====================
+     ARENA: this stands in for real token/chunk streaming off
+     reply_stream(). Real implementation reads chunks from the
+     stream as they arrive instead of slicing a known string on a
+     timer — the visual behavior (word-by-word reveal, blinking
+     caret, caret disappears when done) is what to keep. */
+  function streamText(el, fullText, { onDone, msPerWord = 55 } = {}) {
+    const words = fullText.split(' ');
+    let i = 0;
+    el.classList.add('streaming');
+    const tick = () => {
+      if (i >= words.length) {
+        el.classList.remove('streaming');
+        if (onDone) onDone();
+        return;
+      }
+      el.textContent += (i === 0 ? '' : ' ') + words[i];
+      i++;
+      setTimeout(tick, msPerWord + Math.random() * 40);
+    };
+    tick();
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    const thinkingEl = document.getElementById('thinkingText');
+    const thinkingBlock = document.getElementById('thinkingBlock');
+    const replyEl = document.getElementById('orbitReplyText');
+
+    streamText(
+      thinkingEl,
+      "Checking how orders.py currently stores state before adding a new field — the order model is small, so a single status string with a controlled set of values is simpler than a separate status table.",
+      {
+        msPerWord: 38,
+        onDone: () => {
+          thinkingBlock.classList.add('done');
+          setTimeout(() => {
+            streamText(replyEl, "Noted. I'll keep the proposed changes in draft until you approve them. Running tests now before I show you the diff.", { msPerWord: 50 });
+          }, 300);
+        }
+      }
+    );
+  });
+</script>
+
+</body>
+</html>
