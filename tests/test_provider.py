@@ -7,9 +7,21 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from config import Settings, load_settings
+from config import DEFAULT_GEMINI_MODEL, Settings, load_settings
 from providers.base import ChatMessage
 from providers.gemini import GeminiProvider
+
+_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _env_example_values() -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in (_ROOT / ".env.example").read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            name, _, value = line.partition("=")
+            values[name.strip()] = value.strip()
+    return values
 
 
 class FakeModels:
@@ -51,6 +63,35 @@ class SettingsTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "GEMINI_API_KEY"):
                 load_settings()
+
+    def test_example_template_default_model_and_placeholder_stay_consistent(self) -> None:
+        """Guard the drift that broke the last build.
+
+        The template and the code default used to name different models, and the
+        code default named one Google had announced for shutdown. Both are
+        configuration, so both must agree, and the template's key must be
+        rejected rather than sent to the API.
+        """
+        values = _env_example_values()
+        self.assertEqual(values["GEMINI_MODEL"], DEFAULT_GEMINI_MODEL)
+        with patch.dict(os.environ, {"GEMINI_API_KEY": values["GEMINI_API_KEY"]}, clear=True), patch(
+            "config.load_dotenv"
+        ):
+            with self.assertRaisesRegex(RuntimeError, "GEMINI_API_KEY"):
+                load_settings()
+
+    def test_model_id_is_configured_in_exactly_one_code_place(self) -> None:
+        """Model ids live in config.py and .env only — never in a provider or route."""
+        offenders: list[str] = []
+        for path in (_ROOT / "providers").glob("*.py"):
+            for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                if line.lstrip().startswith("#"):
+                    continue
+                if "gemini-" in line.lower():
+                    offenders.append(f"{path.name}:{number}")
+        self.assertEqual(offenders, [], f"hard-coded model id in provider code: {offenders}")
 
 
 class GeminiProviderTests(unittest.TestCase):

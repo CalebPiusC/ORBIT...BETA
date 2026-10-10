@@ -15,9 +15,15 @@ Two rules from Phase 2 are enforced here, not just displayed:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
+
+# Every record in the store carries this id. It is a constant today because
+# there is one user; it exists now because threading it in later means editing
+# every read and write path, and that is the rewrite we are avoiding.
+DEFAULT_USER_ID = os.getenv("ORBIT_USER_ID", "caleb")
 
 ConnectionStatus = Literal["connected", "not_connected"]
 StepStatus = Literal["done", "active", "pending"]
@@ -35,6 +41,9 @@ class Conversation:
     id: str
     title: str
     group: str  # "Today" | "Yesterday" | "Previous 7 days"
+    # Namespaced per person from the start, while there is still only one real
+    # user, so that adding "friends" later is an extension and not a rewrite.
+    user_id: str = DEFAULT_USER_ID
 
 
 @dataclass
@@ -69,6 +78,7 @@ class ChatMessage:
 @dataclass
 class Task:
     id: str
+    user_id: str
     breadcrumb: str
     title: str
     description: str
@@ -84,6 +94,7 @@ class Task:
 class User:
     name: str
     workspace: str
+    id: str = DEFAULT_USER_ID
 
 
 # GitHub is the only real, built connection. Anything else stays visibly
@@ -95,20 +106,21 @@ _SEED_CONNECTIONS: list[Connection] = [
 ]
 
 _SEED_CONVERSATIONS: list[Conversation] = [
-    Conversation(id="c1", title="Add order tracking to WhatsApp bot", group="Today"),
-    Conversation(id="c2", title="Review portfolio site PR", group="Today"),
-    Conversation(id="c3", title="Sync SEN106 issues with plan", group="Yesterday"),
-    Conversation(id="c4", title="Explain this diff before merge", group="Yesterday"),
-    Conversation(id="c5", title="Run branch tests for ordering bot", group="Previous 7 days"),
-    Conversation(id="c6", title="Draft pricing page copy", group="Previous 7 days"),
+    Conversation(id="c1", title="Add order tracking to WhatsApp bot", group="Today", user_id=DEFAULT_USER_ID),
+    Conversation(id="c2", title="Review portfolio site PR", group="Today", user_id=DEFAULT_USER_ID),
+    Conversation(id="c3", title="Sync SEN106 issues with plan", group="Yesterday", user_id=DEFAULT_USER_ID),
+    Conversation(id="c4", title="Explain this diff before merge", group="Yesterday", user_id=DEFAULT_USER_ID),
+    Conversation(id="c5", title="Run branch tests for ordering bot", group="Previous 7 days", user_id=DEFAULT_USER_ID),
+    Conversation(id="c6", title="Draft pricing page copy", group="Previous 7 days", user_id=DEFAULT_USER_ID),
 ]
 
-_SEED_USER = User(name="Caleb", workspace="Personal workspace")
+_SEED_USER = User(name="Caleb", workspace="Personal workspace", id=DEFAULT_USER_ID)
 
 
 def _seed_task() -> Task:
     return Task(
         id="T1",
+        user_id=DEFAULT_USER_ID,
         breadcrumb="GitHub / whatsapp-ordering-bot / main",
         title="Add order tracking to WhatsApp bot",
         description=(
@@ -191,10 +203,20 @@ class Store:
     def connected_count(self) -> int:
         return sum(1 for c in self.connections if c.status == "connected")
 
+    # ----- per-user scoping (single-user today, every read uses it) -----
+    def conversations_for(self, user_id: str = DEFAULT_USER_ID) -> list[Conversation]:
+        return [c for c in self.conversations if c.user_id == user_id]
+
+    def tasks_for(self, user_id: str = DEFAULT_USER_ID) -> list[Task]:
+        return [t for t in self.tasks.values() if t.user_id == user_id]
+
     # ----- conversations -----
     def conversations_grouped(self) -> dict[str, list[Conversation]]:
         groups: dict[str, list[Conversation]] = {}
-        for conv in self.conversations:
+        # Grouping the *current user's* conversations (all of them, while there
+        # is one user) rather than the raw list, so the scoping call is already
+        # on the read path when a second person exists.
+        for conv in self.conversations_for(self.user.id):
             groups.setdefault(conv.group, []).append(conv)
         return groups
 
