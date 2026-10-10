@@ -127,6 +127,19 @@ These are not style preferences. Each one exists because the previous build viol
 9. **Know which entry point you launched.** `run_demo.py` is the stub and says so in its
    banner and in its replies; never conclude "the UI is broken" or "the model is broken"
    before checking which of the two you started.
+10. **Every wait has a deadline and a label; every setup failure names a layer.**
+   `config.DEFAULT_REQUEST_TIMEOUT_SECONDS` (60, overridable via `ORBIT_HTTP_TIMEOUT`) is
+   passed to `types.HttpOptions(timeout=seconds * 1000)` on the client, so it covers
+   `reply()` and `reply_stream()` alike. The `* 1000` is milliseconds and is pinned by a
+   test — do not "simplify" it, and do not delete it: leaving `timeout` unset is **not**
+   neutral. The SDK then hands `timeout=None` to httpx, and an explicit `None` disables
+   the timeout instead of falling back to httpx's 5s client default, so a blocked
+   connection blocks forever. That is the bug this rule exists for, and it was verified
+   offline against a socket that accepts and then stays silent: hangs without a timeout,
+   raises at the deadline with one. Before blocking, `chat.py` prints
+   `waiting on <model> — Ctrl-C cancels this turn`, and `python chat.py --check` walks
+   config → network → model and names the first failing layer. `--check` masks the key to
+   its first four characters and never raises a traceback.
 
 ---
 
@@ -146,6 +159,7 @@ a live key in this checkout. Say so in any status report instead of implying oth
   (`system_instruction`, `function_declarations`, no `temperature`/`top_p`/`top_k`/
   `thinking_budget` — several of those are being deprecated as parameters, so leaving
   them out is deliberate; do not add them back).
+- **The setup check has never run against a live endpoint.** `python chat.py --check` was exercised with an injected provider and an injected connector, and its mechanism (that an unset `HttpOptions.timeout` means an unbounded wait) was proven against a silent local socket. What is unproven is the shape of a *real* failure: a genuinely firewalled host, a real `401`, a real `404`. The hint text in `chat._model_hint` is reasoned from the error names, not observed from one.
 - **Nothing in §0.4 has been seen in a real browser.** The client behavior was verified by
   serving the app and driving the rendered pages in jsdom (Enter and click both reach
   `/api/chat`, the reply lands in the thread, each failure prints a notice, the task view

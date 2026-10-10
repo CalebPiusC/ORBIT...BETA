@@ -29,6 +29,20 @@ _THINK_OPEN = "<thinking>"
 _THINK_CLOSE = "</thinking>"
 
 
+def timeout_millis(seconds: float) -> int:
+    """Convert a deadline in seconds to the milliseconds HttpOptions expects.
+
+    The ``* 1000`` is not decoration and must not be "simplified" away:
+    ``HttpOptions.timeout`` is documented in milliseconds, and the SDK divides
+    it by 1000 before handing it to httpx. More importantly, leaving it unset
+    is not neutral — the SDK then passes ``timeout=None`` to httpx, and an
+    explicit ``None`` disables the timeout instead of falling back to the
+    client default, so a blocked connection hangs forever with no reply and no
+    error.
+    """
+    return int(seconds * 1000)
+
+
 class GeminiProvider(ChatProvider):
     """Send chat history to Gemini and run declared tools only through a gate."""
 
@@ -45,7 +59,14 @@ class GeminiProvider(ChatProvider):
 
         if client is None:
             settings = load_settings()
-            self._client = genai.Client(api_key=settings.gemini_api_key)
+            # The deadline is set on the client, so it applies to reply() and
+            # to reply_stream() alike — every request this provider makes.
+            self._client = genai.Client(
+                api_key=settings.gemini_api_key,
+                http_options=types.HttpOptions(
+                    timeout=timeout_millis(settings.request_timeout_seconds)
+                ),
+            )
             self.model = model or settings.gemini_model
         else:
             # Client injection keeps provider tests offline; normal use always

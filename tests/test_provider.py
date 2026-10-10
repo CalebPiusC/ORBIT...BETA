@@ -7,9 +7,18 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from config import DEFAULT_GEMINI_MODEL, Settings, load_settings
+from google.genai import types
+
+from config import (
+    DEFAULT_GEMINI_MODEL,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    TIMEOUT_ENV_VAR,
+    Settings,
+    load_settings,
+    read_timeout_seconds,
+)
 from providers.base import ChatMessage
-from providers.gemini import GeminiProvider
+from providers.gemini import GeminiProvider, timeout_millis
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -130,8 +139,77 @@ class GeminiProviderTests(unittest.TestCase):
             provider = GeminiProvider()
             provider.reply([ChatMessage(role="user", content="ping")], "Test prompt.")
 
-        make_client.assert_called_once_with(api_key="local-test-key")
+        make_client.assert_called_once()
+        self.assertEqual(make_client.call_args.kwargs["api_key"], "local-test-key")
+        # A client with no deadline is the bug this replaced: the SDK would pass
+        # timeout=None to httpx, which disables the wait limit entirely.
+        self.assertEqual(make_client.call_args.kwargs["http_options"].timeout, 60_000)
         self.assertEqual(client.models.request["model"], "configured-model")  # type: ignore[index]
+
+    def test_every_request_has_a_deadline(self) -> None:
+        """No code path may build a client without ``http_options.timeout``."""
+        settings = Settings(gemini_api_key="local-test-key", request_timeout_seconds=12.5)
+        with patch("providers.gemini.load_settings", return_value=settings), patch(
+            "providers.gemini.genai.Client", return_value=FakeClient()
+        ) as make_client:
+            GeminiProvider()
+
+        options = make_client.call_args.kwargs["http_options"]
+        self.assertIsInstance(options, types.HttpOptions)
+        self.assertEqual(options.timeout, 12_500)
+
+    def test_deadline_is_converted_to_milliseconds(self) -> None:
+        """HttpOptions.timeout is MILLISECONDS. The *1000 is the point of it.
+
+        Sending seconds here would ask for a 60-millisecond deadline and every
+        request would fail instantly; the failure would look like a network
+        problem and read nothing like a unit error.
+        """
+        self.assertEqual(timeout_millis(60), 60_000)
+        self.assertEqual(timeout_millis(1.5), 1_500)
+        self.assertEqual(timeout_millis(DEFAULT_REQUEST_TIMEOUT_SECONDS), 60_000)
+
+
+class RequestTimeoutTests(unittest.TestCase):
+    def test_default_deadline_is_sixty_seconds(self) -> None:
+        self.assertEqual(DEFAULT_REQUEST_TIMEOUT_SECONDS, 60)
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "local-test-key"}, clear=True), patch(
+            "config.load_dotenv"
+        ):
+            self.assertEqual(load_settings().request_timeout_seconds, 60)
+
+    def test_deadline_is_overridable_from_the_environment(self) -> None:
+        env = {"GEMINI_API_KEY": "local-test-key", TIMEOUT_ENV_VAR: "12.5"}
+        with patch.dict(os.environ, env, clear=True), patch("config.load_dotenv"):
+            self.assertEqual(load_settings().request_timeout_seconds, 12.5)
+
+    def test_a_bad_deadline_is_rejected_rather_than_ignored(self) -> None:
+        """A typo must not quietly become an unbounded wait.
+
+        Silently falling back to the default would be the same silent-failure
+        shape as having no deadline at all, just harder to notice.
+        """
+        for bad in ("0", "-5", "abc", "nan", "inf"):
+            env = {"GEMINI_API_KEY": "local-test-key", TIMEOUT_ENV_VAR: bad}
+            with patch.dict(os.environ, env, clear=True), patch("config.load_dotenv"):
+                with self.assertRaisesRegex(RuntimeError, "ORBIT_HTTP_TIMEOUT"):
+                    load_settings()
+
+    def test_an_unset_deadline_falls_back_to_the_default(self) -> None:
+        self.assertEqual(read_timeout_seconds(None), DEFAULT_REQUEST_TIMEOUT_SECONDS)
+        self.assertEqual(read_timeout_seconds(""), DEFAULT_REQUEST_TIMEOUT_SECONDS)
+        self.assertEqual(read_timeout_seconds("   "), DEFAULT_REQUEST_TIMEOUT_SECONDS)
+
+    def test_example_template_names_the_same_deadline_as_the_code(self) -> None:
+        """Model ids taught us this lesson: config lives in two files, so pin it.
+
+        .env.example and config.py drifted apart once already (handoff §0.2).
+        """
+        values = _env_example_values()
+        self.assertEqual(values[TIMEOUT_ENV_VAR], "60")
+        self.assertEqual(
+            read_timeout_seconds(values[TIMEOUT_ENV_VAR]), DEFAULT_REQUEST_TIMEOUT_SECONDS
+        )
 
     def test_rejects_empty_or_invalid_chat_input(self) -> None:
         provider = GeminiProvider(client=FakeClient())

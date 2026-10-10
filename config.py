@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,11 +16,48 @@ DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 ENV_FILE = Path(__file__).resolve().parent / ".env"
 _PLACEHOLDER_KEYS = {"your-key-here", "your_api_key_here", "replace-me", "changeme"}
 
+# Every request to the model gets a deadline. Without one the SDK forwards
+# ``timeout=None`` to httpx, and an explicit None does not fall back to the
+# client default — it disables the timeout outright, so a firewalled or
+# black-holed connection blocks forever with no reply and no error. That is a
+# silent failure, and it is the whole reason this setting exists. Raise it for
+# slow links, never remove it.
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 60.0
+TIMEOUT_ENV_VAR = "ORBIT_HTTP_TIMEOUT"
+_TIMEOUT_ENV_FILE = "ORBIT_HTTP_TIMEOUT in .env"
+
+
+def read_timeout_seconds(raw: str | None) -> float:
+    """Turn ``ORBIT_HTTP_TIMEOUT`` into a deadline in seconds.
+
+    Unset or blank means "use the default". A value that is not a positive,
+    finite number is a configuration mistake, not a request to disable the
+    deadline, so it is rejected loudly here rather than silently becoming an
+    unbounded wait at the network layer.
+    """
+    if raw is None or not raw.strip():
+        return DEFAULT_REQUEST_TIMEOUT_SECONDS
+
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        raise RuntimeError(
+            f"{_TIMEOUT_ENV_FILE} must be a number of seconds, got {raw.strip()!r}."
+        ) from None
+
+    if not math.isfinite(value) or value <= 0:
+        raise RuntimeError(
+            f"{_TIMEOUT_ENV_FILE} must be a positive number of seconds, got {raw.strip()!r}. "
+            "Zero or negative would disable the deadline and let a request hang forever."
+        )
+    return value
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
     gemini_api_key: str = field(repr=False)
     gemini_model: str = DEFAULT_GEMINI_MODEL
+    request_timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS
 
 
 def load_settings() -> Settings:
@@ -42,4 +80,10 @@ def load_settings() -> Settings:
     if not model:
         model = DEFAULT_GEMINI_MODEL
 
-    return Settings(gemini_api_key=api_key, gemini_model=model)
+    timeout = read_timeout_seconds(os.getenv(TIMEOUT_ENV_VAR))
+
+    return Settings(
+        gemini_api_key=api_key,
+        gemini_model=model,
+        request_timeout_seconds=timeout,
+    )
