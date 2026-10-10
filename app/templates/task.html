@@ -143,12 +143,31 @@
         </div>
         <div class="task-chat-input">
           <input type="text" id="taskInput" placeholder="Add a thought or steer Orbit…" />
-          <div class="send-btn-round" id="taskSend" style="width:26px;height:26px;">➤</div>
+          <button type="button" class="send-btn-round" id="taskSend" style="width:26px;height:26px;" aria-label="Send message">➤</button>
         </div>
       </div>
     </div>
   </div>
 </div>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
-<script>Orbit.bootstrapTask("{{ task.id }}");</script>
+<script>
+  (function () {
+    try {
+      if (typeof Orbit === "undefined" || !Orbit || typeof Orbit.bootstrapTask !== "function") {
+        throw new Error("app.js did not load (window.Orbit is missing).");
+      }
+      // initialTurn: the server says whether this task still needs its opening
+      // update, so a refresh does not re-ask the model and duplicate it.
+      Orbit.bootstrapTask("{{ task.id }}", { initialTurn: {{ "true" if stream_initial else "false" }} });
+    } catch (err) {
+      var log = document.getElementById("taskChatLog");
+      if (log) {
+        var msg = document.createElement("div");
+        msg.className = "notice error";
+        msg.textContent = "The chat UI did not start: " + (err && err.message ? err.message : err);
+        log.appendChild(msg);
+      }
+    }
+  })();
+</script>
 {% endblock %}

@@ -106,11 +106,17 @@ def create_app(provider: Any | None = None, store: Store | None = None) -> Flask
         task_obj = st.get_task(task_id)
         if task_obj is None:
             return render_template("task_not_found.html", task_id=task_id), 404
+        # The opening update is a real model call. Re-asking for it on every
+        # page load would spend a call per refresh and append a duplicate
+        # message to the thread, so it runs only while the task has no Orbit
+        # reply yet.
+        stream_initial = not any(m.is_orbit for m in task_obj.chat)
         return render_template(
             "task.html",
             user=st.user,
             mode=st.mode,
             task=task_obj,
+            stream_initial=stream_initial,
             connections=st.connections,
             connected_count=st.connected_count(),
             conversations=st.conversations_grouped(),
@@ -237,16 +243,30 @@ def create_app(provider: Any | None = None, store: Store | None = None) -> Flask
         @stream_with_context
         def generate() -> Iterator[str]:
             answer_parts: list[str] = []
+            saw_thinking = False
+            failed = False
             try:
                 for chunk in chunk_source():
                     if chunk.kind == "thinking":
+                        saw_thinking = True
                         yield _sse("thinking", chunk.text)
                     else:
                         yield _sse("answer", chunk.text)
                         answer_parts.append(chunk.text)
-                yield _sse("done", "")
             except Exception as exc:  # surface provider/SDK errors to the UI
+                failed = True
                 yield _sse("error", str(exc))
+            if not failed and not answer_parts and not saw_thinking:
+                # A turn that produced literally nothing looks identical to a
+                # hung UI. Say so instead — this is the run_demo stub case and
+                # any provider that streams empty chunks.
+                yield _sse(
+                    "error",
+                    "The provider returned an empty reply. If this is run_demo.py "
+                    "you are on the stub, not Gemini; with a real key check "
+                    "GEMINI_MODEL and GEMINI_API_KEY in .env.",
+                )
+            yield _sse("done", "")
             on_done("".join(answer_parts))
 
         return Response(

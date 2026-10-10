@@ -8,7 +8,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+# Model choice lives here and in .env only — never hard-coded in a provider.
+# gemini-2.5-flash was retired-by-announcement on 2026-10-20, so it is no
+# longer the default. Keep this value in sync with .env.example.
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 ENV_FILE = Path(__file__).resolve().parent / ".env"
 _PLACEHOLDER_KEYS = {"your-key-here", "your_api_key_here", "replace-me", "changeme"}
 
@@ -24,7 +27,13 @@ def load_settings() -> Settings:
     load_dotenv(dotenv_path=ENV_FILE, override=False)
 
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key or api_key.casefold() in _PLACEHOLDER_KEYS:
+    # The placeholder is matched by name, not by shape: an untouched .env.example
+    # must fail loudly here rather than surface later as a 401 from the API.
+    if (
+        not api_key
+        or api_key.casefold() in _PLACEHOLDER_KEYS
+        or api_key.casefold().startswith("your_")
+    ):
         raise RuntimeError(
             "GEMINI_API_KEY is not configured. Copy .env.example to .env and add your key."
         )

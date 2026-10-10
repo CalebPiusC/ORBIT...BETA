@@ -154,7 +154,11 @@
     width: 32px; height: 32px; border-radius: 50%;
     background: var(--accent); border: none; color: #16110c;
     display: flex; align-items: center; justify-content: center; cursor: pointer;
+    /* The mockup drew this as a div; as a real <button> it must not inherit
+       the browser's button font/padding, and it needs a visible focus ring. */
+    font: inherit; padding: 0;
   }
+  .send-btn-round:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-soft, rgba(255,255,255,.25)); }
 
   .suggestion-chips { display: flex; gap: 8px; margin-top: 16px; }
   .chip {
@@ -296,6 +300,16 @@
     margin-bottom: 14px; max-height: 40vh; overflow-y: auto;
   }
   .home-thread.visible { display: flex; }
+
+  /* failure and empty-turn lines — an unanswered turn must never look idle */
+  .chat-bubble .notice, .home-thread > .notice {
+    font-size: 11.5px; line-height: 1.45; color: var(--text-dim);
+    font-style: italic;
+  }
+  .chat-bubble .notice.error, .home-thread > .notice.error {
+    color: #e0655f; font-style: normal;
+  }
+  .chat-bubble .notice.warn { color: #c9a227; font-style: normal; }
 </style>
 </head>
 <body>
