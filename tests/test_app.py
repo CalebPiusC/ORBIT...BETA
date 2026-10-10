@@ -20,7 +20,7 @@ class FakeStreamingProvider:
         return "A canned one-shot reply."
 
     def reply_stream(
-        self, history, system_prompt: str, *, think: bool = False
+        self, history, system_prompt: str, *, think: bool = False, report_attempts: bool = False
     ) -> Iterator[StreamChunk]:
         if think:
             yield StreamChunk(kind="thinking", text="I am checking the repository context.")
@@ -247,7 +247,7 @@ class SilentFailureTests(unittest.TestCase):
 
     def test_empty_reply_is_reported_instead_of_streaming_nothing(self) -> None:
         class EmptyProvider:
-            def reply_stream(self, history, system_prompt, *, think=False):
+            def reply_stream(self, history, system_prompt, *, think=False, report_attempts=False):
                 return iter(())
 
         events, store = self._events(EmptyProvider())
@@ -260,7 +260,7 @@ class SilentFailureTests(unittest.TestCase):
 
     def test_provider_failure_before_first_chunk_reaches_the_ui(self) -> None:
         class BrokenProvider:
-            def reply_stream(self, history, system_prompt, *, think=False):
+            def reply_stream(self, history, system_prompt, *, think=False, report_attempts=False):
                 raise RuntimeError("GEMINI_API_KEY is not configured.")
 
         events, store = self._events(BrokenProvider())
@@ -391,6 +391,78 @@ class DesignMockupSyncTests(unittest.TestCase):
         self.assertIn('class="chat-row user"', mock_text)
         self.assertIn('class="chat-row orbit"', mock_text)
         self.assertIn('class="chat-meta"', mock_text)
+
+
+class RecordingProvider:
+    """Yields the given pieces as answers, recording how many have left so far."""
+
+    def __init__(self, pieces: list[str]) -> None:
+        self.pieces = pieces
+        self.produced = 0
+        self.calls: list[dict[str, Any]] = []
+
+    def reply(self, history, system_prompt: str) -> str:
+        return "".join(self.pieces)
+
+    def reply_stream(self, history, system_prompt: str, *, think: bool = False, report_attempts: bool = False):
+        self.calls.append({"think": think, "report_attempts": report_attempts})
+        if report_attempts:
+            yield StreamChunk(kind="status", text="Asking Chidi…")
+        for piece in self.pieces:
+            self.produced += 1
+            yield StreamChunk(kind="answer", text=piece)
+
+
+def events_as_they_arrive(client, url: str, body: dict, provider: RecordingProvider):
+    """Read a streamed response piece by piece; return (event, pieces produced at arrival)."""
+    resp = client.post(url, json=body, buffered=False)
+    buffer = ""
+    seen: list[tuple[str, int]] = []
+    for piece in resp.response:
+        buffer += piece.decode("utf-8") if isinstance(piece, bytes) else piece
+        while "\n\n" in buffer:
+            block, buffer = buffer.split("\n\n", 1)
+            for event, _data in parse_sse(block + "\n\n"):
+                seen.append((event, provider.produced))
+    return seen
+
+
+class RouteStreamingTests(unittest.TestCase):
+    PIECES = ["Hel", "lo ", "there, ", "Caleb."]
+
+    def _client(self, provider):
+        return create_app(provider=provider, store=Store()).test_client()
+
+    def test_home_answer_reaches_the_client_piece_by_piece(self) -> None:
+        provider = RecordingProvider(self.PIECES)
+        seen = events_as_they_arrive(self._client(provider), "/api/chat", {"message": "hi"}, provider)
+        answers = [produced for event, produced in seen if event == "answer"]
+        self.assertEqual(len(answers), len(self.PIECES))
+        self.assertLess(answers[0], len(self.PIECES))  # first piece left before the end
+
+    def test_task_answer_reaches_the_client_piece_by_piece(self) -> None:
+        provider = RecordingProvider(self.PIECES)
+        seen = events_as_they_arrive(
+            self._client(provider), "/api/task/T1/stream", {"message": "steer"}, provider
+        )
+        answers = [produced for event, produced in seen if event == "answer"]
+        self.assertEqual(len(answers), len(self.PIECES))
+        self.assertLess(answers[0], len(self.PIECES))
+
+    def test_chat_mode_never_asks_for_status_lines(self) -> None:
+        provider = RecordingProvider(self.PIECES)
+        seen = events_as_they_arrive(self._client(provider), "/api/chat", {"message": "hi"}, provider)
+        self.assertNotIn("status", [event for event, _ in seen])
+        self.assertEqual(provider.calls, [{"think": False, "report_attempts": False}])
+
+    def test_agent_mode_asks_for_status_lines_and_shows_them(self) -> None:
+        provider = RecordingProvider(self.PIECES)
+        seen = events_as_they_arrive(
+            self._client(provider), "/api/task/T1/stream", {"message": "steer"}, provider
+        )
+        self.assertEqual(provider.calls, [{"think": True, "report_attempts": True}])
+        self.assertIn("status", [event for event, _ in seen])
+        self.assertEqual(seen[0][0], "status")
 
 
 if __name__ == "__main__":

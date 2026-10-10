@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
 import httpx
@@ -13,6 +13,7 @@ from google.genai.errors import APIError
 
 from config import DEFAULT_GEMINI_FALLBACK_MODEL, DEFAULT_GEMINI_MODEL, load_settings
 from providers.base import ChatMessage, ChatProvider, StreamChunk
+from providers.personas import slot_name
 from tools.registry import AuditLog, ToolRegistry
 
 # The only failures the fallback model is allowed to get past: the server
@@ -61,6 +62,15 @@ def _fallback_reason(exc: BaseException) -> str | None:
     if isinstance(exc, httpx.TransportError):
         return type(exc).__name__
     return None
+
+
+def _describe_failure(reason: str) -> str:
+    """Plain words for a fallback reason, for the Agent-mode status line."""
+    if reason.isdigit():
+        return f"Google returned {reason}"
+    if "Timeout" in reason:
+        return "the request timed out"
+    return "the connection failed"
 
 
 def _failure_label(exc: BaseException) -> str:
@@ -191,14 +201,19 @@ class GeminiProvider(ChatProvider):
         self,
         contents: list[types.Content],
         config: types.GenerateContentConfig,
+        notify: Callable[[str], None] | None = None,
     ) -> Iterator[Any]:
         """Yield SDK stream responses, failing over only before the first chunk.
 
         Once any chunk has reached the user, a failure is surfaced rather than
         restarted on the fallback, because a restart would repeat the text
-        already shown.
+        already shown. ``notify`` receives a short status line before each
+        model is asked, and when the primary has failed.
         """
+        say = notify or (lambda _text: None)
+        primary_name = slot_name(0)
         model = self.model
+        say(f"Asking {primary_name}…")
         started = time.monotonic()
         try:
             stream, first = self._open_stream(model, contents, config)
@@ -208,6 +223,10 @@ class GeminiProvider(ChatProvider):
             if not (reason and self.fallback_model):
                 raise
             model = self.fallback_model
+            say(
+                f"{primary_name} didn't answer ({_describe_failure(reason)}). "
+                f"Asking {slot_name(1)}…"
+            )
             started = time.monotonic()
             try:
                 stream, first = self._open_stream(model, contents, config)
@@ -320,6 +339,7 @@ class GeminiProvider(ChatProvider):
         system_prompt: str,
         *,
         think: bool = False,
+        report_attempts: bool = False,
     ) -> Iterator[StreamChunk]:
         """Stream the reply chunk by chunk instead of returning it all at once.
 
@@ -360,15 +380,30 @@ class GeminiProvider(ChatProvider):
 
         config = types.GenerateContentConfig(system_instruction=call_prompt)
 
-        response_iter = self._stream_responses(contents, config)
+        # Status lines are queued by the stream as it opens and flushed in order
+        # ahead of the next text piece, so they never interleave a reply chunk.
+        pending: list[StreamChunk] = []
+        notify: Callable[[str], None] | None = None
+        if report_attempts:
+            def notify(text: str) -> None:
+                pending.append(StreamChunk(kind="status", text=text))
+        response_iter = self._stream_responses(contents, config, notify=notify)
 
-        text_iter = (_chunk_text(response) for response in response_iter)
-        if think:
-            yield from _split_thinking(text_iter)
-        else:
-            for text in text_iter:
+        def texts() -> Iterator[str]:
+            for response in response_iter:
+                text = _chunk_text(response)
                 if text:
-                    yield StreamChunk(kind="answer", text=text)
+                    yield text
+
+        pieces = _split_thinking(texts()) if think else (
+            StreamChunk(kind="answer", text=text) for text in texts()
+        )
+        for piece in pieces:
+            yield from pending
+            pending.clear()
+            yield piece
+        yield from pending
+        pending.clear()
 
     def _generation_config(self, system_prompt: str) -> types.GenerateContentConfig:
         config: dict[str, Any] = {"system_instruction": system_prompt}
@@ -404,23 +439,22 @@ def _split_thinking(chunks: Iterator[str]) -> Iterator[StreamChunk]:
 
     Expects the model to wrap its plain-language reasoning in
     ``<thinking>…</thinking>`` and put the answer afterwards. Emits the
-    thinking portion as it arrives (progressive reveal) and flips to the
-    answer once the closing tag is seen. If no opening tag appears, the whole
-    stream is treated as the answer. If a tag opens but never closes, whatever
-    was emitted as thinking stays as thinking.
+    thinking portion as it arrives (progressive reveal) and emits the answer
+    as it arrives too, so the reply streams instead of landing at the end. If
+    no opening tag appears, the whole stream is the answer. If a tag opens but
+    never closes, whatever was emitted as thinking stays as thinking.
     """
     state: str = "unknown"  # "unknown" -> "thinking" -> "answer"
     tail = ""
-    answer = ""
 
     for chunk in chunks:
         if not chunk:
             continue
         buf = tail + chunk
+        tail = ""
 
         if state == "answer":
-            answer += buf
-            tail = ""
+            yield StreamChunk(kind="answer", text=buf)
             continue
 
         if state == "unknown":
@@ -434,8 +468,7 @@ def _split_thinking(chunks: Iterator[str]) -> Iterator[StreamChunk]:
             else:
                 # No thinking tag at all -> straight to the answer.
                 state = "answer"
-                answer += buf
-                tail = ""
+                yield StreamChunk(kind="answer", text=buf)
                 continue
 
         # state == "thinking"
@@ -444,9 +477,10 @@ def _split_thinking(chunks: Iterator[str]) -> Iterator[StreamChunk]:
             pre = buf[:close_index]
             if pre:
                 yield StreamChunk(kind="thinking", text=pre)
-            answer = buf[close_index + len(_THINK_CLOSE):]
             state = "answer"
-            tail = ""
+            after = buf[close_index + len(_THINK_CLOSE):]
+            if after:
+                yield StreamChunk(kind="answer", text=after)
         else:
             # Keep the last (len(close)-1) chars in case they begin the close tag.
             keep = len(_THINK_CLOSE) - 1
@@ -459,5 +493,7 @@ def _split_thinking(chunks: Iterator[str]) -> Iterator[StreamChunk]:
 
     if state == "thinking" and tail:
         yield StreamChunk(kind="thinking", text=tail)
-    if answer:
-        yield StreamChunk(kind="answer", text=answer)
+    elif state == "unknown" and tail:
+        # The stream ended while holding a possible opening tag. It was never a
+        # tag, so it is plain answer text. Dropping it would lose the reply's end.
+        yield StreamChunk(kind="answer", text=tail)

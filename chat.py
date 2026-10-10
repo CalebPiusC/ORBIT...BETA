@@ -279,7 +279,50 @@ def run_check(
     preview = " ".join(str(reply).split())[:80]
     answered_by = getattr(target, "last_model_used", None) or getattr(target, "model", "?")
     write(f"[model] ok after {elapsed:.1f}s — answered by {answered_by} — replied: {preview}")
+
+    # 4. stream — does the reply arrive piece by piece, the way the UI shows it?
+    if hasattr(target, "reply_stream"):
+        code = _probe_stream(target, key, write)
+        if code != EXIT_OK:
+            return code
+    else:
+        write("[stream] skipped — this provider cannot stream.")
     write("All three layers passed. If the REPL still seems to hang, the wait is the model, not your setup.")
+    return EXIT_OK
+
+
+def _probe_stream(target: Any, key: str, write: Callable[[str], None]) -> int:
+    """Stream one ping through the real reply_stream() and report how it arrived."""
+    started = time.monotonic()
+    arrivals: list[tuple[float, str]] = []
+    try:
+        for chunk in target.reply_stream(
+            [ChatMessage(role="user", content="ping")], system_prompt=CHECK_PROMPT
+        ):
+            if chunk.kind == "answer" and chunk.text:
+                arrivals.append((time.monotonic() - started, chunk.text))
+    except KeyboardInterrupt:
+        write("")
+        write("[stream] cancelled.")
+        return EXIT_MODEL
+    except Exception as exc:
+        write(f"[stream] FAIL — {_redact(str(exc), key)}")
+        return EXIT_MODEL
+    if not arrivals:
+        write("[stream] FAIL — the stream ended with no reply text.")
+        return EXIT_MODEL
+
+    total = time.monotonic() - started
+    sizes = [len(text) for _, text in arrivals]
+    average = sum(sizes) / len(sizes)
+    answered_by = getattr(target, "last_model_used", None) or getattr(target, "model", "?")
+    write(
+        f"[stream] ok — {len(arrivals)} pieces in {total:.1f}s; first piece after "
+        f"{arrivals[0][0]:.1f}s; average {average:.0f} characters per piece "
+        f"(largest {max(sizes)}); answered by {answered_by}"
+    )
+    if average > 15:
+        write("         Pieces this size hold several words each. That is the model's chunk size, not a delay.")
     return EXIT_OK
 
 

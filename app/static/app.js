@@ -199,6 +199,18 @@
       .replace(/>/g, "&gt;");
   }
 
+  // Agent-mode status lines ("Asking Chidi…") go into the task's live activity
+  // feed, newest first, the same order the server renders saved activity in.
+  function addActivity(text) {
+    var section = document.getElementById("taskActivity");
+    if (!section) return;
+    var row = el("div", "activity-row");
+    row.appendChild(el("span", null, escapeHtml(text)));
+    row.appendChild(el("span", "time", nowLabel()));
+    var heading = section.querySelector("h4");
+    section.insertBefore(row, heading ? heading.nextSibling : section.firstChild);
+  }
+
   // --- mode toggle (Chat / Agent) ----------------------------------------
   function wireModeToggles() {
     var buttons = document.querySelectorAll(".mode-toggle button[data-mode]");
@@ -324,7 +336,9 @@
         "/api/task/" + encodeURIComponent(taskId) + "/stream",
         { message: opts.message || "", initial: !!opts.initial },
         function (event, data) {
-          if (event === "thinking") {
+          if (event === "status") {
+            addActivity(data);
+          } else if (event === "thinking") {
             if (!targetThink) return;
             revealThinking();
             targetThink.textContent += data;

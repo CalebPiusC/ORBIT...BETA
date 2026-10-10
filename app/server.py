@@ -191,7 +191,10 @@ def create_app(provider: Any | None = None, store: Store | None = None) -> Flask
         history = _history_from_thread(task_obj.chat, extra_user=extra_user)
 
         def chunk_source() -> Iterator[StreamChunk]:
-            return get_provider().reply_stream(history, TASK_SYSTEM_PROMPT, think=True)
+            # Agent mode names the model being asked (report_attempts); Chat does not.
+            return get_provider().reply_stream(
+                history, TASK_SYSTEM_PROMPT, think=True, report_attempts=True
+            )
 
         def on_done(answer: str) -> None:
             if answer:
@@ -250,7 +253,10 @@ def create_app(provider: Any | None = None, store: Store | None = None) -> Flask
             failed = False
             try:
                 for chunk in chunk_source():
-                    if chunk.kind == "thinking":
+                    if chunk.kind == "status":
+                        # Agent mode only: which model is being asked. Not reply text.
+                        yield _sse("status", chunk.text)
+                    elif chunk.kind == "thinking":
                         saw_thinking = True
                         yield _sse("thinking", chunk.text)
                     else:

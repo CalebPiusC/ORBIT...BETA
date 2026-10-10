@@ -12,7 +12,7 @@ from chat import (
     run_check,
     run_session,
 )
-from providers.base import ChatMessage
+from providers.base import ChatMessage, StreamChunk
 
 
 class ScriptedProvider:
@@ -170,6 +170,42 @@ class SetupCheckTests(unittest.TestCase):
         self.assertIn("[config] ok", text)
         self.assertIn("[network] ok", text)
         self.assertIn("[model] ok", text)
+
+    def _streaming_provider(self, pieces=None, error=None):
+        class StreamingOk:
+            model = "gemini-test-model"
+            last_model_used = "gemini-test-model"
+
+            def reply(self, history, system_prompt: str) -> str:
+                return "pong"
+
+            def reply_stream(self, history, system_prompt: str, **_kwargs):
+                if error is not None:
+                    raise error
+                for text in pieces or ["pong ", "to ", "you."]:
+                    yield StreamChunk(kind="answer", text=text)
+
+        return StreamingOk()
+
+    def test_check_reports_how_the_reply_streamed(self) -> None:
+        provider = self._streaming_provider()
+        code, text = self._check(**{**self._all_passing(), "provider": provider})
+        self.assertEqual(code, 0)
+        self.assertIn("[stream] ok — 3 pieces", text)
+        self.assertIn("answered by gemini-test-model", text)
+        self.assertIn("All three layers passed", text)
+
+    def test_check_fails_when_the_stream_fails_after_a_good_reply(self) -> None:
+        provider = self._streaming_provider(error=RuntimeError("stream broke"))
+        code, text = self._check(**{**self._all_passing(), "provider": provider})
+        self.assertNotEqual(code, 0)
+        self.assertIn("[stream] FAIL — stream broke", text)
+        self.assertNotIn("All three layers passed", text)
+
+    def test_check_says_so_when_the_provider_cannot_stream(self) -> None:
+        code, text = self._check(**self._all_passing())  # OkProvider has no reply_stream
+        self.assertEqual(code, 0)
+        self.assertIn("[stream] skipped", text)
 
     def test_the_key_is_masked_in_every_branch(self) -> None:
         """No full credential in any output, including the failure paths."""

@@ -12,7 +12,9 @@ ChatRole = Literal["user", "assistant"]
 # A streamed chunk from the model. ``kind`` is ``"thinking"`` when Orbit is
 # narrating its own plain-language reasoning as it works, and ``"answer"`` for
 # the final reply. See ``ChatProvider.reply_stream`` for the contract.
-StreamKind = Literal["thinking", "answer"]
+# ``"status"`` is a line about which model is being asked (Agent mode only; see
+# ``report_attempts``). It is never part of the reply text.
+StreamKind = Literal["thinking", "answer", "status"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +55,7 @@ class ChatProvider(ABC):
         system_prompt: str,
         *,
         think: bool = False,
+        report_attempts: bool = False,
     ) -> Iterator[StreamChunk]:
         """Yield the reply as it is generated, chunk by chunk.
 
@@ -66,5 +69,10 @@ class ChatProvider(ABC):
         language first (``kind="thinking"``) and then streams the final answer
         (``kind="answer"``). Providers that cannot stream may raise
         ``NotImplementedError``; ``GeminiProvider`` implements it for real.
+
+        When ``report_attempts`` is True, the provider also yields
+        ``kind="status"`` chunks as it asks each model (for example "Asking
+        Chidi…", then a fallback notice). Chat mode leaves it False, so no
+        status line appears there.
         """
         raise NotImplementedError

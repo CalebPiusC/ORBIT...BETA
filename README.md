@@ -26,6 +26,8 @@ Set `GEMINI_API_KEY` in `.env` to your own key. `GEMINI_MODEL` defaults to `gemi
 
 `GEMINI_FALLBACK_MODEL` defaults to `gemini-3.8-flash` (`config.DEFAULT_GEMINI_FALLBACK_MODEL`). It is tried **once**, and only when the primary fails with 503/504 or a network error, and only before any tool has run. Leave it blank in `.env` to disable it. Every model that answers, and every failed attempt, is written to `audit.log` as a `model_answered` or `model_attempt_failed` line.
 
+**Model names in Agent mode.** The primary model is called **Chidi** and the fallback **Ada**. Names are handed out in slot order (`providers/personas.py`): Obi, Chika, Zara, Jiden, Oma come next for future models or providers. In Agent mode the Live activity list shows lines such as `Asking Chidi…`, and `Chidi didn't answer (Google returned 503). Asking Ada…` on a fallback. Chat mode never shows names or these lines.
+
 `ORBIT_HTTP_TIMEOUT` (default `60`, seconds) is the deadline for **every** request to the model. Leave it set. Without a deadline the SDK asks httpx to wait forever, so a firewalled or black-holed connection hangs with no reply and no error — "it is thinking" and "it is stuck" become the same thing. Raise it on a slow link; never remove it.
 
 ## Two ways to talk to Orbit
