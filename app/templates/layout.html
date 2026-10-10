@@ -6,31 +6,35 @@
 <title>{% block title %}ORBIT{% endblock %}</title>
 <style>
   /* ===========================================================
-     ORBIT — home screen + coding-agent task view, in dark blue.
-     Palette and structure are carried over verbatim from
-     design/orbit_mockup.html (the reference mockup). The dev-only
-     screen switcher from the mockup is removed; each screen is now
-     its own route/template. Do not redesign this CSS.
+     ORBIT — home screen + coding-agent task view, in Midnight Navy
+     with Soft Copper accents and Warm White text. Layout and structure
+     are unchanged from the original build; only the palette was
+     refined. Do not redesign this CSS.
      =========================================================== */
 
   :root {
-    --bg: #0a0e16;
-    --bg-raised: #131a26;
-    --bg-sunken: #070a10;
-    --bg-card: #111826;
-    --border: #232e3d;
-    --border-soft: #1a2129;
-    --text: #e6e9f0;
-    --text-dim: #8d96a6;
-    --text-faint: #5a6372;
-    --accent: #4a84c9;
-    --accent-bright: #7aa8e2;
-    --accent-dim: #2d4a73;
-    --accent-wash: rgba(74, 132, 201, 0.14);
-    --green: #6a9a6f;
-    --amber: #c9a24a;
-    --red: #c9534a;
-    --red-wash: rgba(201, 83, 74, 0.12);
+    /* Brand surfaces */
+    --bg: #10131C;            /* Midnight Navy — main background */
+    --bg-raised: #141925;     /* Sidebar Navy — sidebar */
+    --bg-sunken: #10131C;     /* inset surfaces (Midnight Navy) */
+    --bg-card: #1B202B;       /* Deep Slate — inputs, cards, panels */
+    --border: #2B303B;        /* Border Grey */
+    --border-soft: rgba(43, 48, 59, 0.6);  /* Border Grey, subtler separators */
+    /* Text */
+    --text: #F4F0EA;          /* Warm White — primary text, wordmark */
+    --text-dim: #A09FA8;      /* Ash Grey — secondary text */
+    --text-faint: #A09FA8;    /* Ash Grey — muted text (kept AA-readable) */
+    /* Brand accent — Soft Copper */
+    --accent: #D99A72;        /* Soft Copper */
+    --accent-bright: #E8AD86; /* Copper Hover — active/hover labels */
+    --accent-dim: rgba(217, 154, 114, 0.4);   /* copper border tint */
+    --accent-wash: rgba(217, 154, 114, 0.14); /* copper selected background */
+    --accent-soft: rgba(217, 154, 114, 0.35); /* focus ring */
+    /* Functional status colors — kept distinct from brand */
+    --green: #78B88A;         /* Success */
+    --amber: #E5B567;         /* Warning */
+    --red: #E17D7D;           /* Error */
+    --red-wash: rgba(225, 125, 125, 0.12);
     --radius: 10px;
     --radius-sm: 7px;
     font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
@@ -47,8 +51,9 @@
     display: flex; flex-direction: column; padding: 14px 10px;
   }
   .sidebar-brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 16px; font-weight: 700; letter-spacing: 0.05em; }
+  /* ORBIT orbital symbol: copper ring, Warm White center dot (geometry unchanged). */
   .brand-mark { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--accent); position: relative; flex-shrink: 0; }
-  .brand-mark::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--accent); }
+  .brand-mark::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--text); }
 
   .new-convo {
     display: flex; align-items: center; gap: 8px;
@@ -56,6 +61,7 @@
     color: var(--accent-bright); border-radius: var(--radius-sm);
     padding: 8px 10px; font-size: 13px; font-weight: 600; cursor: pointer; margin-bottom: 10px;
   }
+  .new-convo:hover { border-color: var(--accent); }
   .sidebar-search {
     display: flex; align-items: center; gap: 8px;
     color: var(--text-faint); font-size: 12px;
@@ -111,7 +117,8 @@
     padding: 6px 16px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
     display: flex; align-items: center; gap: 6px;
   }
-  .mode-toggle button.active { background: var(--accent); color: #16110c; font-weight: 600; }
+  .mode-toggle button.active { background: var(--accent); color: #10131C; font-weight: 600; }
+  .mode-toggle button.active:hover { background: var(--accent-bright); }
   .plus-badge {
     position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
     font-size: 11px; color: var(--accent-bright); border: 1px solid var(--accent-dim);
@@ -131,6 +138,7 @@
     background: var(--bg-card); border: 1px solid var(--border);
     border-radius: 14px; padding: 14px 16px;
   }
+  .home-composer:focus-within { border-color: var(--accent-dim); }
   .home-composer input {
     width: 100%; background: transparent; border: none; outline: none;
     color: var(--text); font-size: 14px; margin-bottom: 10px;
@@ -152,13 +160,15 @@
   }
   .send-btn-round {
     width: 32px; height: 32px; border-radius: 50%;
-    background: var(--accent); border: none; color: #16110c;
+    background: var(--accent); border: none; color: #10131C;
     display: flex; align-items: center; justify-content: center; cursor: pointer;
     /* The mockup drew this as a div; as a real <button> it must not inherit
        the browser's button font/padding, and it needs a visible focus ring. */
     font: inherit; padding: 0;
   }
-  .send-btn-round:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-soft, rgba(255,255,255,.25)); }
+  .send-btn-round:hover { background: var(--accent-bright); }
+  .send-btn-round:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-soft); }
+  button:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
 
   .suggestion-chips { display: flex; gap: 8px; margin-top: 16px; }
   .chip {
@@ -264,7 +274,7 @@
   .chat-bubble.orbit .who { color: var(--accent-bright); }
   .chat-bubble .body { color: var(--text); line-height: 1.5; }
   .chat-bubble .meta { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; }
-  .task-chat-input { border-top: 1px solid var(--border-soft); padding: 10px 12px; display: flex; gap: 8px; align-items: center; }
+  .task-chat-input { border-top: 1px solid var(--border-soft); padding: 10px 12px; display: flex; gap: 8px; align-items: center; background: var(--bg-card); }
   .task-chat-input input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 12.5px; }
   .task-chat-input input::placeholder { color: var(--text-faint); }
 
@@ -307,9 +317,9 @@
     font-style: italic;
   }
   .chat-bubble .notice.error, .home-thread > .notice.error {
-    color: #e0655f; font-style: normal;
+    color: var(--red); font-style: normal;
   }
-  .chat-bubble .notice.warn { color: #c9a227; font-style: normal; }
+  .chat-bubble .notice.warn { color: var(--amber); font-style: normal; }
 </style>
 </head>
 <body>
