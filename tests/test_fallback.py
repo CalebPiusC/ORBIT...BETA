@@ -224,6 +224,23 @@ class StreamFallbackTests(unittest.TestCase):
         self.assertEqual(received, ["Partly "])
         self.assertEqual(models.calls, [("stream", PRIMARY)])
 
+    def test_streamed_fallback_answer_is_audited_as_a_stream(self) -> None:
+        """reply_stream must write the same model/fallback_used fields that reply writes."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            audit_path = Path(temp_dir) / "audit.log"
+            provider, _ = make_provider(
+                {PRIMARY: [api_error(503, "UNAVAILABLE")], FALLBACK: [["Hi"]]},
+                audit_path=audit_path,
+            )
+            list(provider.reply_stream(HISTORY, "sys"))
+            events = read_audit(audit_path)
+
+        self.assertEqual([e["event"] for e in events], ["model_attempt_failed", "model_answered"])
+        failed, answered = events
+        self.assertEqual((failed["model"], failed["role"], failed["reason"]), (PRIMARY, "primary", "APIError 503"))
+        self.assertEqual((answered["model"], answered["role"], answered["fallback_used"]), (FALLBACK, "fallback", True))
+        self.assertTrue(answered["stream"])
+
 
 class AuditTests(unittest.TestCase):
     def test_fallback_turn_writes_failure_then_answer_lines(self) -> None:
