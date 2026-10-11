@@ -221,7 +221,17 @@ class GeminiToolRoundTripTests(unittest.TestCase):
 
             first_config = models.requests[0]["config"]
             declarations = first_config.tools[0].function_declarations
-            self.assertEqual([declaration.name for declaration in declarations], ["write_note"])
+            self.assertEqual(
+                [declaration.name for declaration in declarations],
+                [
+                    "write_note",
+                    "remember_fact",
+                    "forget_fact",
+                    "save_plan",
+                    "pause_heartbeat",
+                    "resume_heartbeat",
+                ],
+            )
             self.assertTrue(first_config.automatic_function_calling.disable)
 
             second_contents = models.requests[1]["contents"]

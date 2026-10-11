@@ -47,12 +47,12 @@
     --text: #F4F0EA;          /* Warm White — primary text, wordmark */
     --text-dim: #A09FA8;      /* Ash Grey — secondary text */
     --text-faint: #A09FA8;    /* Ash Grey — muted text (kept AA-readable) */
-    /* Brand accent — dark blue (values from the mockup) */
-    --accent: #4a84c9;        /* Blue — user bubble fill, primary buttons */
-    --accent-bright: #7aa8e2; /* Light blue — active labels, Orbit icon */
-    --accent-dim: #2d4a73;    /* Dark blue — borders, thinking-block edge */
-    --accent-wash: rgba(74, 132, 201, 0.14); /* selected background */
-    --accent-soft: rgba(74, 132, 201, 0.35); /* focus ring */
+    /* Brand accent — dark blue. Light text (--text) sits on --accent. */
+    --accent: #1f4a8f;        /* Dark blue — user bubble fill, primary buttons */
+    --accent-bright: #6b98de; /* Light blue — active labels, Orbit icon (AA on the navy surfaces) */
+    --accent-dim: #16336a;    /* Deeper blue — borders, thinking-block edge */
+    --accent-wash: rgba(31, 74, 143, 0.22); /* selected background */
+    --accent-soft: rgba(31, 74, 143, 0.45); /* focus ring */
     /* Functional status colors — kept distinct from brand */
     --green: #78B88A;         /* Success */
     --amber: #E5B567;         /* Warning */
@@ -140,8 +140,8 @@
     padding: 6px 16px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
     display: flex; align-items: center; gap: 6px;
   }
-  .mode-toggle button.active { background: var(--accent); color: #10131C; font-weight: 600; }
-  .mode-toggle button.active:hover { background: var(--accent-bright); }
+  .mode-toggle button.active { background: var(--accent); color: var(--text); font-weight: 600; }
+  .mode-toggle button.active:hover { filter: brightness(1.15); }
   .plus-badge {
     position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
     font-size: 11px; color: var(--accent-bright); border: 1px solid var(--accent-dim);
@@ -183,13 +183,13 @@
   }
   .send-btn-round {
     width: 32px; height: 32px; border-radius: 50%;
-    background: var(--accent); border: none; color: #10131C;
+    background: var(--accent); border: none; color: var(--text);
     display: flex; align-items: center; justify-content: center; cursor: pointer;
     /* The mockup drew this as a div; as a real <button> it must not inherit
        the browser's button font/padding, and it needs a visible focus ring. */
     font: inherit; padding: 0;
   }
-  .send-btn-round:hover { background: var(--accent-bright); }
+  .send-btn-round:hover { filter: brightness(1.15); }
   .send-btn-round:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-soft); }
   button:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
 
@@ -214,6 +214,28 @@
   .manage-link { color: var(--accent-bright); cursor: pointer; }
 
   .home-footer { text-align: center; padding: 16px; font-size: 11px; color: var(--text-faint); }
+
+  /* Composer position. A fresh conversation centers it. The first send animates
+     it (see app.js dockComposer) into a fixed bottom bar for the rest of that
+     conversation. "+ New conversation" reloads a fresh, centered page. The bar's
+     left edge is the sidebar width (240px), so it spans only the chat column. */
+  .composer-dock { width: 100%; display: flex; justify-content: center; }
+  .home-main.is-docked { min-height: 0; }
+  .home-main.is-docked .composer-dock {
+    position: fixed; left: 240px; right: 0; bottom: 0; z-index: 5;
+    padding: 12px 20px 18px; background: var(--bg);
+    border-top: 1px solid var(--border-soft);
+  }
+  .home-main.is-docked .home-greeting,
+  .home-main.is-docked .suggestion-chips,
+  .home-main.is-docked .connected-tools,
+  .home-main.is-docked .home-footer { display: none; }
+  .home-main.is-docked .home-center {
+    justify-content: flex-start; min-height: 0; padding: 16px 20px 150px;
+  }
+  .home-main.is-docked .home-thread {
+    flex: 1; min-height: 0; max-height: none; width: 560px; margin-bottom: 0;
+  }
 
   /* ===================== screen 2: coding agent task ===================== */
   .task-main { flex: 1; display: grid; grid-template-rows: auto auto 1fr; overflow: hidden; }
@@ -292,6 +314,19 @@
   }
   .task-chat-head { padding: 14px 16px; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; font-weight: 600; }
   .task-chat-log { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+
+  /* Scrollable panels: the scrollbar is hidden, scrolling is not. Overflow stays
+     auto (never hidden), so wheel, trackpad, touch and keyboard scrolling all
+     still work. Covers the checklist and live activity (inside .task-work), the
+     proposed-changes list, the side chat, and the home thread. */
+  .task-work, .task-chat-log, .home-thread, .step-row, .activity-section, .change-list {
+    scrollbar-width: none;      /* Firefox */
+    -ms-overflow-style: none;   /* legacy Edge / IE */
+  }
+  .task-work::-webkit-scrollbar, .task-chat-log::-webkit-scrollbar, .home-thread::-webkit-scrollbar,
+  .step-row::-webkit-scrollbar, .activity-section::-webkit-scrollbar, .change-list::-webkit-scrollbar {
+    display: none;              /* Chromium / Safari */
+  }
   /* Speakers are told apart by position and surface, not by a name label.
      User = right-aligned accent bubble. Orbit = left-aligned dark surface,
      with the brain icon in front of its text as the only "who" marker.
@@ -305,7 +340,7 @@
     display: flex; flex-direction: column;
   }
   .chat-bubble.user {
-    background: var(--accent); color: #10131C;
+    background: var(--accent); color: var(--text);
     border-bottom-right-radius: 3px;
   }
   .chat-bubble.orbit {
@@ -313,7 +348,7 @@
     border: 1px solid var(--border-soft); border-bottom-left-radius: 3px;
   }
   .chat-bubble .body { color: var(--text); line-height: 1.5; }
-  .chat-bubble.user .body { color: #10131C; }
+  .chat-bubble.user .body { color: var(--text); }
   .chat-meta { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; padding: 0 2px; }
   .task-chat-input { border-top: 1px solid var(--border-soft); padding: 10px 12px; display: flex; gap: 8px; align-items: center; background: var(--bg-card); }
   .task-chat-input input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 12.5px; }
@@ -333,6 +368,11 @@
     background: var(--bg-sunken); border-radius: var(--radius-sm);
     border-left: 2px solid var(--accent-dim);
   }
+  .thinking-label {
+    font-style: normal; font-size: 11px; color: var(--accent-bright);
+    white-space: nowrap; margin-right: 8px;
+  }
+  .thinking-label[hidden] { display: none; }
   .thinking-block .thinking-text::after {
     content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
   }
@@ -381,12 +421,51 @@
     content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
   }
 
+  /* ===================== reminders (heartbeat) ===================== */
+  /* Notice cards sit above the thread. Each one is dismissed by hand, and
+     a dismissal is audited. Quiet hours hold notices back; they never hide one
+     already on screen. */
+  .heartbeat-notices { width: 560px; max-width: 100%; display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+  .heartbeat-notices[hidden] { display: none; }
+  .heartbeat-card {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg-card); border: 1px solid var(--accent-dim);
+    border-left: 3px solid var(--accent-bright); border-radius: var(--radius-sm);
+    padding: 10px 12px; font-size: 12.5px; color: var(--text);
+  }
+  .heartbeat-card .heartbeat-text { flex: 1; line-height: 1.45; }
+  .heartbeat-dismiss {
+    width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--bg-sunken);
+    color: var(--text-dim); font-size: 11px; line-height: 1; cursor: pointer;
+  }
+  .heartbeat-dismiss:hover { color: var(--text); border-color: var(--accent-dim); }
+  .heartbeat-dismiss:disabled { opacity: 0.5; cursor: default; }
+  .heartbeat-dismiss:focus-visible, .reminders-toggle:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
+  /* Reminders switch in the sidebar foot. Switch on = reminders running. */
+  .reminders-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px 10px; }
+  .reminders-row .names { flex: 1; min-width: 0; line-height: 1.3; }
+  .reminders-row .name { font-size: 12.5px; color: var(--text); }
+  .reminders-row .sub { font-size: 11px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .reminders-row .sub.warn { color: var(--amber); white-space: normal; }
+  .reminders-toggle {
+    position: relative; width: 34px; height: 20px; flex-shrink: 0; padding: 0;
+    border-radius: 999px; border: 1px solid var(--border); background: var(--bg-sunken); cursor: pointer;
+  }
+  .reminders-toggle .knob {
+    position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--text-faint); transition: left 0.15s;
+  }
+  .reminders-toggle[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+  .reminders-toggle[aria-checked="true"] .knob { left: 16px; background: var(--text); }
+  .reminders-toggle:disabled { opacity: 0.5; cursor: default; }
 </style>
 </head>
 <body>
 
 <div class="dev-switcher">
   <button class="active" onclick="showScreen('home')">Home</button>
+  <button onclick="showScreen('home-docked')">Home after first send</button>
   <button onclick="showScreen('task')">Coding agent task</button>
 </div>
 
@@ -415,6 +494,13 @@
 
     <div class="sidebar-spacer"></div>
     <div class="sidebar-foot">
+      <div class="reminders-row">
+        <div class="names">
+          <div class="name">Reminders</div>
+          <div class="sub">On · quiet 22:00–08:00</div>
+        </div>
+        <button type="button" class="reminders-toggle" role="switch" aria-label="Reminders" aria-checked="true"><span class="knob"></span></button>
+      </div>
       <div class="connected-apps-row"><span class="dot"></span>Connected apps · 1 active</div>
       <div class="user-row">
         <div class="user-avatar">CP</div>
@@ -441,13 +527,15 @@
         <p>From first question to reviewed change. What are we building?</p>
       </div>
 
-      <div class="home-composer">
-        <input type="text" placeholder="Ask Orbit to review a PR, generate code, or explain a diff…" />
-        <div class="composer-controls">
-          <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
-          <div class="spacer"></div>
-          <div class="icon-btn-round" title="Voice">🎙</div>
-          <div class="send-btn-round">➤</div>
+      <div class="composer-dock">
+        <div class="home-composer">
+          <input type="text" placeholder="Ask Orbit to review a PR, generate code, or explain a diff…" />
+          <div class="composer-controls">
+            <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
+            <div class="spacer"></div>
+            <div class="icon-btn-round" title="Voice">🎙</div>
+            <div class="send-btn-round">➤</div>
+          </div>
         </div>
       </div>
 
@@ -471,6 +559,118 @@
     <div class="home-footer">🔒 Just you and Orbit. Your conversations stay private.</div>
   </div>
 </div>
+
+<div class="screen" id="screen-home-docked">
+  <div class="sidebar">
+    <div class="sidebar-brand"><span class="brand-mark"></span>ORBIT</div>
+    <div class="new-convo">+ New conversation</div>
+    <div class="sidebar-search">⌕ Search chats</div>
+
+    <div class="history-group">
+      <h4>Today</h4>
+      <div class="history-item active">Where is order #1042</div>
+      <div class="history-item">Add order tracking to WhatsApp bot</div>
+      <div class="history-item">Review portfolio site PR</div>
+    </div>
+    <div class="history-group">
+      <h4>Yesterday</h4>
+      <div class="history-item">Sync SEN106 issues with plan</div>
+      <div class="history-item">Explain this diff before merge</div>
+    </div>
+    <div class="history-group">
+      <h4>Previous 7 days</h4>
+      <div class="history-item">Run branch tests for ordering bot</div>
+      <div class="history-item">Draft pricing page copy</div>
+    </div>
+
+    <div class="sidebar-spacer"></div>
+    <div class="sidebar-foot">
+      <div class="reminders-row">
+        <div class="names">
+          <div class="name">Reminders</div>
+          <div class="sub">On · quiet 22:00–08:00</div>
+        </div>
+        <button type="button" class="reminders-toggle" role="switch" aria-label="Reminders" aria-checked="true"><span class="knob"></span></button>
+      </div>
+      <div class="connected-apps-row"><span class="dot"></span>Connected apps · 1 active</div>
+      <div class="user-row">
+        <div class="user-avatar">CP</div>
+        <div class="names">
+          <div class="name">Caleb</div>
+          <div class="sub">Personal workspace</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="home-main is-docked">
+    <div class="home-topbar">
+      <div class="mode-toggle">
+        <button class="active" data-arena="mode-chat">◐ Chat</button>
+        <button data-arena="mode-agent">⚙ Agent</button>
+      </div>
+      <div class="plus-badge">ORBIT</div>
+    </div>
+
+    <div class="home-center">
+      <div class="home-greeting">
+        <h1>Good morning, Caleb.</h1>
+        <p>From first question to reviewed change. What are we building?</p>
+      </div>
+
+      <div class="heartbeat-notices" id="heartbeatNotices">
+        <div class="heartbeat-card" role="status">
+          <span class="heartbeat-text">It is past 10:00 and there is no plan for today yet. Ask Orbit to save one.</span>
+          <button type="button" class="heartbeat-dismiss" aria-label="Dismiss this reminder">✕</button>
+        </div>
+      </div>
+
+      <div class="home-thread visible" id="homeThread">
+        <div class="chat-row user">
+          <div class="chat-bubble user"><div class="body">Where is order #1042?</div></div>
+          <div class="chat-meta">09:41</div>
+        </div>
+        <div class="chat-row orbit">
+          <div class="chat-bubble orbit">
+            <div class="body"><span class="brain-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg></span><span class="reply">It was packed this morning and ships Friday.</span></div>
+          </div>
+          <div class="chat-meta">09:41</div>
+        </div>
+      </div>
+
+      <div class="composer-dock">
+        <div class="home-composer">
+          <input type="text" placeholder="Ask Orbit to review a PR, generate code, or explain a diff…" />
+          <div class="composer-controls">
+            <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
+            <div class="spacer"></div>
+            <div class="icon-btn-round" title="Voice">🎙</div>
+            <div class="send-btn-round">➤</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="suggestion-chips">
+        <div class="chip" onclick="showScreen('task')">◫ Review a PR</div>
+        <div class="chip">⌁ Generate code</div>
+        <div class="chip">✓ Run branch tests</div>
+      </div>
+
+      <div class="connected-tools">
+        <div class="label">Your development tools, connected to Orbit</div>
+        <div class="tool-row">
+          <div class="tool-pill connected"><span class="status-dot"></span>GitHub</div>
+          <div class="tool-pill not-connected"><span class="status-dot"></span>Linear</div>
+          <div class="tool-pill not-connected"><span class="status-dot"></span>Vercel</div>
+          <div class="manage-link">Manage →</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="home-footer">🔒 Just you and Orbit. Your conversations stay private.</div>
+  </div>
+</div>
+
 
 <!-- ===================== SCREEN 2: CODING AGENT TASK ===================== -->
 <div class="screen" id="screen-task">
@@ -538,11 +738,12 @@
           </div>
         </div>
 
-        <div class="thinking-block" id="thinkingBlock">
+        <div class="thinking-block done" id="thinkingBlock">
           <span class="brain-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg>
           </span>
-          <span class="thinking-text" id="thinkingText"></span>
+          <span class="thinking-label" id="thinkingLabel">Asking Titan…</span>
+          <span class="thinking-text" id="thinkingText">Checking how orders.py currently stores state before adding a new field — the order model is small, so a single status string with a controlled set of values is simpler than a separate status table.</span>
         </div>
 
         <div class="changes-card">
@@ -550,6 +751,7 @@
             <div><div class="title">Proposed changes</div><div class="sub">1 file changed · 1 approval required</div></div>
             <div class="draft-badge">Draft proposal</div>
           </div>
+          <div class="change-list">
           <div class="change-row">
             <div class="file">orders.py</div>
             <div class="delta">38 → 61</div>
@@ -561,6 +763,7 @@
             <div class="delta">22 → 30</div>
             <div class="desc-cell">Wired status into the "where's my order" reply</div>
             <div class="status-tag checking">Checking</div>
+          </div>
           </div>
           <div class="approval-note">🔒 No commits will be pushed without your explicit approval.</div>
         </div>
@@ -586,7 +789,7 @@
             <div class="chat-bubble orbit">
               <div class="body"><span class="brain-icon">
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg>
-</span><span class="reply" id="orbitReplyText"></span></div>
+</span><span class="reply" id="orbitReplyText">Noted. I'll keep the proposed changes in draft until you approve them. Running tests now before I show you the diff.</span></div>
             </div>
             <div class="chat-meta">09:42</div>
           </div>
@@ -608,48 +811,9 @@
     event.target.classList.add('active');
   }
 
-  /* ===================== streaming-text demo =====================
-     ARENA: this stands in for real token/chunk streaming off
-     reply_stream(). Real implementation reads chunks from the
-     stream as they arrive instead of slicing a known string on a
-     timer — the visual behavior (word-by-word reveal, blinking
-     caret, caret disappears when done) is what to keep. */
-  function streamText(el, fullText, { onDone, msPerWord = 55 } = {}) {
-    const words = fullText.split(' ');
-    let i = 0;
-    el.classList.add('streaming');
-    const tick = () => {
-      if (i >= words.length) {
-        el.classList.remove('streaming');
-        if (onDone) onDone();
-        return;
-      }
-      el.textContent += (i === 0 ? '' : ' ') + words[i];
-      i++;
-      setTimeout(tick, msPerWord + Math.random() * 40);
-    };
-    tick();
-  }
-
-  window.addEventListener('DOMContentLoaded', () => {
-    const thinkingEl = document.getElementById('thinkingText');
-    const thinkingBlock = document.getElementById('thinkingBlock');
-    const replyEl = document.getElementById('orbitReplyText');
-
-    streamText(
-      thinkingEl,
-      "Checking how orders.py currently stores state before adding a new field — the order model is small, so a single status string with a controlled set of values is simpler than a separate status table.",
-      {
-        msPerWord: 38,
-        onDone: () => {
-          thinkingBlock.classList.add('done');
-          setTimeout(() => {
-            streamText(replyEl, "Noted. I'll keep the proposed changes in draft until you approve them. Running tests now before I show you the diff.", { msPerWord: 50 });
-          }, 300);
-        }
-      }
-    );
-  });
+  /* The live chat is streamed from the server by reply_stream(); this mockup
+     shows the finished state. Replies arrive word by word; the .streaming class
+     (blinking caret) is applied to the reply while chunks are still arriving. */
 </script>
 
 </body>

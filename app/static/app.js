@@ -174,12 +174,22 @@
   function makeOrbitBubble(log) {
     var bubble = makeRow(log, "orbit").bubble;
     var think = el("div", "thinking-block");
+    var thinkLabel = el("span", "thinking-label", "");
+    thinkLabel.hidden = true;
+    think.appendChild(thinkLabel);
     var thinkText = el("span", "thinking-text", "");
     think.appendChild(thinkText);
     bubble.appendChild(think);
     var parts = makeOrbitBody(bubble);
     log.scrollTop = log.scrollHeight;
-    return { bubble: bubble, think: think, thinkText: thinkText, body: parts.body, reply: parts.reply };
+    return {
+      bubble: bubble,
+      think: think,
+      thinkText: thinkText,
+      thinkLabel: thinkLabel,
+      body: parts.body,
+      reply: parts.reply,
+    };
   }
 
   // A body's streamed text goes into its own span so a notice appended beside it
@@ -199,8 +209,21 @@
       .replace(/>/g, "&gt;");
   }
 
-  // Agent-mode status lines ("Asking Chidi…") go into the task's live activity
-  // feed, newest first, the same order the server renders saved activity in.
+  // Agent-mode status lines ("Asking Titan…", or "Titan didn't answer … Asking
+  // Europa…") label the narration with the model that is being asked. Only the
+  // trailing "Asking <name>…" is shown as the label; the full line goes to the
+  // activity feed.
+  var ASKING_RE = /Asking [A-Za-z]+\u2026\s*$/;
+  function showModelLabel(labelNode, text) {
+    if (!labelNode) return;
+    var match = ASKING_RE.exec(text || "");
+    if (!match) return;
+    labelNode.textContent = match[0].trim();
+    labelNode.hidden = false;
+  }
+
+  // Agent-mode status lines go into the task's live activity feed, newest first,
+  // the same order the server renders saved activity in.
   function addActivity(text) {
     var section = document.getElementById("taskActivity");
     if (!section) return;
@@ -209,6 +232,224 @@
     row.appendChild(el("span", "time", nowLabel()));
     var heading = section.querySelector("h4");
     section.insertBefore(row, heading ? heading.nextSibling : section.firstChild);
+  }
+
+  // --- sidebar history ----------------------------------------------------
+  // "+ New conversation" resets the server's active conversation, then reloads
+  // to a fresh, centered composer.
+  // --- proposed tool actions (Chat mode) ----------------------------------
+  // The card is the only place a tool runs from. Text the model supplied goes in
+  // through textContent, never innerHTML.
+  var ACTION_STATE_TEXT = { approved: "Approved", declined: "Declined", failed: "Failed", expired: "Expired" };
+
+  function appendActionCard(log, card) {
+    var bubble = makeRow(log, "orbit").bubble;
+    var container = el("div", "action-card");
+    container.setAttribute("data-action-id", card.id);
+    bubble.appendChild(container);
+    renderActionCard(container, card);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function renderActionCard(container, card) {
+    container.textContent = "";
+    container.setAttribute("data-state", card.state);
+    var body = el("div", "body");
+    body.appendChild(el("span", "action-label", null));
+    body.lastChild.textContent = "Proposed action · nothing runs until you approve";
+    var summary = el("span", "action-summary", null);
+    summary.textContent = card.summary;
+    body.appendChild(summary);
+    container.appendChild(body);
+    if (card.state === "pending") {
+      var bar = el("div", "action-buttons", null);
+      var approve = el("button", "action-approve", null);
+      approve.type = "button";
+      approve.textContent = "Approve";
+      var decline = el("button", "action-decline", null);
+      decline.type = "button";
+      decline.textContent = "Decline";
+      approve.addEventListener("click", function () { decideAction(container, card, true); });
+      decline.addEventListener("click", function () { decideAction(container, card, false); });
+      bar.appendChild(approve);
+      bar.appendChild(decline);
+      container.appendChild(bar);
+    } else {
+      var text = ACTION_STATE_TEXT[card.state] || card.state;
+      if (card.result) text += " — " + card.result;
+      var result = el("div", "action-result", null);
+      result.textContent = text;
+      container.appendChild(result);
+    }
+  }
+
+  function decideAction(container, card, approved) {
+    Array.prototype.forEach.call(container.querySelectorAll("button"), function (b) { b.disabled = true; });
+    fetch("/api/actions/" + encodeURIComponent(card.id) + "/" + (approved ? "approve" : "decline"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (res.status === 404) {
+            // Already answered, or the server restarted: nothing ran.
+            renderActionCard(container, { id: card.id, summary: card.summary, state: "expired", result: data.error || "" });
+            return;
+          }
+          if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+          renderActionCard(container, { id: card.id, summary: card.summary, state: data.state, result: data.result || "" });
+        });
+      })
+      .catch(function (err) {
+        // The outcome is unknown, so the buttons come back and nothing is claimed.
+        Array.prototype.forEach.call(container.querySelectorAll("button"), function (b) { b.disabled = false; });
+        var line = el("div", "notice warn", null);
+        line.textContent = "Could not confirm that with the server, so nothing is marked done. Try again. (" + ((err && err.message) || err) + ")";
+        container.appendChild(line);
+      });
+  }
+
+  // Reminders: dismiss a notice card, or switch reminders off and on. The server
+  // is the source of truth; the page only changes once the server agrees.
+  function wireReminders() {
+    var box = document.getElementById("heartbeatNotices");
+    if (box) {
+      Array.prototype.forEach.call(box.querySelectorAll("[data-dismiss-notice]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var id = btn.getAttribute("data-dismiss-notice");
+          btn.disabled = true;
+          fetch("/api/heartbeat/notices/" + encodeURIComponent(id) + "/dismiss", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+          })
+            .then(function (res) {
+              if (!res.ok) throw new Error("HTTP " + res.status);
+              var card = btn.closest(".heartbeat-card");
+              if (card) card.parentNode.removeChild(card);
+              if (!box.querySelector(".heartbeat-card")) box.hidden = true;
+            })
+            .catch(function () {
+              btn.disabled = false; // still on screen; the person can try again
+            });
+        });
+      });
+    }
+
+    var toggle = document.getElementById("remindersToggle");
+    if (!toggle) return;
+    var state = document.getElementById("remindersState");
+    function say(text, warn) {
+      if (!state) return;
+      state.textContent = text;
+      state.className = warn ? "sub warn" : "sub";
+    }
+    toggle.addEventListener("click", function () {
+      // aria-checked "true" means reminders are on, so the click pauses them.
+      var pauseNow = toggle.getAttribute("aria-checked") === "true";
+      toggle.disabled = true;
+      fetch("/api/heartbeat/pause", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: pauseNow }),
+      })
+        .then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          var paused = data.paused === true;
+          toggle.setAttribute("aria-checked", paused ? "false" : "true");
+          say(paused ? "Paused" : "On · quiet 22:00–08:00", false);
+        })
+        .catch(function () {
+          say("Could not change reminders. Try again.", true);
+        })
+        .then(function () {
+          toggle.disabled = false;
+        });
+    });
+  }
+
+  function wireNewConversation() {
+    var btn = document.getElementById("newConvo");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      fetch("/api/conversations/new", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      }).finally(function () {
+        window.location.href = "/";
+      });
+    });
+  }
+
+  function findHistoryItem(id) {
+    var items = document.querySelectorAll(".history-item[data-conv-id]");
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].getAttribute("data-conv-id") === id) return items[i];
+    }
+    return null;
+  }
+
+  // A new conversation appears at the top of the Today group, highlighted as
+  // the active one, the same place the server puts it on the next page load.
+  function addHistoryItem(id, title) {
+    var groups = document.querySelectorAll(".history-group");
+    var today = null;
+    for (var i = 0; i < groups.length; i++) {
+      var h = groups[i].querySelector("h4");
+      if (h && h.textContent.trim() === "Today") today = groups[i];
+    }
+    if (!today) {
+      today = el("div", "history-group");
+      today.appendChild(el("h4", null, "Today"));
+      var sidebar = document.querySelector(".sidebar");
+      var search = sidebar && sidebar.querySelector(".sidebar-search");
+      if (sidebar && search) sidebar.insertBefore(today, search.nextSibling);
+    }
+    var prev = document.querySelectorAll(".history-item.active");
+    Array.prototype.forEach.call(prev, function (n) {
+      n.classList.remove("active");
+    });
+    var item = el("div", "history-item active", escapeHtml(title));
+    item.setAttribute("data-conv-id", id);
+    var heading = today.querySelector("h4");
+    today.insertBefore(item, heading ? heading.nextSibling : today.firstChild);
+  }
+
+  function setHistoryTitle(id, title) {
+    var item = findHistoryItem(id);
+    if (item) item.textContent = title;
+    else addHistoryItem(id, title);
+  }
+
+  // Lift the centered composer into the fixed bottom bar on the first send. The
+  // composer is measured before and after the layout change, then animated
+  // from its old place with a transform (FLIP), so it visibly slides down. With
+  // reduced motion it just moves.
+  function dockComposer() {
+    var main = document.getElementById("homeMain");
+    var composer = main && main.querySelector(".home-composer");
+    if (!main || !composer || main.classList.contains("is-docked")) return;
+    var before = composer.getBoundingClientRect();
+    main.classList.add("is-docked");
+    var after = composer.getBoundingClientRect();
+    var reduce =
+      window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;
+    var dy = before.top - after.top;
+    if (!dy) return;
+    composer.style.transition = "none";
+    composer.style.transform = "translateY(" + dy + "px)";
+    void composer.offsetWidth; // apply the start position before animating
+    composer.style.transition = "transform 380ms cubic-bezier(0.2, 0.7, 0.2, 1)";
+    composer.style.transform = "";
+    setTimeout(function () {
+      composer.style.transition = "";
+    }, 420);
   }
 
   // --- mode toggle (Chat / Agent) ----------------------------------------
@@ -231,6 +472,17 @@
   // --- HOME --------------------------------------------------------------
   function bootstrapHome() {
     wireModeToggles();
+    wireNewConversation();
+    wireReminders();
+    // Cards still waiting on a decision (rendered by the server on reload).
+    Array.prototype.forEach.call(document.querySelectorAll(".action-card[data-state='pending']"), function (container) {
+      var summary = container.querySelector(".action-summary");
+      renderActionCard(container, {
+        id: container.getAttribute("data-action-id"),
+        summary: summary ? summary.textContent : "",
+        state: "pending",
+      });
+    });
     var chips = document.querySelectorAll(".chip[data-goto-task]");
     Array.prototype.forEach.call(chips, function (chip) {
       chip.addEventListener("click", function () {
@@ -258,6 +510,7 @@
       }
       inflight = true;
       input.value = "";
+      dockComposer();
       thread.classList.add("visible");
       makeUserBubble(thread, text);
       var orbit = makeRow(thread, "orbit").bubble;
@@ -274,6 +527,19 @@
           if (event === "answer") {
             reply.textContent += data;
             thread.scrollTop = thread.scrollHeight;
+          } else if (event === "conversation") {
+            // The first send created it: show it in history before any reply.
+            var created = JSON.parse(data);
+            addHistoryItem(created.id, created.title);
+          } else if (event === "title") {
+            // Named after the first completed exchange, not a truncation.
+            var named = JSON.parse(data);
+            setHistoryTitle(named.id, named.title);
+          } else if (event === "action") {
+            // The model asked for a tool. It is queued and waits for Approve/Decline.
+            appendActionCard(thread, JSON.parse(data));
+          } else if (event === "notice") {
+            showLine(body, data, "warn");
           } else if (event === "done") {
             body.classList.remove("streaming");
           } else if (event === "error") {
@@ -309,9 +575,11 @@
     // server decides (see app.server.task) so a refresh is not a model call.
     var wantInitialTurn = opts.initialTurn !== false;
     wireModeToggles();
+    wireNewConversation();
     var log = document.getElementById("taskChatLog");
     var thinkBlock = document.getElementById("thinkingBlock");
     var thinkText = document.getElementById("thinkingText");
+    var thinkLabel = document.getElementById("thinkingLabel");
     var input = document.getElementById("taskInput");
     var send = document.getElementById("taskSend");
 
@@ -326,6 +594,7 @@
       // threw on the first thinking chunk, which froze the bubble.
       var targetThink = useTop ? thinkText : orbit.thinkText;
       var targetBlock = useTop ? thinkBlock : orbit.think;
+      var targetLabel = useTop ? thinkLabel : orbit.thinkLabel;
       if (!useTop && targetBlock) targetBlock.style.display = "none";
 
       function revealThinking() {
@@ -338,6 +607,7 @@
         function (event, data) {
           if (event === "status") {
             addActivity(data);
+            showModelLabel(targetLabel, data);
           } else if (event === "thinking") {
             if (!targetThink) return;
             revealThinking();

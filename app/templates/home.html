@@ -4,20 +4,30 @@
 <div class="screen screen--active" id="screen-home">
   <div class="sidebar">
     <div class="sidebar-brand"><span class="brand-mark"></span>ORBIT</div>
-    <div class="new-convo">+ New conversation</div>
+    <div class="new-convo" id="newConvo">+ New conversation</div>
     <div class="sidebar-search">⌕ Search chats</div>
 
     {% for group, items in conversations.items() %}
     <div class="history-group">
       <h4>{{ group }}</h4>
       {% for conv in items %}
-      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}">{{ conv.title }}</div>
+      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}" data-conv-id="{{ conv.id }}">{{ conv.title }}</div>
       {% endfor %}
     </div>
     {% endfor %}
 
     <div class="sidebar-spacer"></div>
     <div class="sidebar-foot">
+      {% if heartbeat %}
+      <div class="reminders-row">
+        <div class="names">
+          <div class="name">Reminders</div>
+          <div class="sub" id="remindersState" title="Quiet hours 22:00–08:00 (Lagos). Plan check at {{ '%02d' | format(heartbeat.plan_hour) }}:00.">{% if heartbeat.paused %}Paused{% else %}On · quiet 22:00–08:00{% endif %}</div>
+        </div>
+        <button type="button" class="reminders-toggle" id="remindersToggle" role="switch"
+                aria-label="Reminders" aria-checked="{{ 'false' if heartbeat.paused else 'true' }}"><span class="knob"></span></button>
+      </div>
+      {% endif %}
       <div class="connected-apps-row"><span class="dot"></span>Connected apps · {{ connected_count }} active</div>
       <div class="user-row">
         <div class="user-avatar">{{ user.name[:2]|upper }}</div>
@@ -29,7 +39,7 @@
     </div>
   </div>
 
-  <div class="home-main">
+  <div class="home-main{% if docked %} is-docked{% endif %}" id="homeMain">
     <div class="home-topbar">
       <div class="mode-toggle">
         <button class="{% if mode == 'chat' %}active{% endif %}" data-arena="mode-chat" data-mode="chat">◐ Chat</button>
@@ -44,15 +54,54 @@
         <p>From first question to reviewed change. What are we building?</p>
       </div>
 
-      <div class="home-thread" id="homeThread" aria-live="polite" aria-atomic="false"></div>
+      {% if heartbeat %}
+      <div class="heartbeat-notices" id="heartbeatNotices"{% if not heartbeat.notices %} hidden{% endif %}>
+        {% for notice in heartbeat.notices %}
+        <div class="heartbeat-card" role="status" data-notice-id="{{ notice.id }}">
+          <span class="heartbeat-text">{{ notice.text }}</span>
+          <button type="button" class="heartbeat-dismiss" data-dismiss-notice="{{ notice.id }}" aria-label="Dismiss this reminder">✕</button>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
 
-      <div class="home-composer">
-        <input type="text" id="homeInput" placeholder="Ask Orbit to review a PR, generate code, or explain a diff…" />
-        <div class="composer-controls">
-          <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
-          <div class="spacer"></div>
-          <div class="icon-btn-round" title="Voice">🎙</div>
-          <button type="button" class="send-btn-round" id="homeSend" aria-label="Send message">➤</button>
+      <div class="home-thread{% if thread %} visible{% endif %}" id="homeThread" aria-live="polite" aria-atomic="false">
+        {% for msg in thread %}
+        {# Same markup as app.js builds live: every Orbit message carries the brain icon. #}
+        <div class="chat-row {% if msg.is_orbit %}orbit{% else %}user{% endif %}">
+          <div class="chat-bubble {% if msg.is_orbit %}orbit{% else %}user{% endif %}">
+            {% if msg.action %}
+            {# A proposed tool call: nothing runs until Approve. Same markup app.js builds live. #}
+            <div class="action-card" data-action-id="{{ msg.action.id }}" data-state="{{ msg.action.state }}">
+              <div class="body">
+                <span class="action-label">Proposed action · nothing runs until you approve</span>
+                <span class="action-summary">{{ msg.action.summary }}</span>
+              </div>
+              {% if msg.action.state == 'pending' %}
+              <div class="action-buttons">
+                <button type="button" class="action-approve">Approve</button>
+                <button type="button" class="action-decline">Decline</button>
+              </div>
+              {% else %}
+              <div class="action-result">{{ {'approved': 'Approved', 'declined': 'Declined', 'failed': 'Failed', 'expired': 'Expired'}.get(msg.action.state, msg.action.state) }}{% if msg.action.result %} — {{ msg.action.result }}{% endif %}</div>
+              {% endif %}
+            </div>
+            {% elif msg.is_orbit %}<div class="body"><span class="brain-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg></span><span class="reply">{{ msg.body }}</span></div>{% else %}<div class="body">{{ msg.body }}</div>{% endif %}
+          </div>
+          <div class="chat-meta">{{ msg.time }}</div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="composer-dock">
+        <div class="home-composer">
+          <input type="text" id="homeInput" placeholder="Ask Orbit to review a PR, generate code, or explain a diff…" />
+          <div class="composer-controls">
+            <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
+            <div class="spacer"></div>
+            <div class="icon-btn-round" title="Voice">🎙</div>
+            <button type="button" class="send-btn-round" id="homeSend" aria-label="Send message">➤</button>
+          </div>
         </div>
       </div>
 

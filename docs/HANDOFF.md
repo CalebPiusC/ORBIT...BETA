@@ -18,7 +18,7 @@ before, and they are in better shape than the plan expected:
 | 1 — provider seam, multi-model from the start | **Done** | `providers/base.py` (`ChatProvider`), `providers/gemini.py`, `config.py`, `chat.py` |
 | 2 — tools + confirmation gate in the same pass | **Done** | `tools/registry.py` (gate + audit wrap), `tools/confirmation.py`, `tools/notes.py` |
 | 3 — UI from a real file, not a description | **Done**, offline-verified | `design/orbit_mockup.html` → `app/templates/`, `app/server.py`, `app/store.py` |
-| 4 — memory, heartbeat, voice | **Not started** | — |
+| 4 — memory, heartbeat, voice | **Partly done**: heartbeat (4b) built and offline-verified; memory (4a) and voice as noted in §5 | `heartbeat/`, `memory/plans.py`, `memory/jsonstore.py`, `tools/plans.py`, `runtime/heartbeat.json`, `runtime/plans.json` |
 | 5 — second provider, agent mode | **Not started** | seam exists: `ChatProvider` + `max_tool_rounds` |
 | 6 — `user_id` from the start | **Seeded**, no persistence yet | `app/store.py` (`DEFAULT_USER_ID`, `user_id` on `Conversation`/`Task`/`User`, `conversations_for`, `tasks_for`) |
 
@@ -63,7 +63,7 @@ There are two ways to talk to Orbit and they are not the same thing:
 | Entry point | Provider | Turn model | Notes |
 | --- | --- | --- | --- |
 | `python chat.py` | real `GeminiProvider.reply()` | one-shot before, **REPL now** | keeps history across turns, capped at `MAX_MESSAGES`; a provider error ends the turn, not the session; `/help` `/reset` `/quit`; goes through the gated tool registry, so `write_note` still asks for `yes` |
-| `python -m app.server` | real `reply_stream()` lazily | SSE, streaming | text only — **no tool dispatch**, by design (§1.3) |
+| `python -m app.server` | real `reply_stream()` lazily | SSE, streaming | Chat mode offers the six tools (`allow_tools=True`); one call per reply is queued as a card and runs only when the person clicks Approve (`app/actions.py`). Agent mode is text-only |
 | `python run_demo.py` | `StubStreamingProvider` | SSE, streaming | canned replies. "Hello from Orbit — how can I help?" means you are looking at the stub, not your model |
 
 Three defects were found and fixed while diagnosing "the terminal replies and quits,
@@ -117,9 +117,13 @@ These are not style preferences. Each one exists because the previous build viol
    raises unless a task was explicitly approved; `POST /api/task/<id>/apply` returns 403.
    The sentence "No commits will be pushed without your explicit approval" is a rule, not
    a caption.
-7. **Streaming never replaces gating.** `reply_stream()` is text-only, added *beside*
-   `reply()`. Function-calling turns keep using `reply()` so the gate runs synchronously.
-   Do not "improve" the UX by streaming a tool-using turn until the gate has a UI path.
+7. **Streaming never replaces gating.** `reply_stream(allow_tools=True)` may yield one
+   `ToolProposal` and then stops; it never executes. The proposal is queued in
+   `app/actions.py` and runs only through `PendingActions.decide()` after an explicit
+   Approve on the card, which uses the same `ToolRegistry.dispatch` (gate → run → audit).
+   `DeferredConfirmationGate` answers only for the decision the person just made. Do not
+   let a streamed proposal run on its own, and do not replace the card with a blocking
+   prompt.
 8. **Every turn ends visibly.** Each stream terminates in an `answer`, or an `error`
    saying why there is none, then `done` — server-side (`_sse_response`) and client-side
    (`postSSE`'s `onFinish`, including a rejected `fetch` and a non-event-stream response).
@@ -276,8 +280,34 @@ Not this builder's task, but the constraints are decided now so nobody invents t
 
 - **Memory / heartbeat / voice** land on top of `app/store.py`'s existing read paths, and
   every store keeps the `user_id` field. Heartbeat state is local runtime state
-  (`runtime/`, ignored). Voice is an input/output mode on the same provider seam, not a
-  second brain.
+  (`runtime/heartbeat.json`, `runtime/plans.json`; both ignored). Voice is an input/output
+  mode on the same provider seam, not a second brain.
+
+### 5.1 Heartbeat as built (Phase 4b)
+
+- **Where it runs:** one daemon thread inside the web process, started by `run_app` at
+  boot. `create_app()` never builds it, so tests do not touch `runtime/`.
+- **Checks:** missing plan (after `HEARTBEAT_PLAN_HOUR`, default 10, valid 8-21) and
+  check-in gap (`HEARTBEAT_CHECKIN_GAP_DAYS`, default 2). Plan hour 8-21 keeps the check
+  outside quiet hours (22:00-08:00), so it can always fire. A home-chat message is the check-in.
+- **Once a day:** each check records its local date in `runtime/heartbeat.json` and never
+  fires twice on one date. A restart reads that file, so it neither refires nor resets the
+  check-in timer. A first run starts the timer rather than nagging.
+- **Quiet hours** hold automatic checks. A direct check (`POST /api/heartbeat/check`)
+  bypasses quiet hours only; the once-a-day rule still applies.
+- **Push:** `NTFY_TOPIC` (set in `.env`, never hard-coded or logged) receives one plain
+  HTTP POST per notice. Push failures are recorded on the notice and in the audit log,
+  without the topic.
+- **Pause:** a sidebar switch and the gated `pause_heartbeat` / `resume_heartbeat` tools.
+  Pause is stored in the state file, so the terminal chat and the web scheduler agree.
+- **Audit:** `heartbeat_notice_fired`, `heartbeat_notice_dismissed`, `heartbeat_paused`,
+  `heartbeat_resumed`, `heartbeat_push_failed`. These record ids, kinds and timings, never
+  message text or the topic.
+- **Known limits:** the scheduler only runs while the web app runs; the terminal chat
+  does not run checks. The six tools are available in the terminal chat (`chat.py`) and in
+  the browser's Chat mode (cards, see README "Browser tools"). The sidebar switch is the
+  browser's pause control. ntfy.sh could not be reached from the build sandbox, so the phone
+  push was verified against a local HTTP server only.
 - **Agent mode** reuses the same gate and `max_tool_rounds`, with the ceiling raised from
   the current 5 to a deliberate 6 model calls per turn — one number, in `config.py`,
   asserted by a test. A second provider (stronger Gemini tier for agent turns, a free

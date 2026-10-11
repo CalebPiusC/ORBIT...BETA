@@ -1,6 +1,6 @@
 # ORBIT...BETA
 
-ORBIT's brain and the two screens it lives in. The provider seam accepts conversation history and a system prompt and returns plain text or a stream. Gemini is the only provider implemented; there is exactly one tool, `write_note(content: str)`, and a reusable confirmation gate plus registration-time audit wrapper exist from tool #1 — nothing runs silently. Agent mode, sub-agents, persistent memory, heartbeat, and voice are still out of scope; see `docs/HANDOFF.md` for what comes next and why.
+ORBIT's brain and the two screens it lives in. The provider seam accepts conversation history and a system prompt and returns plain text or a stream. Gemini is the only provider implemented; there is exactly one tool, `write_note(content: str)`, and a reusable confirmation gate plus registration-time audit wrapper exist from tool #1 — nothing runs silently. Heartbeat reminders (a missing daily plan, a check-in gap, and phone push through ntfy.sh) are built. Agent mode, sub-agents, and voice are still out of scope; see `docs/HANDOFF.md` for what comes next and why.
 
 **Read `docs/HANDOFF.md` before changing anything.** It states which rules are load-bearing, which files from the previous build already exist here, and what the next two phases are.
 
@@ -26,7 +26,7 @@ Set `GEMINI_API_KEY` in `.env` to your own key. `GEMINI_MODEL` defaults to `gemi
 
 `GEMINI_FALLBACK_MODEL` defaults to `gemini-3.8-flash` (`config.DEFAULT_GEMINI_FALLBACK_MODEL`). It is tried **once**, and only when the primary fails with 503/504 or a network error, and only before any tool has run. Leave it blank in `.env` to disable it. Every model that answers, and every failed attempt, is written to `audit.log` as a `model_answered` or `model_attempt_failed` line.
 
-**Model names in Agent mode.** The primary model is called **Chidi** and the fallback **Ada**. Names are handed out in slot order (`providers/personas.py`): Obi, Chika, Zara, Jiden, Oma come next for future models or providers. In Agent mode the Live activity list shows lines such as `Asking Chidi…`, and `Chidi didn't answer (Google returned 503). Asking Ada…` on a fallback. Chat mode never shows names or these lines.
+**Model names in Agent mode.** The primary model is called **Titan** and the fallback **Europa**. Names are handed out in slot order (`providers/personas.py`). Io, Ganymede, Callisto, Triton and Luna are reserved for future model slots, in that order. In Agent mode the Live activity list shows lines such as `Asking Titan…`, and `Titan didn't answer (Google returned 503). Asking Europa…` on a fallback. Chat mode never shows names or these lines.
 
 `ORBIT_HTTP_TIMEOUT` (default `60`, seconds) is the deadline for **every** request to the model. Leave it set. Without a deadline the SDK asks httpx to wait forever, so a firewalled or black-holed connection hangs with no reply and no error — "it is thinking" and "it is stuck" become the same thing. Raise it on a slow link; never remove it.
 
@@ -171,4 +171,48 @@ Run the offline suite (model stubbed) with:
 ```sh
 python -m unittest discover -s tests -v
 ```
+
+## Browser tools (Chat mode)
+
+In Chat mode on the home screen, Orbit can ask to use one of six tools: `write_note`,
+`remember_fact`, `forget_fact`, `save_plan`, `pause_heartbeat`, `resume_heartbeat`.
+The same registry and audit log as the terminal are used, with one difference: the
+decision comes from a card, not a console prompt.
+
+- Each reply may ask for **at most one** tool call. Extra calls in the same reply are
+  refused and audited as `tool_call_limit`.
+- The request is queued and shown as a card with the exact action in plain words. **Nothing
+  runs until you click Approve.** Decline records the decision and runs nothing.
+- Each card's outcome is audited (`confirmation`: `confirmed` or `declined`, `execution`:
+  `succeeded`, `not_run`, or a rejection reason). The card shows the final result, and the
+  next turn tells the model how it ended.
+- Agent mode stays text-only. Tools are offered only in Chat mode.
+- Pending cards are held in memory. Restarting the server clears them, and a card left
+  pending is never run.
+
+## Heartbeat reminders
+
+When the web app starts (`python -m app.server` or `python run_demo.py`), a background
+thread checks two things, in Africa/Lagos time:
+
+- **Missing plan:** after `HEARTBEAT_PLAN_HOUR` (default 10:00), if no plan is saved for
+  today. Save one by asking Orbit to save it in the terminal chat (`python chat.py`, you type
+  `yes` to approve) or in Chat mode on the home screen (you click Approve on the card; see
+  [Browser tools](#browser-tools-chat-mode)).
+- **Check-in gap:** after `HEARTBEAT_CHECKIN_GAP_DAYS` (default 2) with no message on the
+  home screen. A home-chat message counts as a check-in.
+
+Each check fires at most once per day. Automatic checks are held during quiet hours
+(22:00-08:00). Asking for a check directly skips the quiet-hours hold, but still fires at
+most once per day. A notice appears as a card on the home screen; dismiss it with ✕. The
+Reminders switch in the sidebar pauses everything. In the terminal chat, the gated
+`pause_heartbeat` and `resume_heartbeat` tools do the same, and so do the Chat-mode cards. Every notice fired or dismissed is written to
+`audit.log`.
+
+Phone push: set `NTFY_TOPIC` in `.env` to a long random topic, subscribe to it in the ntfy
+app, and each notice is also POSTed to `NTFY_SERVER` (default `https://ntfy.sh`). Anyone who
+knows the topic can read your notices, so keep it private. Leave it blank to turn push off.
+
+State lives in `runtime/heartbeat.json` (schedule, paused flag, notices) and
+`runtime/plans.json` (dated plans). Both are gitignored. Settings are in `.env.example`.
 

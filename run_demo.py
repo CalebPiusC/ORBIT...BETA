@@ -29,10 +29,16 @@ class StubStreamingProvider:
         return "STUB: canned one-shot reply. No model was called."
 
     def reply_stream(
-        self, history, system_prompt: str, *, think: bool = False, report_attempts: bool = False
+        self,
+        history,
+        system_prompt: str,
+        *,
+        think: bool = False,
+        report_attempts: bool = False,
+        allow_tools: bool = False,
     ) -> Iterator[StreamChunk]:
         if report_attempts:
-            yield StreamChunk(kind="status", text="STUB: asking Chidi… (no model is called)")
+            yield StreamChunk(kind="status", text="STUB: asking Titan… (no model is called)")
         if think:
             yield StreamChunk(kind="thinking", text="STUB: no model called — showing the thinking block.")
             yield StreamChunk(kind="answer", text="STUB: this text is canned. Run `python -m app.server` with GEMINI_API_KEY in .env for your real model.")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -102,4 +103,64 @@ def load_settings() -> Settings:
         gemini_model=model,
         gemini_fallback_model=fallback,
         request_timeout_seconds=timeout,
+    )
+
+
+# Heartbeat (Phase 4b). Both checks are local-time rules in Africa/Lagos, and
+# quiet hours (22:00 to 08:00 local) suppress automatic notices.
+HEARTBEAT_TIMEZONE = "Africa/Lagos"
+DEFAULT_HEARTBEAT_PLAN_HOUR = 10
+DEFAULT_HEARTBEAT_CHECKIN_GAP_DAYS = 2
+DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 60
+DEFAULT_NTFY_SERVER = "https://ntfy.sh"
+
+
+@dataclass(frozen=True, slots=True)
+class HeartbeatSettings:
+    plan_hour: int = DEFAULT_HEARTBEAT_PLAN_HOUR
+    checkin_gap_days: int = DEFAULT_HEARTBEAT_CHECKIN_GAP_DAYS
+    interval_seconds: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS
+    # "" means phone push is off. The topic is a secret-ish name: keep it in .env.
+    ntfy_topic: str = field(default="", repr=False)
+    ntfy_server: str = DEFAULT_NTFY_SERVER
+
+
+def _int_setting(name: str, default: int, low: int, high: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        raise RuntimeError(f"{name} in .env must be a whole number, got {raw.strip()!r}.") from None
+    if not low <= value <= high:
+        raise RuntimeError(f"{name} in .env must be between {low} and {high}, got {value}.")
+    return value
+
+
+def load_heartbeat_settings() -> HeartbeatSettings:
+    """Read the heartbeat settings from .env or the environment, validated loudly."""
+    load_dotenv(dotenv_path=ENV_FILE, override=False)
+
+    # 08:00 to 21:59 only: a plan hour inside quiet hours could never fire,
+    # because notices are held back until the quiet window ends.
+    plan_hour = _int_setting("HEARTBEAT_PLAN_HOUR", DEFAULT_HEARTBEAT_PLAN_HOUR, 8, 21)
+    gap_days = _int_setting("HEARTBEAT_CHECKIN_GAP_DAYS", DEFAULT_HEARTBEAT_CHECKIN_GAP_DAYS, 1, 365)
+    interval = float(_int_setting("HEARTBEAT_INTERVAL_SECONDS", int(DEFAULT_HEARTBEAT_INTERVAL_SECONDS), 5, 3600))
+
+    topic = os.getenv("NTFY_TOPIC", "").strip()
+    if topic and not re.fullmatch(r"[A-Za-z0-9_-]{4,64}", topic):
+        raise RuntimeError(
+            "NTFY_TOPIC in .env may use only letters, digits, '-' and '_' (4 to 64 characters)."
+        )
+    server = os.getenv("NTFY_SERVER", DEFAULT_NTFY_SERVER).strip().rstrip("/") or DEFAULT_NTFY_SERVER
+    if not server.startswith(("https://", "http://")):
+        raise RuntimeError("NTFY_SERVER in .env must start with https:// (or http:// for a local server).")
+
+    return HeartbeatSettings(
+        plan_hour=plan_hour,
+        checkin_gap_days=gap_days,
+        interval_seconds=interval,
+        ntfy_topic=topic,
+        ntfy_server=server,
     )

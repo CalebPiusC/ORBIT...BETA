@@ -1,9 +1,11 @@
 """Model display names and status lines, offline.
 
 Rules under test:
-- Names follow slot order: slot 0 (primary) is Chidi, slot 1 (fallback) is Ada,
-  then Obi, Chika, Zara, Jiden, Oma. Nothing is named past that.
-- Status lines ("Asking Chidi…") appear only when the caller asks for them
+- Names follow slot order: slot 0 (primary) is Titan, slot 1 (fallback) is Europa.
+  Io, Ganymede, Callisto, Triton and Luna are reserved for future slots, in that
+  order. Nothing is named past
+  the assigned slots.
+- Status lines ("Asking Titan…") appear only when the caller asks for them
   (Agent mode). Chat mode gets no status line, even when the primary fails.
 - Status lines never mix into the reply or thinking text.
 - Answer text reaches the caller as it is generated, not at the end.
@@ -20,7 +22,7 @@ from google.genai.errors import APIError
 
 from providers.base import ChatMessage
 from providers.gemini import GeminiProvider
-from providers.personas import SLOT_NAMES, slot_name
+from providers.personas import RESERVED_NAMES, SLOT_NAMES, slot_name
 
 PRIMARY = "primary-test-model"
 FALLBACK = "fallback-test-model"
@@ -62,37 +64,40 @@ def run(provider: GeminiProvider, **kwargs: Any) -> list[tuple[str, str]]:
 
 class SlotNameTests(unittest.TestCase):
     def test_names_follow_slot_order(self) -> None:
-        self.assertEqual(slot_name(0), "Chidi")  # primary
-        self.assertEqual(slot_name(1), "Ada")  # fallback
-        self.assertEqual(
-            SLOT_NAMES[2:], ("Obi", "Chika", "Zara", "Jiden", "Oma")
-        )
-        for slot, name in enumerate(SLOT_NAMES):
-            self.assertEqual(slot_name(slot), name)
+        self.assertEqual(slot_name(0), "Titan")  # primary
+        self.assertEqual(slot_name(1), "Europa")  # fallback
+        self.assertEqual(SLOT_NAMES, ("Titan", "Europa"))
 
-    def test_no_name_past_the_reserved_list(self) -> None:
-        with self.assertRaises(ValueError):
+    def test_reserved_names_are_not_handed_out(self) -> None:
+        self.assertEqual(RESERVED_NAMES, ("Io", "Ganymede", "Callisto", "Triton", "Luna"))
+        for name in ("Io", "Ganymede", "Callisto", "Triton", "Luna"):
+            self.assertIn(name, RESERVED_NAMES)
+            self.assertNotIn(name, SLOT_NAMES)
+
+    def test_no_name_past_the_assigned_slots(self) -> None:
+        with self.assertRaises(ValueError) as caught:
             slot_name(len(SLOT_NAMES))
+        self.assertIn("Io", str(caught.exception))  # the error says what is reserved
 
 
 class AgentModeStatusTests(unittest.TestCase):
     def test_primary_answer_is_announced_before_the_reply(self) -> None:
         provider = provider_for({PRIMARY: ["Hello ", "there."]})
         out = run(provider, report_attempts=True)
-        self.assertEqual(out[0], ("status", "Asking Chidi…"))
+        self.assertEqual(out[0], ("status", "Asking Titan…"))
         self.assertEqual(
             [text for kind, text in out if kind == "answer"], ["Hello ", "there."]
         )
 
     def test_failover_names_both_models_in_order(self) -> None:
-        provider = provider_for({PRIMARY: api_error(503), FALLBACK: ["From Ada."]})
+        provider = provider_for({PRIMARY: api_error(503), FALLBACK: ["From Europa."]})
         out = run(provider, report_attempts=True)
         statuses = [text for kind, text in out if kind == "status"]
         self.assertEqual(
             statuses,
-            ["Asking Chidi…", "Chidi didn't answer (Google returned 503). Asking Ada…"],
+            ["Asking Titan…", "Titan didn't answer (Google returned 503). Asking Europa…"],
         )
-        self.assertEqual([t for k, t in out if k == "answer"], ["From Ada."])
+        self.assertEqual([t for k, t in out if k == "answer"], ["From Europa."])
         # Status lines come before any reply text.
         kinds = [k for k, _ in out]
         self.assertLess(kinds.index("status"), kinds.index("answer"))

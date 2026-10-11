@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
-from typing import Literal
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 ChatRole = Literal["user", "assistant"]
 
@@ -26,6 +26,17 @@ class StreamChunk:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolProposal:
+    """A tool call the model asked for. Nothing has run; the person must approve it first.
+
+    Chat mode yields at most one of these per reply, and then the stream ends.
+    """
+
+    name: str
+    arguments: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class ChatMessage:
     """A single text message in a conversation history."""
 
@@ -41,6 +52,21 @@ class ChatMessage:
             raise ValueError("ChatMessage content must not be empty.")
 
 
+TITLE_SYSTEM_PROMPT = (
+    "You write short titles for chat conversations. Reply with only the title: "
+    "three to six words, no quotes, no trailing punctuation, no label such as "
+    "'Title:'."
+)
+
+
+def title_request(user_text: str, answer: str) -> str:
+    """The user turn sent with TITLE_SYSTEM_PROMPT. Only the first exchange is sent."""
+    return (
+        "Title this conversation from its first exchange.\n\n"
+        f"User: {user_text[:1000]}\n\nAssistant: {answer[:1000]}"
+    )
+
+
 class ChatProvider(ABC):
     """The chat-only seam between ORBIT and a language-model provider."""
 
@@ -49,6 +75,17 @@ class ChatProvider(ABC):
         """Return the provider's text reply to a conversation."""
         raise NotImplementedError
 
+    def title(self, user_text: str, answer: str) -> str:
+        """Return a short title for a conversation's first exchange.
+
+        One lightweight call, made once per conversation. The default goes
+        through ``reply()``. A provider that can make a call with no tools
+        attached should override this, so a title request can never propose
+        an action.
+        """
+        history = [ChatMessage(role="user", content=title_request(user_text, answer))]
+        return self.reply(history, TITLE_SYSTEM_PROMPT)
+
     def reply_stream(
         self,
         history: Sequence[ChatMessage],
@@ -56,7 +93,8 @@ class ChatProvider(ABC):
         *,
         think: bool = False,
         report_attempts: bool = False,
-    ) -> Iterator[StreamChunk]:
+        allow_tools: bool = False,
+    ) -> Iterator["StreamChunk | ToolProposal"]:
         """Yield the reply as it is generated, chunk by chunk.
 
         This is an *addition* to the one-shot ``reply()``: chat mode's quick
@@ -72,7 +110,12 @@ class ChatProvider(ABC):
 
         When ``report_attempts`` is True, the provider also yields
         ``kind="status"`` chunks as it asks each model (for example "Asking
-        Chidi…", then a fallback notice). Chat mode leaves it False, so no
+        Titan…", then a fallback notice). Chat mode leaves it False, so no
         status line appears there.
+
+        When ``allow_tools`` is True, the model may ask for one tool call. The
+        provider then yields a :class:`ToolProposal` and stops reading the
+        stream. It never runs the tool: the caller queues the proposal for the
+        person to approve. Providers that cannot offer tools ignore the flag.
         """
         raise NotImplementedError
