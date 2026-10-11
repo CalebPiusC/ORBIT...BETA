@@ -32,7 +32,21 @@ from providers.base import ChatMessage as ProvChatMessage, StreamChunk, ToolProp
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from app.actions import PendingActions, ProposalRejected
-from app.store import PLACEHOLDER_TITLE, ActionCard, Store, now_label
+from app.followups import followups_for
+from app.starters import WELCOME_STARTERS
+from app.store import PLACEHOLDER_TITLE, ActionCard, Activity, Store, now_label
+from app.taskplan import (
+    FAILED,
+    IDLE,
+    RUNNING,
+    SOURCE_ORBIT,
+    TaskRun,
+    add_files,
+    apply_narration,
+    files_in,
+    finish_run,
+    new_run,
+)
 from app.voice import VoiceService, VoiceServiceUnavailable
 from app.titles import request_title
 from memory.facts import FactStore
@@ -163,6 +177,28 @@ def create_app(
     def _heartbeat_or_none() -> Any | None:
         return app.config["HEARTBEAT"]
 
+    def _panel_state(task_obj: Any) -> dict[str, Any] | None:
+        """The Agent panel's state, or ``None`` when this task has never run.
+
+        The panel is rendered from this and nothing else. A task with no run has
+        no state to report, and an invented one would read as progress the agent
+        never made.
+        """
+        run: TaskRun | None = getattr(task_obj, "run", None)
+        if run is None:
+            return None
+        payload: dict[str, Any] = dict(run.as_dict())
+        payload["activity"] = [{"text": a.text, "time": a.time} for a in task_obj.activity]
+        payload["approved"] = bool(task_obj.approved)
+        payload["applied"] = bool(task_obj.applied)
+        # A planned-but-not-started run is not yet working on anything.
+        payload["running"] = run.status == RUNNING and run.started
+        return payload
+
+    def _note(task_obj: Any, text: str) -> None:
+        """One real line in the task's activity list, newest first."""
+        task_obj.activity.insert(0, Activity(text=text, time=now_label()))
+
     def _heartbeat_view() -> dict[str, Any] | None:
         hb = _heartbeat_or_none()
         if hb is None:
@@ -221,6 +257,11 @@ def create_app(
             # Once a conversation exists its composer is the fixed bottom bar.
             # Only a fresh, empty conversation centers it.
             docked=st.active_conversation_id is not None,
+            # The welcome screen belongs to a genuinely empty conversation only.
+            # A returning conversation with history gets the thread, never this.
+            welcome=st.active_conversation_id is None and not st.home_thread,
+            starters=WELCOME_STARTERS,
+            followups=followups_for(st.home_thread),
             heartbeat=_heartbeat_view(),
         )
 
@@ -235,6 +276,11 @@ def create_app(
         # message to the thread, so it runs only while the task has no Orbit
         # reply yet.
         stream_initial = not any(m.is_orbit for m in task_obj.chat)
+        if stream_initial and task_obj.run is None:
+            # Plan the run now so the panel is complete on the first paint. This
+            # builds an object from the request text — it is not a model call,
+            # and it does not claim any step has happened.
+            task_obj.run = new_run(task_obj.description)
         return render_template(
             "task.html",
             user=st.user,
@@ -242,12 +288,25 @@ def create_app(
             thinking_level=st.thinking_level,
             task=task_obj,
             stream_initial=stream_initial,
+            panel=_panel_state(task_obj),
             heartbeat=_heartbeat_view(),
             connections=st.connections,
             connected_count=st.connected_count(),
             conversations=st.conversations_grouped(),
             active_conversation_id=st.active_conversation_id,
         )
+
+    @app.post("/api/tasks")
+    def api_new_task() -> Response:
+        """Create an Agent task from a request the person typed."""
+        st: Store = app.config["STORE"]
+        payload = request.get_json(silent=True) or {}
+        request_text = payload.get("request")
+        request_text = request_text.strip() if isinstance(request_text, str) else ""
+        if not request_text:
+            return _json({"error": "a task needs a request to work from."}, 400)
+        task = st.create_task(request_text)
+        return _json({"id": task.id, "title": task.title})
 
     @app.post("/api/mode")
     def set_mode() -> Response:
@@ -445,15 +504,26 @@ def create_app(
                     StoreChatMessage(who="Orbit", time=sent_at, body=card.summary, is_orbit=True, action=card),
                 )
 
-        def after_done(answer: str) -> tuple[str, str] | None:
-            """Name the conversation after its first completed exchange, once."""
+        def after_done(answer: str) -> list[tuple[str, str]] | None:
+            """Name the conversation, then offer follow-ups this reply supports.
+
+            Both events are sent after "done" so neither can hold up the reply.
+            Follow-ups come from the reply that was just stored (see
+            app.followups): a chip is only offered for something really in it,
+            and an empty or failed turn offers none.
+            """
+            events: list[tuple[str, str]] = []
             conv = st.get_conversation(conv_id)
-            if not answer.strip() or conv is None or conv.titled:
-                return None
-            conv.titled = True  # one attempt only, success or not
-            title = request_title(get_provider(), message, answer)
-            st.set_title(conv_id, title)
-            return "title", json.dumps({"id": conv_id, "title": title})
+            if answer.strip() and conv is not None and not conv.titled:
+                conv.titled = True  # one attempt only, success or not
+                title = request_title(get_provider(), message, answer)
+                st.set_title(conv_id, title)
+                events.append(("title", json.dumps({"id": conv_id, "title": title})))
+            if answer.strip():
+                chips = followups_for(st.home_thread)
+                if chips:
+                    events.append(("followups", json.dumps([chip.as_dict() for chip in chips])))
+            return events or None
 
         start_event = None
         if created is not None:
@@ -587,6 +657,14 @@ def create_app(
         label_models = st.mode == "agent"
         thinking_level = st.thinking_level
 
+        # The plan is built from the request text the first time a task runs and
+        # then carried across turns, so steering the task does not re-plan it.
+        run = task_obj.run or new_run(task_obj.description)
+        task_obj.run = run
+        run.status = RUNNING
+        run.started = True
+        run.operation = "Thinking…"
+
         def chunk_source() -> Iterator[StreamChunk]:
             return get_provider().reply_stream(
                 history,
@@ -603,7 +681,52 @@ def create_app(
                     StoreChatMessage(who="Orbit", time=sent_at, body=answer, is_orbit=True),
                 )
 
-        return _sse_response(chunk_source, on_done)
+        def on_chunk(chunk: StreamChunk) -> list[tuple[str, str]]:
+            """Fold one streamed chunk into the panel, and say so only on change.
+
+            Nothing here is invented: a step moves because Orbit's narration
+            mentioned it (app.taskplan.apply_narration), a file appears because
+            the request or Orbit named it, and the operation line is whatever the
+            stream is actually doing.
+            """
+            before = json.dumps(_panel_state(task_obj), sort_keys=True)
+            if chunk.kind == "status":
+                # Agent mode only: "Asking Titan…" / a fallback line.
+                run.operation = chunk.text
+                _note(task_obj, chunk.text)
+            elif chunk.kind == "thinking":
+                if apply_narration(run.steps, chunk.text):
+                    active = next((s for s in run.steps if s.status == "active"), None)
+                    if active is not None and active.evidence:
+                        _note(task_obj, f"{active.title} — “{active.evidence}”")
+                add_files(run, files_in(chunk.text), SOURCE_ORBIT)
+                run.operation = "Working through it…"
+            elif chunk.kind == "answer":
+                add_files(run, files_in(chunk.text), SOURCE_ORBIT)
+                run.operation = "Writing your answer…"
+            after = json.dumps(_panel_state(task_obj), sort_keys=True)
+            return [("task_state", after)] if after != before else []
+
+        def on_stream_end(answer: str, failed: bool) -> list[tuple[str, str]]:
+            """The run's final state, after the last chunk and before "done"."""
+            if failed or not answer.strip():
+                run.status = FAILED
+                run.operation = "Stopped before finishing"
+                _note(task_obj, "This turn ended without an answer.")
+            else:
+                finish_run(run.steps)
+                run.status = IDLE
+                run.operation = "Waiting for your input"
+                _note(task_obj, "Turn finished · waiting for your input.")
+            return [("task_state", json.dumps(_panel_state(task_obj), sort_keys=True))]
+
+        return _sse_response(
+            chunk_source,
+            on_done,
+            start_event=("task_state", json.dumps(_panel_state(task_obj), sort_keys=True)),
+            on_chunk=on_chunk,
+            on_stream_end=on_stream_end,
+        )
 
     @app.post("/api/task/<task_id>/approve")
     def api_approve(task_id: str) -> Response:
@@ -619,8 +742,6 @@ def create_app(
                 mimetype="application/json",
             )
         st.approve_task(task_id)
-        from app.store import Activity
-
         task_obj = st.get_task(task_id)
         assert task_obj is not None
         task_obj.activity.insert(0, Activity(text="You approved the proposed changes.", time="just now"))
@@ -647,8 +768,10 @@ def create_app(
         on_done: Callable[[str], None],
         *,
         start_event: tuple[str, str] | None = None,
-        after_done: Callable[[str], tuple[str, str] | None] | None = None,
+        after_done: Callable[[str], list[tuple[str, str]] | None] | None = None,
         on_proposal: Callable[[ToolProposal], tuple[str, str]] | None = None,
+        on_chunk: Callable[[StreamChunk], list[tuple[str, str]]] | None = None,
+        on_stream_end: Callable[[str, bool], list[tuple[str, str]]] | None = None,
     ) -> Response:
         @stream_with_context
         def generate() -> Iterator[str]:
@@ -666,6 +789,11 @@ def create_app(
                         else:
                             yield _sse(*on_proposal(chunk))
                         continue
+                    if on_chunk is not None:
+                        # Panel state derived from this chunk, emitted only when
+                        # the chunk actually changed it.
+                        for event_name, payload in on_chunk(chunk):
+                            yield _sse(event_name, payload)
                     if chunk.kind == "status":
                         # Agent mode only: which model is being asked. Not reply text.
                         yield _sse("status", chunk.text)
@@ -710,15 +838,19 @@ def create_app(
                     "you are on the stub, not Gemini; with a real key check "
                     "GEMINI_MODEL and GEMINI_API_KEY in .env.",
                 )
+            if on_stream_end is not None:
+                # The run's settled state, before "done": a client that has seen
+                # "done" already knows how the run ended.
+                for event_name, payload in on_stream_end(answer, failed):
+                    yield _sse(event_name, payload)
             # Store the answer and any cards before "done", so a client that has
             # seen "done" can always find its cards in the store (approve works).
             on_done(answer)
             yield _sse("done", "")
             if after_done is not None:
                 # Sent after "done", so the reply is never held up by naming.
-                extra = after_done(answer)
-                if extra is not None:
-                    yield _sse(*extra)
+                for event_name, payload in after_done(answer) or ():
+                    yield _sse(event_name, payload)
 
         return Response(
             generate(),

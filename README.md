@@ -123,8 +123,9 @@ They are implemented as real routes/templates backed by live data in `app/store.
 
 - `GET /` — the chat-first **home** (sidebar history, Chat/Agent mode toggle,
   composer, connected-tools row).
-- `GET /task/<task_id>` — the **coding-agent task view** (step checklist,
-  proposed-changes card, live activity, side chat).
+- `GET /task/<task_id>` — the **coding-agent task view** (the Agent panel:
+  a checklist planned from the request, files named as it works, the current
+  operation, approval state, live activity, side chat).
 
 The mockup's dev-only screen switcher is removed; navigation is real state
 (the Chat/Agent mode and the task id).
@@ -258,4 +259,46 @@ the latest completed response; Send becomes Stop while a stream is active. The c
 includes an attachment picker and GitHub shortcut. File selections are shown locally but
 are not uploaded to the model yet; the GitHub shortcut opens GitHub rather than selecting a
 repository. The settings/account controls open a summary of the current local workspace.
+
+## Home screen: welcome, live status, follow-ups
+
+- **Welcome screen** — shown only on a genuinely empty conversation, never on one with
+  history. It carries the heading "Your ideas, in orbit.", the subtitle "Think it. Build
+  it. Let's work on it together.", and three shortcuts — **Build something**, **Explore an
+  idea**, **Review my work** — each of which sends a real prompt (see `app/starters.py`)
+  through the ordinary composer path. The orbit rings turn slowly while idle and speed up
+  beside the status line the moment Orbit starts responding.
+- **Live status while generating** — a turn says what is actually happening: "Thinking…",
+  then "Still thinking…" if the wait runs long, then "Writing your answer…" once text is
+  arriving (Agent mode says "Working through it…" while it narrates). No status is shown
+  that the stream cannot support: attachments are still not uploaded to the model, so no
+  label claims to be reading them.
+- **Follow-up chips** — after a reply that contains a code block, up to three chips appear
+  above the composer: *Explain this code · Find potential bugs · Improve implementation*.
+  They come from `app/followups.py`, which only offers a chip for something observable in
+  the reply, and the row is hidden — not empty — on every other turn.
+
+## Agent mode: the task panel
+
+`POST /api/tasks` creates a task from a request you type, and `GET /task/<task_id>` shows
+it. The panel is generated from the actual request (`app/taskplan.py`):
+
+- **Steps from your request** — the checklist is planned from the request's own wording, so
+  a bug report plans "Reproduce the failure" then "Fix the root cause" while a review plans
+  "Read the code closely" then "Report what you find". A step only leaves *pending* when
+  Orbit's narration gives evidence for it, and the sentence that moved it is shown beneath
+  the step, so every tick can be read back against what Orbit said.
+- **Files touched** — only files the request named or Orbit mentioned, each labelled with
+  which of the two. Nothing guesses.
+- **What it's doing now** — the live operation, from the stream ("Thinking…", "Asking
+  Titan…", "Writing your answer…", "Waiting for your input").
+- **Needs your approval** — the standing rule, plus the task's real approval state. There
+  is deliberately no Approve button while nothing has been proposed; the gate is enforced
+  in `Store.apply_changes` and `POST /api/task/<id>/apply` (403 without an explicit
+  approval), not in a control that only looks like one.
+
+A task that has never run has no panel at all — the request and a start control are the
+whole of it. The seeded example task (`T1`) keeps its request text and nothing else: it
+ships with no steps, no file diffs and no activity lines, because those used to be seeded
+with invented numbers that read as progress the agent had made.
 
