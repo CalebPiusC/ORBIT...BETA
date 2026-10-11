@@ -19,7 +19,7 @@ import re
 import socket
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from config import Settings, load_settings
@@ -170,18 +170,32 @@ def _proxy_note() -> str | None:
 _OVERLOADED_RE = re.compile(r"\b(503|504)\b|\bUNAVAILABLE\b|\bDEADLINE_EXCEEDED\b")
 
 
-def _model_hint(exc: BaseException, elapsed: float, timeout: float) -> str:
-    """Turn a model-layer failure into the next thing to try."""
+def _model_hint(
+    exc: BaseException,
+    elapsed: float,
+    timeout: float,
+    attempts: Sequence[str] = (),
+) -> str:
+    """Turn a model-layer failure into the next thing to try.
+
+    ``attempts`` lists why each earlier model attempt failed in this turn (see
+    ``GeminiProvider.last_attempts``). It matters because the error that reaches
+    here may be the *fallback's* timeout, which says nothing about why the
+    primary failed.
+    """
     name = type(exc).__name__
     detail = str(exc)
     # 503/504 mean Google answered and said it is slow or overloaded. Check this
     # before the deadline test: a 504 that arrives near 60s is Google's answer,
-    # not a blocked connection.
-    if _OVERLOADED_RE.search(detail) or getattr(exc, "code", None) in (503, 504):
+    # not a blocked connection. An earlier 503/504 counts too, even when the
+    # final error is a timeout on the fallback.
+    overloaded_before = any(reason in ("503", "504") for reason in attempts)
+    if overloaded_before or _OVERLOADED_RE.search(detail) or getattr(exc, "code", None) in (503, 504):
+        retried = " ORBIT retried on the fallback model as well." if len(attempts) > 1 else ""
         return (
-            "Google's server is slow or overloaded (503/504). ORBIT already tried the "
-            "fallback model if one is set, so wait a few minutes and try again. "
-            "This is not a key or firewall problem."
+            "Google's server is slow or overloaded right now (503/504), so the request "
+            f"did not complete.{retried} The problem is on Google's side, not your key or "
+            "your network: retry in a minute or two."
         )
     # A failure that lands at or beyond the deadline means the request never
     # came back at all: the connection is being blocked or black-holed.
@@ -278,8 +292,14 @@ def run_check(
         return EXIT_MODEL
     except Exception as exc:
         elapsed = time.monotonic() - started
+        attempts = getattr(target, "last_attempts", None)
+        if not isinstance(attempts, (list, tuple)):
+            attempts = ()
         write(f"[model] FAIL after {elapsed:.1f}s — {_redact(str(exc), key)}")
-        write(f"          {_model_hint(exc, elapsed, resolved.request_timeout_seconds)}")
+        write(
+            "          "
+            + _model_hint(exc, elapsed, resolved.request_timeout_seconds, attempts=list(attempts))
+        )
         return EXIT_MODEL
 
     elapsed = time.monotonic() - started

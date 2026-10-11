@@ -80,6 +80,11 @@ def _failure_label(exc: BaseException) -> str:
     return type(exc).__name__
 
 
+def _attempt_reason(exc: BaseException) -> str:
+    """The short reason one model attempt failed, e.g. ``"504"`` or ``"ReadTimeout"``."""
+    return _fallback_reason(exc) or _failure_label(exc)
+
+
 class GeminiProvider(ChatProvider):
     """Send chat history to Gemini and run declared tools only through a gate.
 
@@ -136,6 +141,11 @@ class GeminiProvider(ChatProvider):
             self.fallback_model = None
         # The model that produced the most recent answer. Set on success only.
         self.last_model_used: str | None = None
+        # Why each failed attempt in the most recent turn failed, in order. A
+        # turn that failed on the fallback still shows the primary's reason, so
+        # the caller can tell "Google said 504, then the fallback timed out"
+        # apart from "the connection never came back".
+        self.last_attempts: list[str] = []
 
         self._tool_registry = tool_registry
         self._max_tool_rounds = max_tool_rounds
@@ -143,6 +153,7 @@ class GeminiProvider(ChatProvider):
     # --- model calls with a single fallback ---------------------------------
 
     def _audit_failure(self, model: str, role: str, exc: BaseException, started: float) -> None:
+        self.last_attempts.append(_attempt_reason(exc))
         if self._audit is not None:
             self._audit.record_model_event(
                 event="model_attempt_failed",
@@ -262,6 +273,7 @@ class GeminiProvider(ChatProvider):
         if not history:
             raise ValueError("history must contain at least one chat message.")
 
+        self.last_attempts = []
         contents: list[types.Content] = []
         for message in history:
             if not isinstance(message, ChatMessage):
@@ -362,6 +374,7 @@ class GeminiProvider(ChatProvider):
         if not history:
             raise ValueError("history must contain at least one chat message.")
 
+        self.last_attempts = []
         contents: list[types.Content] = []
         for message in history:
             if not isinstance(message, ChatMessage):

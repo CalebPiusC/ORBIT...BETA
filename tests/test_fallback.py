@@ -312,6 +312,79 @@ class ModelHintTests(unittest.TestCase):
         self.assertIn("blocked or firewalled", hint)
 
 
+class FallbackDiagnosisTests(unittest.TestCase):
+    """When the fallback also fails, the hint must still say what the primary said."""
+
+    KEY = "local-test-key-for-offline-tests"
+
+    def test_each_failed_attempt_is_recorded_in_order(self) -> None:
+        provider, _ = make_provider(
+            {PRIMARY: [api_error(504, "DEADLINE_EXCEEDED")], FALLBACK: [httpx.ReadTimeout("slow")]}
+        )
+        with self.assertRaises(httpx.ReadTimeout):
+            provider.reply(HISTORY, "sys")
+        self.assertEqual(provider.last_attempts, ["504", "ReadTimeout"])
+
+    def test_a_turn_that_succeeds_on_the_primary_records_no_failures(self) -> None:
+        provider, _ = make_provider({PRIMARY: [reply("fine")]})
+        provider.reply(HISTORY, "sys")
+        self.assertEqual(provider.last_attempts, [])
+
+    def test_attempts_reset_on_the_next_turn(self) -> None:
+        provider, _ = make_provider(
+            {PRIMARY: [api_error(503, "UNAVAILABLE"), reply("ok")], FALLBACK: [api_error(503, "UNAVAILABLE")]}
+        )
+        with self.assertRaises(APIError):
+            provider.reply(HISTORY, "sys")
+        self.assertEqual(provider.last_attempts, ["503", "503"])
+        provider.reply(HISTORY, "sys")
+        self.assertEqual(provider.last_attempts, [])
+
+    def test_fallback_timeout_after_primary_504_is_called_overloaded_not_blocked(self) -> None:
+        hint = _model_hint(
+            httpx.ReadTimeout("slow"), elapsed=121.0, timeout=60.0, attempts=["504", "ReadTimeout"]
+        )
+        self.assertIn("slow or overloaded", hint)
+        self.assertIn("retry", hint)
+        self.assertIn("fallback model as well", hint)
+        self.assertNotIn("blocked", hint)
+        self.assertNotIn("firewalled", hint)
+
+    def test_a_silent_timeout_with_no_earlier_overload_still_blames_the_network(self) -> None:
+        hint = _model_hint(httpx.ReadTimeout("slow"), elapsed=60.0, timeout=60.0, attempts=["ReadTimeout"])
+        self.assertIn("blocked or firewalled", hint)
+
+    def test_check_output_names_overload_when_the_fallback_timed_out(self) -> None:
+        from unittest.mock import patch as _patch
+
+        from chat import run_check
+        from config import Settings
+
+        class PrimaryThen504FallbackTimeout:
+            model = PRIMARY
+            last_attempts: list[str] = []
+
+            def reply(self, history, system_prompt: str) -> str:
+                self.last_attempts = ["504", "ReadTimeout"]
+                raise httpx.ReadTimeout("slow")
+
+        out: list[str] = []
+        settings = Settings(gemini_api_key=self.KEY, gemini_model=PRIMARY)
+        clock = iter([0.0, 121.0])
+        with _patch("chat.time.monotonic", side_effect=lambda: next(clock)):
+            code = run_check(
+                write=out.append,
+                settings=settings,
+                connect=lambda *args: 0.01,
+                provider=PrimaryThen504FallbackTimeout(),
+            )
+        text = "\n".join(out)
+        self.assertEqual(code, 4)
+        self.assertIn("slow or overloaded", text)
+        self.assertNotIn("firewalled", text)
+        self.assertNotIn("blocked", text)
+
+
 class ChatSurfaceTests(unittest.TestCase):
     def test_repl_says_when_the_fallback_answered(self) -> None:
         class FallbackAnswered:
