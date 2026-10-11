@@ -33,8 +33,10 @@ SYSTEM_PROMPT = (
     "Use write_note only when the user explicitly asks you to save a note, "
     "and pass the exact one-line note text they requested. Use remember_fact or "
     "forget_fact only when the person explicitly asks you to remember or forget a "
-    "fact about them. Never claim anything was saved or removed unless the tool "
-    "reports success. If the person declines, do not retry."
+    "fact about them. Use save_plan only when the person explicitly asks you to save "
+    "today's plan, and pause_heartbeat or resume_heartbeat only when they explicitly "
+    "ask to pause or resume reminders. Never claim anything was saved, removed, paused "
+    "or resumed unless the tool reports success. If the person declines, do not retry."
 )
 
 # History is capped so a long session cannot grow the request without limit.

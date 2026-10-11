@@ -22,6 +22,7 @@ proposed changes can only be applied/pushed after an explicit approval call, and
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Iterable, Iterator
 from typing import Any, Callable
@@ -32,6 +33,8 @@ from providers.base import ChatMessage as ProvChatMessage, StreamChunk
 from app.store import PLACEHOLDER_TITLE, Store, now_label
 from app.titles import request_title
 from memory.facts import FactStore
+
+log = logging.getLogger("orbit.server")
 
 HOME_SYSTEM_PROMPT = (
     "You are ORBIT, a helpful assistant. Reply clearly and concisely. "
@@ -56,6 +59,10 @@ def _sse(event: str, data: str) -> str:
     return f"event: {event}\n{data_lines}\n\n"
 
 
+def _json(payload: Any, status: int = 200) -> Response:
+    return Response(json.dumps(payload), status=status, mimetype="application/json")
+
+
 def _history_from_thread(
     messages: Iterable[Any], extra_user: str | None = None
 ) -> list[ProvChatMessage]:
@@ -72,6 +79,7 @@ def create_app(
     provider: Any | None = None,
     store: Store | None = None,
     facts: FactStore | None = None,
+    heartbeat: Any | None = None,
 ) -> Flask:
     """Build the Flask app.
 
@@ -79,12 +87,33 @@ def create_app(
     lazily constructs a real ``GeminiProvider`` on first use (which needs
     GEMINI_API_KEY). Tests pass a stubbed provider directly. ``facts`` is the
     background-fact file; it is re-read on every turn.
+
+    ``heartbeat`` is the reminder service. It is deliberately not built here:
+    ``run_app`` builds it and starts its scheduler at boot, so importing or
+    testing the app never touches runtime/heartbeat.json. Without a heartbeat
+    the heartbeat routes answer 503 and home shows no notices.
     """
     app = Flask(__name__, template_folder="templates")
     app.secret_key = "orbit-dev-secret"
     app.config["PROVIDER"] = provider
     app.config["STORE"] = store or Store()
     app.config["FACTS"] = facts if facts is not None else FactStore()
+    app.config["HEARTBEAT"] = heartbeat
+
+    def _heartbeat_or_none() -> Any | None:
+        return app.config["HEARTBEAT"]
+
+    def _heartbeat_view() -> dict[str, Any] | None:
+        hb = _heartbeat_or_none()
+        if hb is None:
+            return None
+        try:
+            return hb.snapshot()
+        except RuntimeError:
+            # A corrupt state file must not take the whole home page down. The
+            # error is logged, and the scheduler reports it on every tick.
+            log.exception("heartbeat state unreadable; home shows no notices")
+            return None
 
     def get_provider() -> Any:
         prov = app.config["PROVIDER"]
@@ -111,6 +140,7 @@ def create_app(
             # Once a conversation exists its composer is the fixed bottom bar.
             # Only a fresh, empty conversation centers it.
             docked=st.active_conversation_id is not None,
+            heartbeat=_heartbeat_view(),
         )
 
     @app.get("/task/<task_id>")
@@ -174,6 +204,13 @@ def create_app(
 
         sent_at = now_label()
         st.append_message(conv_id, StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False))
+        # Heartbeat's check-in: a message sent from home counts as checking in.
+        hb = _heartbeat_or_none()
+        if hb is not None:
+            try:
+                hb.record_checkin()
+            except RuntimeError:
+                log.exception("could not record check-in; the chat message was still saved")
         history = _history_from_thread(st.threads[conv_id])
 
         # Read the facts now, once per turn, so an edit lands on the next reply.
@@ -202,6 +239,43 @@ def create_app(
         if created is not None:
             start_event = ("conversation", json.dumps({"id": conv_id, "title": PLACEHOLDER_TITLE}))
         return _sse_response(chunk_source, on_done, start_event=start_event, after_done=after_done)
+
+    @app.get("/api/heartbeat")
+    def api_heartbeat() -> Response:
+        hb = _heartbeat_or_none()
+        if hb is None:
+            return _json({"error": "heartbeat is not running"}, 503)
+        return _json(hb.snapshot())
+
+    @app.post("/api/heartbeat/pause")
+    def api_heartbeat_pause() -> Response:
+        hb = _heartbeat_or_none()
+        if hb is None:
+            return _json({"error": "heartbeat is not running"}, 503)
+        payload = request.get_json(silent=True) or {}
+        # Strict, like the approval gate: only a literal true or false is accepted.
+        paused = payload.get("paused")
+        if not isinstance(paused, bool):
+            return _json({"error": "paused must be true or false"}, 400)
+        return _json({"paused": hb.set_paused(paused, source="settings")})
+
+    @app.post("/api/heartbeat/notices/<notice_id>/dismiss")
+    def api_heartbeat_dismiss(notice_id: str) -> Response:
+        hb = _heartbeat_or_none()
+        if hb is None:
+            return _json({"error": "heartbeat is not running"}, 503)
+        if not hb.dismiss(notice_id, source="card"):
+            return _json({"error": "no open notice with that id"}, 404)
+        return _json({"dismissed": True})
+
+    @app.post("/api/heartbeat/check")
+    def api_heartbeat_check() -> Response:
+        """Run both checks now, because the person asked. Quiet hours do not apply."""
+        hb = _heartbeat_or_none()
+        if hb is None:
+            return _json({"error": "heartbeat is not running"}, 503)
+        result = hb.check_now()
+        return _json({"status": result["status"], "fired": [n["id"] for n in result["fired"]]})
 
     @app.post("/api/task/<task_id>/stream")
     def api_task_stream(task_id: str) -> Response:
@@ -354,6 +428,10 @@ def run_app(app: Flask) -> None:
     Loopback is the safe default for a local run. Set ``ORBIT_HOST=0.0.0.0``
     explicitly when a container or sandbox preview needs an externally reachable
     bind address. The Flask debugger stays disabled in either case.
+
+    At boot this also attaches the heartbeat (unless the app already has one) and
+    starts its scheduler as a daemon thread in this process. Debug mode is off, so
+    the reloader never runs a second copy of the thread.
     """
     host = os.environ.get("ORBIT_HOST", "").strip() or "127.0.0.1"
     raw_port = os.environ.get("PORT", "").strip() or "5000"
@@ -365,6 +443,15 @@ def run_app(app: Flask) -> None:
         ) from None
     if not 1 <= port <= 65535:
         raise RuntimeError(f"PORT must be between 1 and 65535, got {port}.")
+
+    from config import load_heartbeat_settings
+    from heartbeat import Heartbeat, start_scheduler
+
+    heartbeat = app.config.get("HEARTBEAT")
+    if heartbeat is None:
+        heartbeat = Heartbeat(settings=load_heartbeat_settings())
+        app.config["HEARTBEAT"] = heartbeat
+    start_scheduler(heartbeat, interval_seconds=heartbeat.settings.interval_seconds)
 
     app.run(host=host, port=port, debug=False)
 

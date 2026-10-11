@@ -237,6 +237,68 @@
   // --- sidebar history ----------------------------------------------------
   // "+ New conversation" resets the server's active conversation, then reloads
   // to a fresh, centered composer.
+  // Reminders: dismiss a notice card, or switch reminders off and on. The server
+  // is the source of truth; the page only changes once the server agrees.
+  function wireReminders() {
+    var box = document.getElementById("heartbeatNotices");
+    if (box) {
+      Array.prototype.forEach.call(box.querySelectorAll("[data-dismiss-notice]"), function (btn) {
+        btn.addEventListener("click", function () {
+          var id = btn.getAttribute("data-dismiss-notice");
+          btn.disabled = true;
+          fetch("/api/heartbeat/notices/" + encodeURIComponent(id) + "/dismiss", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+          })
+            .then(function (res) {
+              if (!res.ok) throw new Error("HTTP " + res.status);
+              var card = btn.closest(".heartbeat-card");
+              if (card) card.parentNode.removeChild(card);
+              if (!box.querySelector(".heartbeat-card")) box.hidden = true;
+            })
+            .catch(function () {
+              btn.disabled = false; // still on screen; the person can try again
+            });
+        });
+      });
+    }
+
+    var toggle = document.getElementById("remindersToggle");
+    if (!toggle) return;
+    var state = document.getElementById("remindersState");
+    function say(text, warn) {
+      if (!state) return;
+      state.textContent = text;
+      state.className = warn ? "sub warn" : "sub";
+    }
+    toggle.addEventListener("click", function () {
+      // aria-checked "true" means reminders are on, so the click pauses them.
+      var pauseNow = toggle.getAttribute("aria-checked") === "true";
+      toggle.disabled = true;
+      fetch("/api/heartbeat/pause", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: pauseNow }),
+      })
+        .then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          var paused = data.paused === true;
+          toggle.setAttribute("aria-checked", paused ? "false" : "true");
+          say(paused ? "Paused" : "On · quiet 22:00–08:00", false);
+        })
+        .catch(function () {
+          say("Could not change reminders. Try again.", true);
+        })
+        .then(function () {
+          toggle.disabled = false;
+        });
+    });
+  }
+
   function wireNewConversation() {
     var btn = document.getElementById("newConvo");
     if (!btn) return;
@@ -338,6 +400,7 @@
   function bootstrapHome() {
     wireModeToggles();
     wireNewConversation();
+    wireReminders();
     var chips = document.querySelectorAll(".chip[data-goto-task]");
     Array.prototype.forEach.call(chips, function (chip) {
       chip.addEventListener("click", function () {

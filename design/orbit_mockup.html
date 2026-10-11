@@ -421,6 +421,44 @@
     content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
   }
 
+  /* ===================== reminders (heartbeat) ===================== */
+  /* Notice cards sit above the thread. Each one is dismissed by hand, and
+     a dismissal is audited. Quiet hours hold notices back; they never hide one
+     already on screen. */
+  .heartbeat-notices { width: 560px; max-width: 100%; display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+  .heartbeat-notices[hidden] { display: none; }
+  .heartbeat-card {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg-card); border: 1px solid var(--accent-dim);
+    border-left: 3px solid var(--accent-bright); border-radius: var(--radius-sm);
+    padding: 10px 12px; font-size: 12.5px; color: var(--text);
+  }
+  .heartbeat-card .heartbeat-text { flex: 1; line-height: 1.45; }
+  .heartbeat-dismiss {
+    width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--bg-sunken);
+    color: var(--text-dim); font-size: 11px; line-height: 1; cursor: pointer;
+  }
+  .heartbeat-dismiss:hover { color: var(--text); border-color: var(--accent-dim); }
+  .heartbeat-dismiss:disabled { opacity: 0.5; cursor: default; }
+  .heartbeat-dismiss:focus-visible, .reminders-toggle:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
+  /* Reminders switch in the sidebar foot. Switch on = reminders running. */
+  .reminders-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px 10px; }
+  .reminders-row .names { flex: 1; min-width: 0; line-height: 1.3; }
+  .reminders-row .name { font-size: 12.5px; color: var(--text); }
+  .reminders-row .sub { font-size: 11px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .reminders-row .sub.warn { color: var(--amber); white-space: normal; }
+  .reminders-toggle {
+    position: relative; width: 34px; height: 20px; flex-shrink: 0; padding: 0;
+    border-radius: 999px; border: 1px solid var(--border); background: var(--bg-sunken); cursor: pointer;
+  }
+  .reminders-toggle .knob {
+    position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--text-faint); transition: left 0.15s;
+  }
+  .reminders-toggle[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+  .reminders-toggle[aria-checked="true"] .knob { left: 16px; background: var(--text); }
+  .reminders-toggle:disabled { opacity: 0.5; cursor: default; }
 </style>
 </head>
 <body>
@@ -456,6 +494,13 @@
 
     <div class="sidebar-spacer"></div>
     <div class="sidebar-foot">
+      <div class="reminders-row">
+        <div class="names">
+          <div class="name">Reminders</div>
+          <div class="sub">On · quiet 22:00–08:00</div>
+        </div>
+        <button type="button" class="reminders-toggle" role="switch" aria-label="Reminders" aria-checked="true"><span class="knob"></span></button>
+      </div>
       <div class="connected-apps-row"><span class="dot"></span>Connected apps · 1 active</div>
       <div class="user-row">
         <div class="user-avatar">CP</div>
@@ -540,6 +585,13 @@
 
     <div class="sidebar-spacer"></div>
     <div class="sidebar-foot">
+      <div class="reminders-row">
+        <div class="names">
+          <div class="name">Reminders</div>
+          <div class="sub">On · quiet 22:00–08:00</div>
+        </div>
+        <button type="button" class="reminders-toggle" role="switch" aria-label="Reminders" aria-checked="true"><span class="knob"></span></button>
+      </div>
       <div class="connected-apps-row"><span class="dot"></span>Connected apps · 1 active</div>
       <div class="user-row">
         <div class="user-avatar">CP</div>
@@ -564,6 +616,13 @@
       <div class="home-greeting">
         <h1>Good morning, Caleb.</h1>
         <p>From first question to reviewed change. What are we building?</p>
+      </div>
+
+      <div class="heartbeat-notices" id="heartbeatNotices">
+        <div class="heartbeat-card" role="status">
+          <span class="heartbeat-text">It is past 10:00 and there is no plan for today yet. Ask Orbit to save one.</span>
+          <button type="button" class="heartbeat-dismiss" aria-label="Dismiss this reminder">✕</button>
+        </div>
       </div>
 
       <div class="home-thread visible" id="homeThread">

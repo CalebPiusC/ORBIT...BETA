@@ -108,6 +108,20 @@ class AuditLog:
         }
         self._write(event)
 
+    def record_event(self, event: str, **fields: Any) -> None:
+        """Append one non-tool event, such as a heartbeat notice fired or dismissed.
+
+        Fields must be identifiers, reasons and timings, never message text.
+        """
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
+                "+00:00", "Z"
+            ),
+            "event": event,
+            **fields,
+        }
+        self._write(record)
+
     def _write(self, event: Mapping[str, Any]) -> None:
         line = json.dumps(event, ensure_ascii=False, separators=(",", ":"), default=str)
         self.path.parent.mkdir(parents=True, exist_ok=True)

@@ -18,6 +18,16 @@
 
     <div class="sidebar-spacer"></div>
     <div class="sidebar-foot">
+      {% if heartbeat %}
+      <div class="reminders-row">
+        <div class="names">
+          <div class="name">Reminders</div>
+          <div class="sub" id="remindersState" title="Quiet hours 22:00–08:00 (Lagos). Plan check at {{ '%02d' | format(heartbeat.plan_hour) }}:00.">{% if heartbeat.paused %}Paused{% else %}On · quiet 22:00–08:00{% endif %}</div>
+        </div>
+        <button type="button" class="reminders-toggle" id="remindersToggle" role="switch"
+                aria-label="Reminders" aria-checked="{{ 'false' if heartbeat.paused else 'true' }}"><span class="knob"></span></button>
+      </div>
+      {% endif %}
       <div class="connected-apps-row"><span class="dot"></span>Connected apps · {{ connected_count }} active</div>
       <div class="user-row">
         <div class="user-avatar">{{ user.name[:2]|upper }}</div>
@@ -43,6 +53,17 @@
         <h1>{{ greeting }}</h1>
         <p>From first question to reviewed change. What are we building?</p>
       </div>
+
+      {% if heartbeat %}
+      <div class="heartbeat-notices" id="heartbeatNotices"{% if not heartbeat.notices %} hidden{% endif %}>
+        {% for notice in heartbeat.notices %}
+        <div class="heartbeat-card" role="status" data-notice-id="{{ notice.id }}">
+          <span class="heartbeat-text">{{ notice.text }}</span>
+          <button type="button" class="heartbeat-dismiss" data-dismiss-notice="{{ notice.id }}" aria-label="Dismiss this reminder">✕</button>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
 
       <div class="home-thread{% if thread %} visible{% endif %}" id="homeThread" aria-live="polite" aria-atomic="false">
         {% for msg in thread %}

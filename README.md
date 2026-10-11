@@ -1,6 +1,6 @@
 # ORBIT...BETA
 
-ORBIT's brain and the two screens it lives in. The provider seam accepts conversation history and a system prompt and returns plain text or a stream. Gemini is the only provider implemented; there is exactly one tool, `write_note(content: str)`, and a reusable confirmation gate plus registration-time audit wrapper exist from tool #1 — nothing runs silently. Agent mode, sub-agents, persistent memory, heartbeat, and voice are still out of scope; see `docs/HANDOFF.md` for what comes next and why.
+ORBIT's brain and the two screens it lives in. The provider seam accepts conversation history and a system prompt and returns plain text or a stream. Gemini is the only provider implemented; there is exactly one tool, `write_note(content: str)`, and a reusable confirmation gate plus registration-time audit wrapper exist from tool #1 — nothing runs silently. Heartbeat reminders (a missing daily plan, a check-in gap, and phone push through ntfy.sh) are built. Agent mode, sub-agents, and voice are still out of scope; see `docs/HANDOFF.md` for what comes next and why.
 
 **Read `docs/HANDOFF.md` before changing anything.** It states which rules are load-bearing, which files from the previous build already exist here, and what the next two phases are.
 
@@ -171,4 +171,29 @@ Run the offline suite (model stubbed) with:
 ```sh
 python -m unittest discover -s tests -v
 ```
+
+## Heartbeat reminders
+
+When the web app starts (`python -m app.server` or `python run_demo.py`), a background
+thread checks two things, in Africa/Lagos time:
+
+- **Missing plan:** after `HEARTBEAT_PLAN_HOUR` (default 10:00), if no plan is saved for
+  today. Save one in the terminal chat (`python chat.py`) by asking Orbit to save it. That
+  is a gated tool, so you type `yes` to approve. The browser home chat does not run tools yet.
+- **Check-in gap:** after `HEARTBEAT_CHECKIN_GAP_DAYS` (default 2) with no message on the
+  home screen. A home-chat message counts as a check-in.
+
+Each check fires at most once per day. Automatic checks are held during quiet hours
+(22:00-08:00). Asking for a check directly skips the quiet-hours hold, but still fires at
+most once per day. A notice appears as a card on the home screen; dismiss it with ✕. The
+Reminders switch in the sidebar pauses everything, and In the terminal chat, the gated
+`pause_heartbeat` and `resume_heartbeat` tools do the same. Every notice fired or dismissed is written to
+`audit.log`.
+
+Phone push: set `NTFY_TOPIC` in `.env` to a long random topic, subscribe to it in the ntfy
+app, and each notice is also POSTed to `NTFY_SERVER` (default `https://ntfy.sh`). Anyone who
+knows the topic can read your notices, so keep it private. Leave it blank to turn push off.
+
+State lives in `runtime/heartbeat.json` (schedule, paused flag, notices) and
+`runtime/plans.json` (dated plans). Both are gitignored. Settings are in `.env.example`.
 
