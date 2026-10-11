@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 ChatRole = Literal["user", "assistant"]
+ThinkingLevel = Literal["quick", "deep"]
 
 # A streamed chunk from the model. ``kind`` is ``"thinking"`` when Orbit is
 # narrating its own plain-language reasoning as it works, and ``"answer"`` for
@@ -94,6 +95,7 @@ class ChatProvider(ABC):
         think: bool = False,
         report_attempts: bool = False,
         allow_tools: bool = False,
+        thinking_level: ThinkingLevel = "quick",
     ) -> Iterator["StreamChunk | ToolProposal"]:
         """Yield the reply as it is generated, chunk by chunk.
 
@@ -112,6 +114,10 @@ class ChatProvider(ABC):
         ``kind="status"`` chunks as it asks each model (for example "Asking
         Titan…", then a fallback notice). Chat mode leaves it False, so no
         status line appears there.
+
+        ``thinking_level`` selects the provider's Quick or Deep response policy.
+        Gemini uses a tight output-token cap and the primary model for Quick;
+        Deep uses a larger cap and prefers the configured fallback model.
 
         When ``allow_tools`` is True, the model may ask for one tool call. The
         provider then yields a :class:`ToolProposal` and stops reading the

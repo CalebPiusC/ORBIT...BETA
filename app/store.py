@@ -111,6 +111,8 @@ class Task:
     chat: list[ChatMessage]
     approved: bool = False
     applied: bool = False
+    last_turn_prompt: str | None = None
+    last_turn_initial: bool = False
 
 
 @dataclass
@@ -218,8 +220,9 @@ class Store:
         # None is a fresh, empty conversation: the composer is centered and no
         # history item is highlighted. The first send creates one.
         self.active_conversation_id: str | None = None
-        # Chat/Agent mode toggle — the same toggle surfaced in the UI.
+        # Chat/Agent and Quick/Deep selectors are shared across the two screens.
         self.mode: Literal["chat", "agent"] = "chat"
+        self.thinking_level: Literal["quick", "deep"] = "quick"
         self.tasks: dict[str, Task] = {"T1": _seed_task()}
         # Home chat threads (user + Orbit turns), one per conversation id.
         self.threads: dict[str, list[ChatMessage]] = {}
@@ -309,6 +312,11 @@ class Store:
         if mode not in ("chat", "agent"):
             raise ValueError("mode must be 'chat' or 'agent'.")
         self.mode = mode  # type: ignore[assignment]
+
+    def set_thinking_level(self, level: str) -> None:
+        if level not in ("quick", "deep"):
+            raise ValueError("thinking_level must be 'quick' or 'deep'.")
+        self.thinking_level = level  # type: ignore[assignment]
 
     # ----- tasks -----
     def get_task(self, task_id: str) -> Task | None:

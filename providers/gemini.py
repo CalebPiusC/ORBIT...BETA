@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 
 import httpx
@@ -17,10 +19,12 @@ from providers.base import (
     ChatMessage,
     ChatProvider,
     StreamChunk,
+    ThinkingLevel,
     ToolProposal,
     title_request,
 )
 from providers.personas import slot_name
+from providers.response_diagnostics import response_diagnostics
 from tools.registry import AuditLog, ToolRegistry
 
 # The only failures the fallback model is allowed to get past: the server
@@ -30,6 +34,9 @@ from tools.registry import AuditLog, ToolRegistry
 FALLBACK_STATUS_CODES = (503, 504)
 
 _END = object()
+log = logging.getLogger("orbit.gemini")
+QUICK_MAX_OUTPUT_TOKENS = 512
+DEEP_MAX_OUTPUT_TOKENS = 4096
 
 # Instructs the model to narrate its reasoning as plain language wrapped in
 # <thinking>…</thinking>, then give the final answer. We surface that
@@ -215,11 +222,25 @@ class GeminiProvider(ChatProvider):
         self._audit_answer(model, stream=False)
         return response, model
 
+    def _persona_for_model(self, model: str) -> str:
+        """Return the assigned display name for the model that is actually called."""
+        if self.fallback_model and model == self.fallback_model:
+            return slot_name(1)
+        return slot_name(0)
+
+    def _model_order_for_level(self, thinking_level: ThinkingLevel) -> tuple[str, str | None]:
+        """Choose a preferred model and one alternate for this requested depth."""
+        if thinking_level == "deep" and self.fallback_model:
+            return self.fallback_model, self.model
+        return self.model, self.fallback_model
+
     def _stream_responses(
         self,
         contents: list[types.Content],
         config: types.GenerateContentConfig,
         notify: Callable[[str], None] | None = None,
+        *,
+        model_order: tuple[str, str | None] | None = None,
     ) -> Iterator[Any]:
         """Yield SDK stream responses, failing over only before the first chunk.
 
@@ -229,27 +250,30 @@ class GeminiProvider(ChatProvider):
         model is asked, and when the primary has failed.
         """
         say = notify or (lambda _text: None)
-        primary_name = slot_name(0)
-        model = self.model
-        say(f"Asking {primary_name}…")
+        model, alternate_model = model_order or (self.model, self.fallback_model)
+        first_persona = self._persona_for_model(model)
+        say(f"Asking {first_persona}…")
         started = time.monotonic()
         try:
             stream, first = self._open_stream(model, contents, config)
         except Exception as exc:
             reason = _fallback_reason(exc)
-            self._audit_failure(model, "primary", exc, started)
-            if not (reason and self.fallback_model):
+            role = "primary" if model == self.model else "fallback"
+            self._audit_failure(model, role, exc, started)
+            if not (reason and alternate_model):
                 raise
-            model = self.fallback_model
+            model = alternate_model
+            alternate_persona = self._persona_for_model(model)
             say(
-                f"{primary_name} didn't answer ({_describe_failure(reason)}). "
-                f"Asking {slot_name(1)}…"
+                f"{first_persona} didn't answer ({_describe_failure(reason)}). "
+                f"Asking {alternate_persona}…"
             )
             started = time.monotonic()
             try:
                 stream, first = self._open_stream(model, contents, config)
             except Exception as fallback_exc:
-                self._audit_failure(model, "fallback", fallback_exc, started)
+                role = "primary" if model == self.model else "fallback"
+                self._audit_failure(model, role, fallback_exc, started)
                 raise
 
         self._audit_answer(model, stream=True)
@@ -375,6 +399,7 @@ class GeminiProvider(ChatProvider):
         think: bool = False,
         report_attempts: bool = False,
         allow_tools: bool = False,
+        thinking_level: ThinkingLevel = "quick",
     ) -> Iterator[StreamChunk | ToolProposal]:
         """Stream the reply chunk by chunk instead of returning it all at once.
 
@@ -388,12 +413,17 @@ class GeminiProvider(ChatProvider):
         Streaming is text-only on purpose: function-calling turns should keep
         using the one-shot :meth:`reply` so the confirmation gate runs
         synchronously. The ``system_instruction`` is still sent, so the model's
-        persona and constraints apply.
+        persona and constraints apply. ``thinking_level`` selects the configured
+        primary model with a 512-token budget (Quick), or prefers the configured
+        fallback model with a 4096-token budget (Deep). If Deep has no fallback,
+        it uses the primary with the larger budget.
         """
         if not isinstance(system_prompt, str):
             raise TypeError("system_prompt must be a string.")
         if not system_prompt.strip():
             raise ValueError("system_prompt must not be empty.")
+        if thinking_level not in ("quick", "deep"):
+            raise ValueError("thinking_level must be 'quick' or 'deep'.")
         if not history:
             raise ValueError("history must contain at least one chat message.")
 
@@ -414,14 +444,16 @@ class GeminiProvider(ChatProvider):
             if think:
                 raise ValueError("Tool calls are offered only for plain replies (think=False).")
             if self._tool_registry is not None and self._tool_registry.definitions:
-                yield from self._stream_with_tools(contents, system_prompt)
+                yield from self._stream_with_tools(contents, system_prompt, thinking_level=thinking_level)
                 return
 
         call_prompt = system_prompt
         if think:
             call_prompt = f"{system_prompt}\n\n{_THINK_INSTRUCTION}"
 
-        config = types.GenerateContentConfig(system_instruction=call_prompt)
+        config = self._generation_config(
+            call_prompt, thinking_level=thinking_level, include_tools=False
+        )
 
         # Status lines are queued by the stream as it opens and flushed in order
         # ahead of the next text piece, so they never interleave a reply chunk.
@@ -430,13 +462,38 @@ class GeminiProvider(ChatProvider):
         if report_attempts:
             def notify(text: str) -> None:
                 pending.append(StreamChunk(kind="status", text=text))
-        response_iter = self._stream_responses(contents, config, notify=notify)
+        response_iter = self._stream_responses(
+            contents,
+            config,
+            notify=notify,
+            model_order=self._model_order_for_level(thinking_level),
+        )
+
+        response_count = 0
+        response_notes: list[dict[str, Any]] = []
+        visible_text_characters = 0
+        stream_completed = False
 
         def texts() -> Iterator[str]:
-            for response in response_iter:
-                text = _chunk_text(response)
-                if text:
-                    yield text
+            nonlocal response_count, visible_text_characters, stream_completed
+            try:
+                for response in response_iter:
+                    response_count += 1
+                    text = _chunk_text(response)
+                    if text and text.strip():
+                        visible_text_characters += len(text.strip())
+                        yield text
+                    elif len(response_notes) < 32:
+                        response_notes.append(
+                            response_diagnostics(response, chunk_index=response_count - 1)
+                        )
+            except Exception as exc:
+                if response_count and visible_text_characters == 0:
+                    self._record_empty_response(
+                        response_count, response_notes, failure_type=type(exc).__name__
+                    )
+                raise
+            stream_completed = True
 
         pieces = _split_thinking(texts()) if think else (
             StreamChunk(kind="answer", text=text) for text in texts()
@@ -447,9 +504,48 @@ class GeminiProvider(ChatProvider):
             yield piece
         yield from pending
         pending.clear()
+        if stream_completed and visible_text_characters == 0:
+            self._record_empty_response(response_count, response_notes)
+
+    def _record_empty_response(
+        self,
+        response_count: int,
+        response_notes: list[dict[str, Any]],
+        *,
+        failure_type: str | None = None,
+    ) -> None:
+        """Log a textless response with safe raw-response metadata."""
+        model = self.last_model_used or self.model
+        role = "primary" if model == self.model else "fallback"
+        diagnostics = {
+            "response_count": response_count,
+            "response_diagnostics": response_notes,
+        }
+        if failure_type is not None:
+            diagnostics["failure_type"] = failure_type
+        log.error(
+            "Gemini stream produced no reply text; raw response diagnostics: %s",
+            json.dumps(diagnostics, ensure_ascii=False, sort_keys=True, default=str),
+        )
+        if self._audit is not None:
+            try:
+                self._audit.record_model_event(
+                    event="model_empty_response",
+                    model=model,
+                    role=role,
+                    stream=True,
+                    reason="no_text",
+                    **diagnostics,
+                )
+            except Exception:
+                log.exception("could not write Gemini empty-response diagnostics to audit.log")
 
     def _stream_with_tools(
-        self, contents: list[types.Content], system_prompt: str
+        self,
+        contents: list[types.Content],
+        system_prompt: str,
+        *,
+        thinking_level: ThinkingLevel,
     ) -> Iterator[StreamChunk | ToolProposal]:
         """Stream a plain reply that may end in one tool proposal.
 
@@ -459,8 +555,10 @@ class GeminiProvider(ChatProvider):
         reply can never ask for more than one action.
         """
         assert self._tool_registry is not None
-        config = self._generation_config(system_prompt)
-        for response in self._stream_responses(contents, config):
+        config = self._generation_config(system_prompt, thinking_level=thinking_level)
+        for response in self._stream_responses(
+            contents, config, model_order=self._model_order_for_level(thinking_level)
+        ):
             parts = _response_parts(response)
             text = "".join(part.text for part in parts if isinstance(getattr(part, "text", None), str))
             if text:
@@ -479,9 +577,23 @@ class GeminiProvider(ChatProvider):
             yield ToolProposal(name=first.name or "unknown_tool", arguments=dict(first.args or {}))
             return
 
-    def _generation_config(self, system_prompt: str) -> types.GenerateContentConfig:
+    def _generation_config(
+        self,
+        system_prompt: str,
+        *,
+        thinking_level: ThinkingLevel | None = None,
+        include_tools: bool = True,
+    ) -> types.GenerateContentConfig:
         config: dict[str, Any] = {"system_instruction": system_prompt}
-        if self._tool_registry is not None and self._tool_registry.definitions:
+        if thinking_level is not None:
+            if thinking_level not in ("quick", "deep"):
+                raise ValueError("thinking_level must be 'quick' or 'deep'.")
+            config["max_output_tokens"] = (
+                QUICK_MAX_OUTPUT_TOKENS
+                if thinking_level == "quick"
+                else DEEP_MAX_OUTPUT_TOKENS
+            )
+        if include_tools and self._tool_registry is not None and self._tool_registry.definitions:
             declarations = [
                 types.FunctionDeclaration(
                     name=definition.name,
@@ -508,12 +620,28 @@ def _response_parts(response: Any) -> list[Any]:
 
 
 def _chunk_text(response: Any) -> str:
-    """Pull the concatenated text out of one streamed Gemini response chunk."""
-    text = getattr(response, "text", None)
+    """Pull text from a response without triggering SDK text-accessor errors.
+
+    Gemini's convenience ``response.text`` property can raise when the first
+    candidate is a function call or has no text part. In that case, inspect the
+    raw parts directly so the caller can record useful empty-response metadata.
+    """
+    try:
+        text = getattr(response, "text", None)
+    except (AttributeError, ValueError):
+        text = None
     if isinstance(text, str) and text:
         return text
-    parts = getattr(response, "parts", None) or []
-    return "".join(getattr(part, "text", "") or "" for part in parts)
+    parts = getattr(response, "parts", None) or _response_parts(response)
+    pieces: list[str] = []
+    for part in parts:
+        try:
+            part_text = getattr(part, "text", None)
+        except (AttributeError, ValueError):
+            part_text = None
+        if isinstance(part_text, str):
+            pieces.append(part_text)
+    return "".join(pieces)
 
 
 def _split_thinking(chunks: Iterator[str]) -> Iterator[StreamChunk]:

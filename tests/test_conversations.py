@@ -6,6 +6,7 @@ Offline. The provider is a stub, so no network and no real model calls.
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
@@ -16,6 +17,7 @@ from app.server import create_app
 from app.store import PLACEHOLDER_TITLE, Store
 from app.titles import UNTITLED
 from tests.test_app import parse_sse
+from tools.registry import AuditLog
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -39,7 +41,7 @@ class TitlingProvider:
         return self.title_text
 
     def reply_stream(
-        self, history, system_prompt: str, *, think: bool = False, report_attempts: bool = False
+        self, history, system_prompt: str, *, think: bool = False, report_attempts: bool = False, thinking_level: str = "quick"
     ) -> Iterator[StreamChunk]:
         text = self.answers.pop(0) if self.answers else "Okay."
         if text:
@@ -174,13 +176,18 @@ class HistoryTitleTests(unittest.TestCase):
 
     def test_a_turn_with_no_answer_does_not_use_up_the_naming_call(self) -> None:
         provider = TitlingProvider(["", "Real answer."], title="Real title")
-        client, _ = _client(provider)
-        first = _send(client, "first")
-        self.assertIn("error", [k for k, _ in first])  # the empty turn is reported
-        self.assertEqual(provider.title_calls, [])
-        second = _send(client, "second")
-        named = [json.loads(d)["title"] for k, d in second if k == "title"]
-        self.assertEqual(named, ["Real title"])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = create_app(
+                provider=provider,
+                store=Store(),
+                model_audit=AuditLog(Path(temp_dir) / "audit.log"),
+            ).test_client()
+            first = _send(client, "first")
+            self.assertIn("error", [k for k, _ in first])  # the empty turn is reported
+            self.assertEqual(provider.title_calls, [])
+            second = _send(client, "second")
+            named = [json.loads(d)["title"] for k, d in second if k == "title"]
+            self.assertEqual(named, ["Real title"])
 
     def test_a_steered_send_reuses_the_same_conversation(self) -> None:
         provider = TitlingProvider(["One.", "Two."])
