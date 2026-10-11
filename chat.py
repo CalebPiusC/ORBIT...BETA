@@ -24,6 +24,7 @@ from typing import Any
 
 from config import Settings, load_settings
 from memory.facts import FactStore
+from memory.time_context import with_current_time
 from providers.base import ChatMessage
 from providers.gemini import GeminiProvider
 from tools import build_tool_registry
@@ -106,7 +107,7 @@ def run_session(
         model_name = getattr(provider, "model", "the model")
         write(WAIT_TEMPLATE.format(model=model_name))
         try:
-            system_prompt = fact_store.system_prompt(SYSTEM_PROMPT)
+            system_prompt = with_current_time(fact_store.system_prompt(SYSTEM_PROMPT))
             answer = provider.reply(history=history, system_prompt=system_prompt)
         except KeyboardInterrupt:
             # Cancel the wait, not the conversation: keep the turn queued.

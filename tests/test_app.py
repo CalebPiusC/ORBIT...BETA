@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
@@ -11,17 +12,35 @@ from providers.base import ChatMessage, StreamChunk
 
 from app.server import create_app
 from app.store import Connection, Store
+from tools.registry import AuditLog
 
 
 class FakeStreamingProvider:
     """Stand-in for GeminiProvider: returns canned streamed chunks, no network."""
 
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
     def reply(self, history, system_prompt: str) -> str:
         return "A canned one-shot reply."
 
     def reply_stream(
-        self, history, system_prompt: str, *, think: bool = False, report_attempts: bool = False
+        self,
+        history,
+        system_prompt: str,
+        *,
+        think: bool = False,
+        report_attempts: bool = False,
+        thinking_level: str = "quick",
     ) -> Iterator[StreamChunk]:
+        self.calls.append(
+            {
+                "history": list(history),
+                "system_prompt": system_prompt,
+                "think": think,
+                "thinking_level": thinking_level,
+            }
+        )
         if think:
             yield StreamChunk(kind="thinking", text="I am checking the repository context.")
             yield StreamChunk(kind="answer", text="Here is my plan for the change.")
@@ -63,6 +82,57 @@ class AppRoutesTests(unittest.TestCase):
         # Mode toggle reflects default chat mode.
         self.assertIn('data-arena="mode-chat"', body)
         self.assertIn('data-mode="chat"', body)
+        self.assertIn('id="currentConversationTitle"', body)
+        self.assertIn("Your ideas, in orbit.", body)
+        self.assertIn("Search chats", body)
+        self.assertIn('data-open-settings', body)
+        self.assertNotIn('class="plus-badge">ORBIT', body)
+
+    def test_chat_and_agent_turn_prompts_include_lagos_time_context(self):
+        home = self.client.post("/api/chat", json={"message": "What time is it?"})
+        home.get_data(as_text=True)
+        self.store.set_mode("agent")
+        agent = self.client.post("/api/task/T1/stream", json={"initial": True})
+        agent.get_data(as_text=True)
+        provider = self.app.config["PROVIDER"]
+        self.assertEqual(len(provider.calls), 2)
+        for call in provider.calls:
+            self.assertIn("Current date and time in Africa/Lagos:", call["system_prompt"])
+            self.assertIn("Use this as the authoritative current time", call["system_prompt"])
+
+    def test_active_conversation_title_is_shown_in_topbar(self):
+        conversation = self.store.start_conversation()
+        self.store.set_title(conversation.id, "Lagos release notes")
+        body = self.client.get("/").get_data(as_text=True)
+        self.assertIn('<span class="topbar-name">Lagos release notes</span>', body)
+
+    def test_regenerate_replaces_only_the_last_home_reply(self):
+        first = self.client.post("/api/chat", json={"message": "Check this answer again."})
+        self.assertEqual(first.status_code, 200)
+        first.get_data(as_text=True)
+        self.assertEqual(len(self.store.home_thread), 2)
+
+        second = self.client.post("/api/chat", json={"regenerate": True})
+        self.assertEqual(second.status_code, 200)
+        second.get_data(as_text=True)
+        self.assertEqual(len(self.store.home_thread), 2)
+        self.assertEqual([item.who for item in self.store.home_thread], ["You", "Orbit"])
+        self.assertEqual(self.store.home_thread[0].body, "Check this answer again.")
+        self.assertEqual(len(self.app.config["PROVIDER"].calls), 2)
+
+    def test_favicon_and_wordmark_use_the_shared_svg_mark(self):
+        body = self.client.get("/").get_data(as_text=True)
+        mark_url = "/static/orbit-mark.svg"
+        self.assertIn(f'<link rel="icon" type="image/svg+xml" href="{mark_url}" />', body)
+        self.assertIn(f'<img class="brand-mark" src="{mark_url}" alt="" aria-hidden="true" />', body)
+
+        mark = self.client.get(mark_url)
+        self.assertEqual(mark.status_code, 200)
+        svg = mark.get_data(as_text=True)
+        mark.close()
+        self.assertIn('viewBox="0 0 64 64"', svg)
+        self.assertIn('rotate(25 32 32)', svg)
+        self.assertIn('rotate(-30 32 32)', svg)
 
     def test_only_github_shown_as_connected(self):
         resp = self.client.get("/")
@@ -109,6 +179,24 @@ class AppRoutesTests(unittest.TestCase):
             "/api/mode", json={"mode": "banana"}, content_type="application/json"
         )
         self.assertEqual(resp.status_code, 400)
+
+    def test_thinking_level_defaults_to_quick_and_can_be_changed(self):
+        self.assertEqual(self.store.thinking_level, "quick")
+        home = self.client.get("/").get_data(as_text=True)
+        self.assertIn('data-thinking-level="quick" aria-pressed="true"', home)
+        self.assertIn('data-thinking-level="deep" aria-pressed="false"', home)
+
+        response = self.client.post("/api/thinking-level", json={"thinking_level": "deep"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json(), {"thinking_level": "deep"})
+        self.assertEqual(self.store.thinking_level, "deep")
+        task = self.client.get("/task/T1").get_data(as_text=True)
+        self.assertIn('data-thinking-level="deep" aria-pressed="true"', task)
+
+    def test_thinking_level_rejects_unknown_values(self):
+        response = self.client.post("/api/thinking-level", json={"thinking_level": "extreme"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.store.thinking_level, "quick")
 
 
 class ApprovalGateTests(unittest.TestCase):
@@ -201,6 +289,21 @@ class StreamingEndpointTests(unittest.TestCase):
         assert task is not None
         self.assertTrue(any(m.is_orbit for m in task.chat))
 
+    def test_task_initial_response_can_be_regenerated_without_duplicate_messages(self):
+        first = self.client.post("/api/task/T1/stream", json={"initial": True})
+        first.get_data(as_text=True)
+        task = self.store.get_task("T1")
+        assert task is not None
+        self.assertEqual(len(task.chat), 2)
+
+        retry = self.client.post("/api/task/T1/stream", json={"regenerate": True})
+        retry.get_data(as_text=True)
+        self.assertEqual(len(task.chat), 2)
+        self.assertEqual(sum(item.is_orbit for item in task.chat), 1)
+        self.assertEqual(len(self.app.config["PROVIDER"].calls), 2)
+        for call in self.app.config["PROVIDER"].calls:
+            self.assertIn("Start the task:", call["history"][-1].content)
+
     def test_task_stream_requires_message_when_not_initial(self):
         resp = self.client.post(
             "/api/task/T1/stream", json={}, content_type="application/json"
@@ -239,48 +342,59 @@ class SilentFailureTests(unittest.TestCase):
     first chunk. Both must reach the page as an event, not as silence.
     """
 
-    def _events(self, provider: Any) -> tuple[list[tuple[str, str]], Store]:
+    def _events(self, provider: Any) -> tuple[list[tuple[str, str]], Store, Path]:
         store = Store()
-        app = create_app(provider=provider, store=store)
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        audit_path = Path(temp_dir.name) / "audit.log"
+        app = create_app(provider=provider, store=store, model_audit=AuditLog(audit_path))
         resp = app.test_client().post(
             "/api/chat", json={"message": "Hello Orbit"}, content_type="application/json"
         )
         self.assertEqual(resp.status_code, 200)
-        return parse_sse(resp.get_data(as_text=True)), store
+        return parse_sse(resp.get_data(as_text=True)), store, audit_path
 
     def test_empty_reply_is_reported_instead_of_streaming_nothing(self) -> None:
         class EmptyProvider:
-            def reply_stream(self, history, system_prompt, *, think=False, report_attempts=False):
+            def reply_stream(self, history, system_prompt, *, think=False, report_attempts=False, thinking_level="quick"):
                 return iter(())
 
-        events, store = self._events(EmptyProvider())
+        events, store, audit_path = self._events(EmptyProvider())
         kinds = [k for k, _ in events]
         self.assertIn("error", kinds)
         self.assertEqual(kinds[-1], "done")
         detail = "".join(d for k, d in events if k == "error")
         self.assertIn("empty reply", detail)
         self.assertFalse(any(m.is_orbit for m in store.home_thread))
+        audit_events = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
+        fallback = next(event for event in audit_events if event["event"] == "model_returned_nothing")
+        self.assertEqual(fallback["reason"], "empty_stream")
 
     def test_provider_failure_before_first_chunk_reaches_the_ui(self) -> None:
         class BrokenProvider:
-            def reply_stream(self, history, system_prompt, *, think=False, report_attempts=False):
+            def reply_stream(self, history, system_prompt, *, think=False, report_attempts=False, thinking_level="quick"):
                 raise RuntimeError("GEMINI_API_KEY is not configured.")
 
-        events, store = self._events(BrokenProvider())
+        events, store, audit_path = self._events(BrokenProvider())
         kinds = [k for k, _ in events]
         self.assertIn("error", kinds)
         self.assertEqual(kinds[-1], "done")
         detail = "".join(d for k, d in events if k == "error")
         self.assertIn("GEMINI_API_KEY", detail)
         self.assertFalse(any(m.is_orbit for m in store.home_thread))
+        raw_audit = audit_path.read_text(encoding="utf-8")
+        audit_events = [json.loads(line) for line in raw_audit.splitlines()]
+        failure = next(event for event in audit_events if event["event"] == "model_stream_failed")
+        self.assertEqual(failure["reason"], "RuntimeError")
+        self.assertNotIn("GEMINI_API_KEY", raw_audit)
 
 
 class ChatBubbleLayoutTests(unittest.TestCase):
-    """Speakers are told apart by position and surface, not by name labels.
+    """Speakers are told apart by position and marker, not by name labels.
 
     Rule (UI request, chat area): no "You" / "Orbit" text labels. User bubbles
-    are right-aligned (class ``user``); Orbit bubbles are left-aligned (class
-    ``orbit``) with the brain icon in front of their text as the only marker.
+    are right-aligned (class ``user``); Orbit replies are plain, unboxed text
+    with the orbital mark in front as the only speaker marker.
     """
 
     def setUp(self) -> None:
@@ -321,11 +435,28 @@ class ChatBubbleLayoutTests(unittest.TestCase):
         self.assertRegex(body, r'<div class="chat-meta">09:41</div>')
         self.assertIn("Add order status tracking", body)
 
-    def test_orbit_messages_are_left_aligned_with_brain_icon_in_text(self) -> None:
+    def test_orbit_messages_are_unboxed_and_have_full_reply_width(self) -> None:
+        css = (Path(__file__).resolve().parent.parent / "app" / "templates" / "layout.html").read_text(
+            encoding="utf-8"
+        )
+        orbit = re.search(r"\.chat-bubble\.orbit\s*\{([^}]*)\}", css)
+        self.assertIsNotNone(orbit)
+        self.assertRegex(orbit.group(1), r"background:\s*transparent")
+        self.assertRegex(orbit.group(1), r"border:\s*0")
+        self.assertRegex(orbit.group(1), r"padding:\s*0")
+        self.assertRegex(orbit.group(1), r"width:\s*100%")
+        self.assertRegex(css, r"\.chat-row\.orbit\s*\{[^}]*width:\s*100%")
+        self.assertRegex(css, r"\.chat-bubble\.orbit \.body\s*\{[^}]*white-space:\s*pre-wrap")
+
+        user = re.search(r"\.chat-bubble\.user\s*\{([^}]*)\}", css)
+        self.assertIsNotNone(user)
+        self.assertIn("background: var(--accent)", user.group(1))
+
+    def test_orbit_messages_are_left_aligned_with_orbital_mark_in_text(self) -> None:
         body = self.client.get("/task/T1").get_data(as_text=True)
         self.assertIn('class="chat-bubble orbit"', body)
-        # The icon is inside the same body element as Orbit's text, before it.
-        self.assertRegex(body, r'<div class="body"><span class="brain-icon">.*?</span>On it\.</div>')
+        # The shared brand SVG is inside the body, before Orbit's text.
+        self.assertRegex(body, r'<div class="body"><img class="orbit-icon"[^>]*><span class="reply">On it\.</span></div>')
 
     def test_script_builds_rows_and_time_lines(self) -> None:
         from pathlib import Path
@@ -340,6 +471,25 @@ class ChatBubbleLayoutTests(unittest.TestCase):
         self.assertIn('"chat-bubble " + side', script)
         # The home thread's pending check must look at rows, not bare bubbles.
         self.assertIn('".chat-row.orbit:last-child .body"', script)
+
+    def test_voice_controls_record_and_use_the_ordinary_chat_send_handlers(self) -> None:
+        home = self.client.get("/").get_data(as_text=True)
+        task = self.client.get("/task/T1").get_data(as_text=True)
+        script = (Path(__file__).resolve().parent.parent / "app" / "static" / "app.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('id="homeVoice"', home)
+        self.assertIn('id="taskVoice"', task)
+        self.assertIn("navigator.mediaDevices.getUserMedia({ audio: true })", script)
+        self.assertIn("new window.MediaRecorder(stream", script)
+        self.assertIn('fetch("/api/voice/transcribe"', script)
+        self.assertIn('form.append("audio", blob', script)
+        self.assertIn("sendMessage({ voiceReply: true })", script)
+        self.assertIn("sendSteer({ voiceReply: true })", script)
+        self.assertIn('fetch("/api/voice/speech"', script)
+        self.assertIn("body.appendChild(audio)", script)  # timestamp stays beneath text and player
+        self.assertIn('window.MediaSource.isTypeSupported("audio/mpeg")', script)
+        self.assertIn("response.blob()", script)  # playback fallback when MSE is absent
 
 
 class ServerMessageTimeTests(unittest.TestCase):
@@ -442,7 +592,7 @@ class PaletteAndBubbleTests(unittest.TestCase):
                 _contrast(self.tokens["--accent-bright"], self.tokens[surface]), 4.5, surface
             )
 
-    def test_home_thread_renders_every_orbit_message_with_brain_icon(self) -> None:
+    def test_home_thread_renders_every_orbit_message_with_orbital_mark(self) -> None:
         from app.store import ChatMessage as StoreChatMessage
 
         self.store.start_conversation()
@@ -456,9 +606,9 @@ class PaletteAndBubbleTests(unittest.TestCase):
         body = self.client.get("/").get_data(as_text=True)
         self.assertIn('<div class="chat-row user">', body)
         self.assertEqual(body.count('<div class="chat-row orbit">'), 2)
-        # Every Orbit body starts with the brain icon, not only while streaming.
+        # Every Orbit body starts with the shared logo mark, not only while streaming.
         self.assertEqual(
-            len(re.findall(r'<div class="body"><span class="brain-icon">.*?</span><span class="reply">', body, re.S)),
+            len(re.findall(r'<div class="body"><img class="orbit-icon"[^>]*><span class="reply">', body, re.S)),
             2,
         )
         self.assertRegex(body, r'<div class="chat-meta">09:43</div>')
@@ -539,8 +689,8 @@ class RecordingProvider:
     def reply(self, history, system_prompt: str) -> str:
         return "".join(self.pieces)
 
-    def reply_stream(self, history, system_prompt: str, *, think: bool = False, report_attempts: bool = False):
-        self.calls.append({"think": think, "report_attempts": report_attempts})
+    def reply_stream(self, history, system_prompt: str, *, think: bool = False, report_attempts: bool = False, thinking_level: str = "quick"):
+        self.calls.append({"think": think, "report_attempts": report_attempts, "thinking_level": thinking_level})
         if report_attempts:
             yield StreamChunk(kind="status", text="Asking Titan…")
         for piece in self.pieces:
@@ -586,18 +736,30 @@ class RouteStreamingTests(unittest.TestCase):
         self.assertEqual(len(answers), len(self.PIECES))
         self.assertLess(answers[0], len(self.PIECES))
 
+    def test_selected_deep_level_is_passed_to_both_chat_routes(self) -> None:
+        for url, payload in (
+            ("/api/chat", {"message": "deep question"}),
+            ("/api/task/T1/stream", {"message": "deep steering"}),
+        ):
+            provider = RecordingProvider(self.PIECES)
+            store = Store()
+            store.set_thinking_level("deep")
+            client = create_app(provider=provider, store=store).test_client()
+            client.post(url, json=payload).get_data(as_text=True)
+            self.assertEqual(provider.calls[0]["thinking_level"], "deep")
+
     def test_chat_mode_never_asks_for_status_lines(self) -> None:
         provider = RecordingProvider(self.PIECES)
         seen = events_as_they_arrive(self._client(provider), "/api/chat", {"message": "hi"}, provider)
         self.assertNotIn("status", [event for event, _ in seen])
-        self.assertEqual(provider.calls, [{"think": False, "report_attempts": False}])
+        self.assertEqual(provider.calls, [{"think": False, "report_attempts": False, "thinking_level": "quick"}])
 
     def test_agent_mode_asks_for_status_lines_and_shows_them(self) -> None:
         provider = RecordingProvider(self.PIECES)
         seen = events_as_they_arrive(
             self._client(provider, mode="agent"), "/api/task/T1/stream", {"message": "steer"}, provider
         )
-        self.assertEqual(provider.calls, [{"think": True, "report_attempts": True}])
+        self.assertEqual(provider.calls, [{"think": True, "report_attempts": True, "thinking_level": "quick"}])
         self.assertIn("status", [event for event, _ in seen])
         self.assertEqual(seen[0][0], "status")
 
@@ -606,7 +768,7 @@ class RouteStreamingTests(unittest.TestCase):
         seen = events_as_they_arrive(
             self._client(provider, mode="chat"), "/api/task/T1/stream", {"message": "steer"}, provider
         )
-        self.assertEqual(provider.calls, [{"think": True, "report_attempts": False}])
+        self.assertEqual(provider.calls, [{"think": True, "report_attempts": False, "thinking_level": "quick"}])
         self.assertNotIn("status", [event for event, _ in seen])
 
 

@@ -18,8 +18,8 @@ before, and they are in better shape than the plan expected:
 | 1 — provider seam, multi-model from the start | **Done** | `providers/base.py` (`ChatProvider`), `providers/gemini.py`, `config.py`, `chat.py` |
 | 2 — tools + confirmation gate in the same pass | **Done** | `tools/registry.py` (gate + audit wrap), `tools/confirmation.py`, `tools/notes.py` |
 | 3 — UI from a real file, not a description | **Done**, offline-verified | `design/orbit_mockup.html` → `app/templates/`, `app/server.py`, `app/store.py` |
-| 4 — memory, heartbeat, voice | **Partly done**: heartbeat (4b) built and offline-verified; memory (4a) and voice as noted in §5 | `heartbeat/`, `memory/plans.py`, `memory/jsonstore.py`, `tools/plans.py`, `runtime/heartbeat.json`, `runtime/plans.json` |
-| 5 — second provider, agent mode | **Not started** | seam exists: `ChatProvider` + `max_tool_rounds` |
+| 4 — memory, heartbeat, browser voice | **Partly done**: memory and heartbeat foundations exist; browser push-to-talk, speech replies, and Quick/Deep selection are built in Phase 4c and offline-tested | `heartbeat/`, `memory/`, `app/voice.py`, `app/static/app.js`, `runtime/heartbeat.json`, `runtime/plans.json` |
+| 5 — second provider, agent mode | **Partly done**: Agent UI and truthful Gemini model labels exist; no second provider or sub-agents | seam exists: `ChatProvider` + `max_tool_rounds`, task stream in `app/server.py` |
 | 6 — `user_id` from the start | **Seeded**, no persistence yet | `app/store.py` (`DEFAULT_USER_ID`, `user_id` on `Conversation`/`Task`/`User`, `conversations_for`, `tasks_for`) |
 
 Offline suite: all green (`sh setup.sh` re-runs them). `google-genai` 1.75.0.
@@ -150,6 +150,13 @@ These are not style preferences. Each one exists because the previous build viol
    `127.0.0.1` and always sets `debug=False`. A container or sandbox preview may opt into
    an external bind with `ORBIT_HOST=0.0.0.0` (and `PORT` for the port); do not turn on
    debug mode, especially on an externally reachable address.
+12. **Quick/Deep and voice are additions, not new chat paths.** Quick/Deep affects the
+   streamed UI provider request only; Deep prefers the configured fallback model with a
+   larger `max_output_tokens` cap, and Agent activity must identify the actual model after
+   failover. Keep typed input as the default. Voice transcripts re-enter `/api/chat` or
+   `/api/task/<id>/stream`; they must not bypass tool approval, task approval, history, or
+   safety gates. Audio uploads are bounded and temporary, and generated MP3 bytes are
+   streamed from the server rather than synthesized in the browser.
 
 ---
 
@@ -178,6 +185,11 @@ a live key in this checkout. Say so in any status report instead of implying oth
   preview host is blocked — so a "web box does nothing" report should be triaged by
   checking whether the `POST /api/chat` line ever appears in the server log. No log line
   means browser or proxy; a log line with no visible reply means streaming/buffering.
+- **Voice is offline-tested with fakes, not live end-to-end.** The browser microphone,
+  real Whisper model download/transcription, Edge TTS network stream, and audio playback
+  have not been exercised in a real browser. Tests cover the service adapters and Flask
+  endpoints without contacting Whisper or Microsoft. The preview must be HTTPS (or
+  localhost) for microphone access.
 
 ---
 
@@ -274,14 +286,12 @@ property still holds.
 
 ---
 
-## 5. Phase 4 and 5, when you get there
+## 5. Phase 4 and 5 — current status and constraints
 
-Not this builder's task, but the constraints are decided now so nobody invents them later:
-
-- **Memory / heartbeat / voice** land on top of `app/store.py`'s existing read paths, and
-  every store keeps the `user_id` field. Heartbeat state is local runtime state
-  (`runtime/heartbeat.json`, `runtime/plans.json`; both ignored). Voice is an input/output
-  mode on the same provider seam, not a second brain.
+The shared store seam remains `app/store.py`; records keep their `user_id` field.
+Heartbeat state is local runtime state (`runtime/heartbeat.json`, `runtime/plans.json`;
+both ignored). Voice is an input/output path on the same provider seam, not a second
+brain.
 
 ### 5.1 Heartbeat as built (Phase 4b)
 
@@ -308,7 +318,47 @@ Not this builder's task, but the constraints are decided now so nobody invents t
   the browser's Chat mode (cards, see README "Browser tools"). The sidebar switch is the
   browser's pause control. ntfy.sh could not be reached from the build sandbox, so the phone
   push was verified against a local HTTP server only.
-- **Agent mode** reuses the same gate and `max_tool_rounds`, with the ceiling raised from
-  the current 5 to a deliberate 6 model calls per turn — one number, in `config.py`,
-  asserted by a test. A second provider (stronger Gemini tier for agent turns, a free
-  tier as fallback) is additive because `ChatProvider` is the only thing call sites know.
+### 5.2 Browser voice and Quick/Deep (Phase 4c)
+
+- **Typed chat remains the default.** Press-and-hold mic controls record through the
+  browser's `MediaRecorder`; release uploads the clip to `/api/voice/transcribe`. The
+  returned transcript is placed into the existing composer and sent through the ordinary
+  `/api/chat` or `/api/task/<id>/stream` route.
+- **Transcription is local to the server.** `app/voice.py` lazily loads
+  `faster-whisper` (`base`, CPU, `int8` by default). The browser upload is capped at
+  25 MiB, recordings stop at two minutes, and audio is stored in a temporary file only
+  during transcription; it is removed in `finally`. The first call downloads the model
+  to the standard Hugging Face cache. Settings: `ORBIT_WHISPER_MODEL`,
+  `ORBIT_WHISPER_DEVICE`, `ORBIT_WHISPER_COMPUTE_TYPE`.
+- **Voice replies are streamed.** A turn submitted by push-to-talk requests
+  `/api/voice/speech`; Edge TTS streams MP3 using `en-US-GuyNeural` at `-15Hz`.
+  The browser uses Media Source Extensions where MP3 streaming is supported and a Blob
+  playback fallback otherwise. Typed turns remain text-only.
+- **Quick/Deep is per stream, shared across both screens.** Quick uses the configured
+  primary Gemini model and `max_output_tokens=512`. Deep uses `4096` and prefers the
+  configured fallback model; if it fails before the first chunk, the primary is tried.
+  Agent status names the model actually being called, including Deep-first and failover
+  order. The selection lives in `Store` for the web process lifetime.
+- **Current Agent mode is still one Gemini provider.** It streams a task reply with
+  narration and optional model-attempt labels; Chat mode remains the only browser mode
+  that offers the six gated tools. There are no sub-agents or second provider yet. Keep
+  approvals enforced by `Store` and `PendingActions` before any future execution path.
+
+### 5.3 Lagos time context, empty-stream audit, and UI polish
+
+- Every CLI, home-chat, and task-agent prompt gets a freshly computed `Africa/Lagos`
+  date/time context (`memory/time_context.py`). It uses an aware instant and explicitly
+  tells the model that this context is authoritative for time-sensitive answers.
+- A Gemini stream that completes without visible text logs `model_empty_response` with
+  safe response metadata: candidate finish reasons, function-call names and
+  function-call-without-text flags, prompt/candidate safety blocks and ratings, response
+  ids/model version, and usage counters. Function-call arguments and prompt/reply text are
+  excluded. The browser's user-visible empty-reply fallback is separately recorded as
+  `model_returned_nothing`; provider exceptions are recorded as `model_stream_failed`.
+- Sidebar search filters local history; conversation/task headers show their current
+  names; settings/account controls open an account summary; Orbit message actions support
+  copy, latest-turn regenerate, and local feedback state. The send control becomes Stop
+  during streaming. Motion respects `prefers-reduced-motion`.
+- Composer attachment controls currently open the file picker but do not upload files to
+  the model. Selected filenames are shown locally with that limitation stated. The GitHub
+  shortcut opens GitHub; it does not choose a repository.

@@ -29,13 +29,33 @@ from typing import Any, Callable
 
 from flask import Flask, Response, render_template, request, stream_with_context
 from providers.base import ChatMessage as ProvChatMessage, StreamChunk, ToolProposal
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from app.actions import PendingActions, ProposalRejected
 from app.store import PLACEHOLDER_TITLE, ActionCard, Store, now_label
+from app.voice import VoiceService, VoiceServiceUnavailable
 from app.titles import request_title
 from memory.facts import FactStore
+from memory.time_context import with_current_time
+from tools.registry import AuditLog
 
 log = logging.getLogger("orbit.server")
+
+MAX_VOICE_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_SPEECH_TEXT_CHARS = 12_000
+_AUDIO_SUFFIX_BY_MIME = {
+    "audio/webm": ".webm",
+    "video/webm": ".webm",
+    "audio/ogg": ".ogg",
+    "application/ogg": ".ogg",
+    "audio/mp4": ".mp4",
+    "video/mp4": ".mp4",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/wave": ".wav",
+}
 
 HOME_SYSTEM_PROMPT = (
     "You are ORBIT, a helpful assistant. Reply clearly and concisely. "
@@ -107,6 +127,8 @@ def create_app(
     facts: FactStore | None = None,
     heartbeat: Any | None = None,
     actions: PendingActions | None = None,
+    voice_service: Any | None = None,
+    model_audit: AuditLog | None = None,
 ) -> Flask:
     """Build the Flask app.
 
@@ -118,17 +140,25 @@ def create_app(
     ``heartbeat`` is the reminder service. It is deliberately not built here:
     ``run_app`` builds it and starts its scheduler at boot, so importing or
     testing the app never touches runtime/heartbeat.json. Without a heartbeat
-    the heartbeat routes answer 503 and home shows no notices.
+    the heartbeat routes answer 503 and home shows no notices. Voice providers
+    are lazy by default; tests may inject a fake ``voice_service``.
     """
     app = Flask(__name__, template_folder="templates")
     app.secret_key = "orbit-dev-secret"
+    app.config["MAX_CONTENT_LENGTH"] = MAX_VOICE_UPLOAD_BYTES
     app.config["PROVIDER"] = provider
     app.config["STORE"] = store or Store()
     app.config["FACTS"] = facts if facts is not None else FactStore()
     app.config["HEARTBEAT"] = heartbeat
+    app.config["VOICE_SERVICE"] = voice_service if voice_service is not None else VoiceService()
+    app.config["MODEL_AUDIT"] = model_audit if model_audit is not None else AuditLog()
     # The queue of tool calls the home chat proposed. Without it, Chat mode is
     # plain text, as before. run_app builds it with the real tools.
     app.config["ACTIONS"] = actions
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def request_too_large(_error: RequestEntityTooLarge) -> Response:
+        return _json({"error": "Recording is too large. Keep voice clips under 25 MB."}, 413)
 
     def _heartbeat_or_none() -> Any | None:
         return app.config["HEARTBEAT"]
@@ -151,9 +181,22 @@ def create_app(
             from providers.gemini import GeminiProvider
 
             queue = app.config["ACTIONS"]
-            prov = GeminiProvider(tool_registry=queue.registry if queue is not None else None)
+            prov = GeminiProvider(
+                tool_registry=queue.registry if queue is not None else None,
+                audit_log=app.config["MODEL_AUDIT"],
+            )
             app.config["PROVIDER"] = prov
         return prov
+
+    def _record_model_event(event: str, **fields: Any) -> None:
+        audit: AuditLog | None = app.config["MODEL_AUDIT"]
+        if audit is None:
+            return
+        try:
+            audit.record_model_event(event=event, **fields)
+        except Exception:
+            # Diagnostics must not turn a provider failure into a broken SSE stream.
+            log.exception("could not write model diagnostics to audit.log")
 
     @app.get("/")
     def home() -> str:
@@ -163,8 +206,15 @@ def create_app(
             user=st.user,
             greeting=st.greeting(),
             mode=st.mode,
+            thinking_level=st.thinking_level,
             conversations=st.conversations_grouped(),
             active_conversation_id=st.active_conversation_id,
+            active_conversation_title=(
+                st.get_conversation(st.active_conversation_id).title
+                if st.active_conversation_id is not None
+                and st.get_conversation(st.active_conversation_id) is not None
+                else PLACEHOLDER_TITLE
+            ),
             connections=st.connections,
             connected_count=st.connected_count(),
             thread=st.home_thread,
@@ -189,8 +239,10 @@ def create_app(
             "task.html",
             user=st.user,
             mode=st.mode,
+            thinking_level=st.thinking_level,
             task=task_obj,
             stream_initial=stream_initial,
+            heartbeat=_heartbeat_view(),
             connections=st.connections,
             connected_count=st.connected_count(),
             conversations=st.conversations_grouped(),
@@ -208,6 +260,79 @@ def create_app(
             return Response(json.dumps({"error": str(exc)}), status=400, mimetype="application/json")
         return Response(json.dumps({"mode": st.mode}), mimetype="application/json")
 
+    @app.post("/api/thinking-level")
+    def set_thinking_level() -> Response:
+        st: Store = app.config["STORE"]
+        payload = request.get_json(silent=True) or {}
+        try:
+            st.set_thinking_level(payload.get("thinking_level"))
+        except ValueError as exc:
+            return _json({"error": str(exc)}, 400)
+        return _json({"thinking_level": st.thinking_level})
+
+    @app.post("/api/voice/transcribe")
+    def api_voice_transcribe() -> Response:
+        upload = request.files.get("audio")
+        if upload is None:
+            return _json({"error": "audio recording is required"}, 400)
+        mime_type = (upload.mimetype or "").lower().split(";", 1)[0].strip()
+        extension = _AUDIO_SUFFIX_BY_MIME.get(mime_type)
+        if extension is None:
+            return _json({"error": "unsupported audio format"}, 415)
+        audio = upload.read()
+        if not audio:
+            return _json({"error": "the recording is empty"}, 400)
+        try:
+            transcript = app.config["VOICE_SERVICE"].transcribe(audio, extension=extension)
+        except VoiceServiceUnavailable:
+            log.exception("voice transcription service unavailable")
+            return _json({"error": "Voice transcription is unavailable right now."}, 503)
+        except ValueError as exc:
+            return _json({"error": str(exc)}, 400)
+        except Exception:
+            log.exception("voice transcription failed")
+            return _json({"error": "Could not transcribe that recording. Please try again."}, 500)
+        if not transcript:
+            return _json({"error": "No speech was detected. Try speaking a little closer to the mic."}, 422)
+        return _json({"transcript": transcript})
+
+    @app.post("/api/voice/speech")
+    def api_voice_speech() -> Response:
+        payload = request.get_json(silent=True) or {}
+        text = payload.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return _json({"error": "text is required"}, 400)
+        text = text.strip()
+        if len(text) > MAX_SPEECH_TEXT_CHARS:
+            return _json({"error": "That reply is too long to synthesize as one audio clip."}, 413)
+        try:
+            chunks = iter(app.config["VOICE_SERVICE"].stream_speech(text))
+            first_chunk = next(chunks)
+        except VoiceServiceUnavailable:
+            log.exception("voice synthesis service unavailable")
+            return _json({"error": "Spoken replies are unavailable right now."}, 503)
+        except StopIteration:
+            return _json({"error": "The speech service returned no audio."}, 502)
+        except Exception:
+            log.exception("voice synthesis failed before audio started")
+            return _json({"error": "Could not generate spoken audio. Please try again."}, 502)
+
+        @stream_with_context
+        def audio_stream() -> Iterator[bytes]:
+            yield first_chunk
+            try:
+                yield from chunks
+            except Exception:
+                # HTTP headers and the first MP3 bytes are already on the wire;
+                # log a truncated upstream stream rather than leaking details.
+                log.exception("voice synthesis stream ended unexpectedly")
+
+        return Response(
+            audio_stream(),
+            mimetype="audio/mpeg",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
+
     @app.post("/api/conversations/new")
     def api_new_conversation() -> Response:
         st: Store = app.config["STORE"]
@@ -218,45 +343,84 @@ def create_app(
     def api_chat() -> Response:
         st: Store = app.config["STORE"]
         payload = request.get_json(silent=True) or {}
-        message = (payload.get("message") or "").strip()
-        if not message:
-            return Response(json.dumps({"error": "message is required"}), status=400, mimetype="application/json")
-
+        regenerate = payload.get("regenerate") is True
+        message = payload.get("message")
+        message = message.strip() if isinstance(message, str) else ""
         from app.store import ChatMessage as StoreChatMessage
 
-        # The first send in a fresh conversation creates it. Every event of this
-        # turn is tied to this id, so switching conversations mid-stream cannot
-        # file the reply under the wrong one.
         created = None
-        if st.active_conversation_id is None:
-            created = st.start_conversation()
-        conv_id = st.active_conversation_id
-        assert conv_id is not None
-
         sent_at = now_label()
-        st.append_message(conv_id, StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False))
-        # Heartbeat's check-in: a message sent from home counts as checking in.
-        hb = _heartbeat_or_none()
-        if hb is not None:
-            try:
-                hb.record_checkin()
-            except RuntimeError:
-                log.exception("could not record check-in; the chat message was still saved")
+        if regenerate:
+            conv_id = st.active_conversation_id
+            thread = st.threads.get(conv_id or "", [])
+            if conv_id is None or not thread or not thread[-1].is_orbit or thread[-1].action is not None:
+                return Response(
+                    json.dumps({"error": "there is no completed response to regenerate"}),
+                    status=409,
+                    mimetype="application/json",
+                )
+            previous_user = next((item for item in reversed(thread[:-1]) if not item.is_orbit), None)
+            if previous_user is None:
+                return Response(
+                    json.dumps({"error": "the last response has no user message to retry"}),
+                    status=409,
+                    mimetype="application/json",
+                )
+            # Replace only the latest Orbit reply. The original user message
+            # remains in history and no duplicate turn/check-in is created.
+            thread.pop()
+            message = previous_user.body
+        else:
+            if not message:
+                return Response(json.dumps({"error": "message is required"}), status=400, mimetype="application/json")
+            # The first send in a fresh conversation creates it. Every event of
+            # this turn is tied to this id, so switching conversations mid-stream
+            # cannot file the reply under the wrong one.
+            if st.active_conversation_id is None:
+                created = st.start_conversation()
+            conv_id = st.active_conversation_id
+            assert conv_id is not None
+            st.append_message(
+                conv_id,
+                StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False),
+            )
+
+        assert conv_id is not None
+        if not regenerate:
+            # Heartbeat's check-in: a user message counts, a retry does not.
+            hb = _heartbeat_or_none()
+            if hb is not None:
+                try:
+                    hb.record_checkin()
+                except RuntimeError:
+                    log.exception("could not record check-in; the chat message was still saved")
         history = _history_from_thread(st.threads[conv_id])
 
         # Tools are offered in Chat mode only, and only when a queue is attached.
         queue: PendingActions | None = app.config["ACTIONS"]
         use_tools = queue is not None and st.mode == "chat"
+        thinking_level = st.thinking_level
         home_prompt = HOME_SYSTEM_PROMPT + (f" {TOOL_GUIDANCE}" if use_tools else "")
         # Read the facts now, once per turn, so an edit lands on the next reply.
-        system_prompt = app.config["FACTS"].system_prompt(home_prompt)
+        system_prompt = with_current_time(app.config["FACTS"].system_prompt(home_prompt))
         cards: list[ActionCard] = []
 
         def chunk_source() -> Iterator[StreamChunk | ToolProposal]:
             provider = get_provider()
             if use_tools:
-                return provider.reply_stream(history, system_prompt, think=False, allow_tools=True)
-            return provider.reply_stream(history, system_prompt, think=False)
+                return provider.reply_stream(
+                    history,
+                    system_prompt,
+                    think=False,
+                    allow_tools=True,
+                    thinking_level=thinking_level,
+                )
+            return provider.reply_stream(
+                history,
+                system_prompt,
+                think=False,
+                thinking_level=thinking_level,
+            )
 
         def on_proposal(proposal: ToolProposal) -> tuple[str, str]:
             """Queue the call for approval. Nothing runs here."""
@@ -270,7 +434,7 @@ def create_app(
             return "action", json.dumps({"id": card.id, "summary": card.summary, "state": card.state})
 
         def on_done(answer: str) -> None:
-            if answer:
+            if answer.strip():
                 st.append_message(
                     conv_id, StoreChatMessage(who="Orbit", time=sent_at, body=answer, is_orbit=True)
                 )
@@ -284,7 +448,7 @@ def create_app(
         def after_done(answer: str) -> tuple[str, str] | None:
             """Name the conversation after its first completed exchange, once."""
             conv = st.get_conversation(conv_id)
-            if not answer or conv is None or conv.titled:
+            if not answer.strip() or conv is None or conv.titled:
                 return None
             conv.titled = True  # one attempt only, success or not
             title = request_title(get_provider(), message, answer)
@@ -368,21 +532,49 @@ def create_app(
             return Response(json.dumps({"error": "unknown task"}), status=404, mimetype="application/json")
 
         payload = request.get_json(silent=True) or {}
-        message = (payload.get("message") or "").strip()
+        message = payload.get("message")
+        message = message.strip() if isinstance(message, str) else ""
         initial = bool(payload.get("initial", False))
+        regenerate = payload.get("regenerate") is True
 
         from app.store import ChatMessage as StoreChatMessage
 
         extra_user: str | None = None
         sent_at = now_label()  # message start time, shown under both bubbles
-        if initial:
+        if regenerate:
+            if initial or not task_obj.chat or not task_obj.chat[-1].is_orbit:
+                return Response(
+                    json.dumps({"error": "there is no completed task response to regenerate"}),
+                    status=409,
+                    mimetype="application/json",
+                )
+            if task_obj.last_turn_initial:
+                extra_user = task_obj.last_turn_prompt
+                if not extra_user:
+                    return Response(
+                        json.dumps({"error": "the opening prompt is unavailable"}),
+                        status=409,
+                        mimetype="application/json",
+                    )
+            elif len(task_obj.chat) < 2 or task_obj.chat[-2].is_orbit:
+                return Response(
+                    json.dumps({"error": "the last task response has no user message to retry"}),
+                    status=409,
+                    mimetype="application/json",
+                )
+            task_obj.chat.pop()
+        elif initial:
             extra_user = (
                 f"Start the task: {task_obj.title}. {task_obj.description} "
                 "Give your opening update."
             )
+            task_obj.last_turn_prompt = extra_user
+            task_obj.last_turn_initial = True
         else:
             if not message:
                 return Response(json.dumps({"error": "message is required"}), status=400, mimetype="application/json")
+            task_obj.last_turn_prompt = message
+            task_obj.last_turn_initial = False
             st.add_chat(
                 task_id,
                 StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False),
@@ -390,17 +582,22 @@ def create_app(
 
         history = _history_from_thread(task_obj.chat, extra_user=extra_user)
 
-        system_prompt = app.config["FACTS"].system_prompt(TASK_SYSTEM_PROMPT)
+        system_prompt = with_current_time(app.config["FACTS"].system_prompt(TASK_SYSTEM_PROMPT))
         # Agent mode names the model being asked ("Asking Titan…"); Chat mode stays unlabeled.
         label_models = st.mode == "agent"
+        thinking_level = st.thinking_level
 
         def chunk_source() -> Iterator[StreamChunk]:
             return get_provider().reply_stream(
-                history, system_prompt, think=True, report_attempts=label_models
+                history,
+                system_prompt,
+                think=True,
+                report_attempts=label_models,
+                thinking_level=thinking_level,
             )
 
         def on_done(answer: str) -> None:
-            if answer:
+            if answer.strip():
                 st.add_chat(
                     task_id,
                     StoreChatMessage(who="Orbit", time=sent_at, body=answer, is_orbit=True),
@@ -456,7 +653,6 @@ def create_app(
         @stream_with_context
         def generate() -> Iterator[str]:
             answer_parts: list[str] = []
-            saw_thinking = False
             saw_proposal = False
             failed = False
             if start_event is not None:
@@ -474,17 +670,39 @@ def create_app(
                         # Agent mode only: which model is being asked. Not reply text.
                         yield _sse("status", chunk.text)
                     elif chunk.kind == "thinking":
-                        saw_thinking = True
                         yield _sse("thinking", chunk.text)
                     else:
                         yield _sse("answer", chunk.text)
                         answer_parts.append(chunk.text)
             except Exception as exc:  # surface provider/SDK errors to the UI
                 failed = True
+                provider = app.config.get("PROVIDER")
+                _record_model_event(
+                    "model_stream_failed",
+                    provider=type(provider).__name__ if provider is not None else "unknown",
+                    model=getattr(provider, "last_model_used", None)
+                    or getattr(provider, "model", None),
+                    reason=type(exc).__name__,
+                    stream=True,
+                )
                 yield _sse("error", str(exc))
-            if not failed and not answer_parts and not saw_thinking and not saw_proposal:
+            answer = "".join(answer_parts)
+            if not failed and not answer.strip() and not saw_proposal:
+                # Always audit this user-visible fallback—even when the
+                # provider itself has no model-level diagnostics (for example,
+                # the demo stub or a provider that yielded only empty chunks).
+                provider = app.config.get("PROVIDER")
+                _record_model_event(
+                    "model_returned_nothing",
+                    provider=type(provider).__name__ if provider is not None else "unknown",
+                    model=getattr(provider, "last_model_used", None)
+                    or getattr(provider, "model", None),
+                    reason="empty_stream",
+                    stream=True,
+                    function_call_proposal_seen=saw_proposal,
+                )
                 # A turn that produced literally nothing looks identical to a
-                # hung UI. Say so instead — this is the run_demo stub case and
+                # hung UI. Say so instead—this is the run_demo stub case and
                 # any provider that streams empty chunks.
                 yield _sse(
                     "error",
@@ -492,7 +710,6 @@ def create_app(
                     "you are on the stub, not Gemini; with a real key check "
                     "GEMINI_MODEL and GEMINI_API_KEY in .env.",
                 )
-            answer = "".join(answer_parts)
             # Store the answer and any cards before "done", so a client that has
             # seen "done" can always find its cards in the store (approve works).
             on_done(answer)

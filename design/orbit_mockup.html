@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>ORBIT</title>
+<link rel="icon" type="image/svg+xml" href="../app/static/orbit-mark.svg" />
 <style>
   /* ===========================================================
      ORBIT — home screen + coding-agent task view, in dark blue.
@@ -74,9 +75,8 @@
     display: flex; flex-direction: column; padding: 14px 10px;
   }
   .sidebar-brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 16px; font-weight: 700; letter-spacing: 0.05em; }
-  /* ORBIT orbital symbol: blue ring, Warm White center dot (geometry unchanged). */
-  .brand-mark { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--accent); position: relative; flex-shrink: 0; }
-  .brand-mark::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--text); }
+  /* The wordmark and favicon share the same orbital SVG mark. */
+  .brand-mark { display: block; width: 18px; height: 18px; flex-shrink: 0; }
 
   .new-convo {
     display: flex; align-items: center; gap: 8px;
@@ -142,6 +142,8 @@
   }
   .mode-toggle button.active { background: var(--accent); color: var(--text); font-weight: 600; }
   .mode-toggle button.active:hover { filter: brightness(1.15); }
+  .home-topbar-controls { display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .thinking-toggle button { padding: 6px 10px; font-size: 11px; }
   .plus-badge {
     position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
     font-size: 11px; color: var(--accent-bright); border: 1px solid var(--accent-dim);
@@ -181,6 +183,9 @@
     border: 1px solid var(--border); background: var(--bg-sunken);
     color: var(--text-dim); display: flex; align-items: center; justify-content: center; cursor: pointer;
   }
+  .voice-btn { flex-shrink: 0; font: inherit; padding: 0; touch-action: none; user-select: none; }
+  .voice-btn.recording { border-color: var(--red); background: var(--red-wash); color: var(--red); }
+  .reply-audio { display: block; width: min(320px, 100%); height: 34px; margin-top: 6px; }
   .send-btn-round {
     width: 32px; height: 32px; border-radius: 50%;
     background: var(--accent); border: none; color: var(--text);
@@ -327,13 +332,12 @@
   .step-row::-webkit-scrollbar, .activity-section::-webkit-scrollbar, .change-list::-webkit-scrollbar {
     display: none;              /* Chromium / Safari */
   }
-  /* Speakers are told apart by position and surface, not by a name label.
-     User = right-aligned accent bubble. Orbit = left-aligned dark surface,
-     with the brain icon in front of its text as the only "who" marker.
-     Each message is a .chat-row: its bubble, then a faint time line. */
+  /* Speakers are told apart by position and marker, not by a name label.
+     User = right-aligned accent bubble. Orbit = plain left-aligned text with
+     the orbital mark in front. Each row keeps its faint time line beneath. */
   .chat-row { display: flex; flex-direction: column; max-width: 86%; }
   .chat-row.user { align-self: flex-end; align-items: flex-end; }
-  .chat-row.orbit { align-self: flex-start; align-items: flex-start; }
+  .chat-row.orbit { align-self: flex-start; align-items: flex-start; width: 100%; max-width: 100%; }
   .chat-bubble {
     font-size: 12.5px; max-width: 100%;
     padding: 9px 12px; border-radius: var(--radius);
@@ -344,22 +348,22 @@
     border-bottom-right-radius: 3px;
   }
   .chat-bubble.orbit {
-    background: var(--bg-card);
-    border: 1px solid var(--border-soft); border-bottom-left-radius: 3px;
+    width: 100%; background: transparent; border: 0; border-radius: 0; padding: 0;
   }
   .chat-bubble .body { color: var(--text); line-height: 1.5; }
+  .chat-bubble.orbit .body { white-space: pre-wrap; overflow-wrap: anywhere; }
   .chat-bubble.user .body { color: var(--text); }
   .chat-meta { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; padding: 0 2px; }
   .task-chat-input { border-top: 1px solid var(--border-soft); padding: 10px 12px; display: flex; gap: 8px; align-items: center; background: var(--bg-card); }
-  .task-chat-input input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 12.5px; }
+  .task-chat-input input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text); font-size: 12.5px; }
   .task-chat-input input::placeholder { color: var(--text-faint); }
+  .task-chat-input .voice-btn { width: 26px; height: 26px; }
 
-  /* ===================== brain icon + streaming thought/reply ===================== */
-  .brain-icon {
-    width: 15px; height: 15px; flex-shrink: 0; color: var(--accent-bright);
+  /* ===================== orbital mark + streaming thought/reply ===================== */
+  .orbit-icon {
+    width: 15px; height: 15px; flex-shrink: 0;
     display: inline-block; vertical-align: -3px; margin-right: 5px;
   }
-  .brain-icon svg { width: 100%; height: 100%; }
 
   .thinking-block {
     display: flex; align-items: flex-start; gap: 0;
@@ -379,7 +383,7 @@
   .thinking-block.done .thinking-text::after { content: ""; }
   @keyframes caret-blink { 50% { opacity: 0; } }
 
-  .chat-bubble.orbit .body .brain-icon { margin-right: 6px; }
+  .chat-bubble.orbit .body .orbit-icon { margin-right: 6px; }
   .chat-bubble .body.streaming::after {
     content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
   }
@@ -472,7 +476,7 @@
 <!-- ===================== SCREEN 1: HOME ===================== -->
 <div class="screen screen--active" id="screen-home">
   <div class="sidebar">
-    <div class="sidebar-brand"><span class="brand-mark"></span>ORBIT</div>
+    <div class="sidebar-brand"><img class="brand-mark" src="../app/static/orbit-mark.svg" alt="" aria-hidden="true" />ORBIT</div>
     <div class="new-convo">+ New conversation</div>
     <div class="sidebar-search">⌕ Search chats</div>
 
@@ -514,9 +518,15 @@
 
   <div class="home-main">
     <div class="home-topbar">
-      <div class="mode-toggle">
-        <button class="active" data-arena="mode-chat">◐ Chat</button>
-        <button data-arena="mode-agent">⚙ Agent</button>
+      <div class="home-topbar-controls">
+        <div class="mode-toggle">
+          <button class="active" data-arena="mode-chat">◐ Chat</button>
+          <button data-arena="mode-agent">⚙ Agent</button>
+        </div>
+        <div class="mode-toggle thinking-toggle" role="group" aria-label="Response depth">
+          <button class="active" data-thinking-level="quick" aria-pressed="true">Quick</button>
+          <button data-thinking-level="deep" aria-pressed="false">Deep</button>
+        </div>
       </div>
       <div class="plus-badge">ORBIT</div>
     </div>
@@ -533,7 +543,7 @@
           <div class="composer-controls">
             <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
             <div class="spacer"></div>
-            <div class="icon-btn-round" title="Voice">🎙</div>
+            <button type="button" class="icon-btn-round voice-btn" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
             <div class="send-btn-round">➤</div>
           </div>
         </div>
@@ -562,7 +572,7 @@
 
 <div class="screen" id="screen-home-docked">
   <div class="sidebar">
-    <div class="sidebar-brand"><span class="brand-mark"></span>ORBIT</div>
+    <div class="sidebar-brand"><img class="brand-mark" src="../app/static/orbit-mark.svg" alt="" aria-hidden="true" />ORBIT</div>
     <div class="new-convo">+ New conversation</div>
     <div class="sidebar-search">⌕ Search chats</div>
 
@@ -605,9 +615,15 @@
 
   <div class="home-main is-docked">
     <div class="home-topbar">
-      <div class="mode-toggle">
-        <button class="active" data-arena="mode-chat">◐ Chat</button>
-        <button data-arena="mode-agent">⚙ Agent</button>
+      <div class="home-topbar-controls">
+        <div class="mode-toggle">
+          <button class="active" data-arena="mode-chat">◐ Chat</button>
+          <button data-arena="mode-agent">⚙ Agent</button>
+        </div>
+        <div class="mode-toggle thinking-toggle" role="group" aria-label="Response depth">
+          <button class="active" data-thinking-level="quick" aria-pressed="true">Quick</button>
+          <button data-thinking-level="deep" aria-pressed="false">Deep</button>
+        </div>
       </div>
       <div class="plus-badge">ORBIT</div>
     </div>
@@ -632,7 +648,7 @@
         </div>
         <div class="chat-row orbit">
           <div class="chat-bubble orbit">
-            <div class="body"><span class="brain-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg></span><span class="reply">It was packed this morning and ships Friday.</span></div>
+            <div class="body"><img class="orbit-icon" src="../app/static/orbit-mark.svg" alt="" aria-hidden="true" /><span class="reply">It was packed this morning and ships Friday.</span></div>
           </div>
           <div class="chat-meta">09:41</div>
         </div>
@@ -644,7 +660,7 @@
           <div class="composer-controls">
             <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
             <div class="spacer"></div>
-            <div class="icon-btn-round" title="Voice">🎙</div>
+            <button type="button" class="icon-btn-round voice-btn" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
             <div class="send-btn-round">➤</div>
           </div>
         </div>
@@ -675,7 +691,7 @@
 <!-- ===================== SCREEN 2: CODING AGENT TASK ===================== -->
 <div class="screen" id="screen-task">
   <div class="sidebar">
-    <div class="sidebar-brand"><span class="brand-mark"></span>ORBIT</div>
+    <div class="sidebar-brand"><img class="brand-mark" src="../app/static/orbit-mark.svg" alt="" aria-hidden="true" />ORBIT</div>
     <div class="new-convo">+ New conversation</div>
     <div class="sidebar-search">⌕ Search chats</div>
     <div class="history-group">
@@ -702,6 +718,10 @@
         <div class="mode-toggle">
           <button data-arena="mode-chat">◐ Chat</button>
           <button class="active" data-arena="mode-agent">⚙ Agent</button>
+        </div>
+        <div class="mode-toggle thinking-toggle" role="group" aria-label="Response depth">
+          <button class="active" data-thinking-level="quick" aria-pressed="true">Quick</button>
+          <button data-thinking-level="deep" aria-pressed="false">Deep</button>
         </div>
         <div class="working-indicator"><span class="dot"></span>Orbit is working</div>
         <div class="pause-btn">⏸ Pause</div>
@@ -739,9 +759,7 @@
         </div>
 
         <div class="thinking-block done" id="thinkingBlock">
-          <span class="brain-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg>
-          </span>
+          <img class="orbit-icon" src="../app/static/orbit-mark.svg" alt="" aria-hidden="true" />
           <span class="thinking-label" id="thinkingLabel">Asking Titan…</span>
           <span class="thinking-text" id="thinkingText">Checking how orders.py currently stores state before adding a new field — the order model is small, so a single status string with a controlled set of values is simpler than a separate status table.</span>
         </div>
@@ -787,15 +805,14 @@
           </div>
           <div class="chat-row orbit">
             <div class="chat-bubble orbit">
-              <div class="body"><span class="brain-icon">
-<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg>
-</span><span class="reply" id="orbitReplyText">Noted. I'll keep the proposed changes in draft until you approve them. Running tests now before I show you the diff.</span></div>
+              <div class="body"><img class="orbit-icon" src="../app/static/orbit-mark.svg" alt="" aria-hidden="true" /><span class="reply" id="orbitReplyText">Noted. I'll keep the proposed changes in draft until you approve them. Running tests now before I show you the diff.</span></div>
             </div>
             <div class="chat-meta">09:42</div>
           </div>
         </div>
         <div class="task-chat-input">
           <input type="text" placeholder="Add a thought or steer Orbit…" />
+          <button type="button" class="icon-btn-round voice-btn" style="width:26px;height:26px;" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
           <div class="send-btn-round" style="width:26px;height:26px;">➤</div>
         </div>
       </div>

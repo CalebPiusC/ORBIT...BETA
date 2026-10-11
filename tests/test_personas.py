@@ -39,9 +39,11 @@ class StreamScript:
     def __init__(self, script: dict[str, Any]) -> None:
         self._script = dict(script)
         self.calls: list[str] = []
+        self.configs: list[Any] = []
 
     def generate_content_stream(self, *, model: str, contents: Any, config: Any):
         self.calls.append(model)
+        self.configs.append(config)
         outcome = self._script[model]
         if isinstance(outcome, BaseException):
             raise outcome
@@ -137,6 +139,55 @@ class ChatModeHasNoStatusTests(unittest.TestCase):
     def test_no_status_on_a_normal_chat_turn(self) -> None:
         out = run(provider_for({PRIMARY: ["Hi."]}))
         self.assertEqual(out, [("answer", "Hi.")])
+
+
+class QuickDeepSelectionTests(unittest.TestCase):
+    def test_quick_uses_primary_model_and_tight_budget(self) -> None:
+        provider = provider_for({PRIMARY: ["quick answer"]})
+        out = run(provider, thinking_level="quick", report_attempts=True)
+        models = provider._client.models
+        self.assertEqual(models.calls, [PRIMARY])
+        self.assertEqual(models.configs[0].max_output_tokens, 512)
+        self.assertEqual([text for kind, text in out if kind == "status"], ["Asking Titan…"])
+        self.assertEqual(provider.last_model_used, PRIMARY)
+
+    def test_deep_prefers_fallback_with_larger_budget_and_actual_persona(self) -> None:
+        provider = provider_for({FALLBACK: ["deep answer"]})
+        out = run(provider, thinking_level="deep", report_attempts=True)
+        models = provider._client.models
+        self.assertEqual(models.calls, [FALLBACK])
+        self.assertEqual(models.configs[0].max_output_tokens, 4096)
+        self.assertEqual([text for kind, text in out if kind == "status"], ["Asking Europa…"])
+        self.assertEqual(provider.last_model_used, FALLBACK)
+
+    def test_deep_failover_labels_the_primary_that_actually_answers(self) -> None:
+        provider = provider_for({FALLBACK: api_error(504), PRIMARY: ["primary fallback"]})
+        out = run(provider, thinking_level="deep", report_attempts=True)
+        statuses = [text for kind, text in out if kind == "status"]
+        self.assertEqual(
+            statuses,
+            ["Asking Europa…", "Europa didn't answer (Google returned 504). Asking Titan…"],
+        )
+        self.assertEqual(provider.last_model_used, PRIMARY)
+
+    def test_deep_without_a_configured_fallback_uses_primary_with_deep_budget(self) -> None:
+        provider = GeminiProvider(
+            client=SimpleNamespace(models=StreamScript({PRIMARY: ["deep"]})),
+            model=PRIMARY,
+            fallback_model="",
+            audit_log=None,
+        )
+        out = run(provider, thinking_level="deep", report_attempts=True)
+        models = provider._client.models
+        self.assertEqual(models.calls, [PRIMARY])
+        self.assertEqual(models.configs[0].max_output_tokens, 4096)
+        self.assertEqual([text for kind, text in out if kind == "status"], ["Asking Titan…"])
+
+    def test_rejects_unknown_thinking_level(self) -> None:
+        provider = provider_for({PRIMARY: ["not used"]})
+        with self.assertRaisesRegex(ValueError, "thinking_level"):
+            run(provider, thinking_level="extreme")
+        self.assertEqual(provider._client.models.calls, [])
 
 
 class ReplyStreamsAsItArrivesTests(unittest.TestCase):

@@ -294,7 +294,7 @@ class ScriptedProvider:
     def title(self, user_text: str, answer: str) -> str:
         return "Plan saving"
 
-    def reply_stream(self, history, system_prompt: str, *, think: bool = False, report_attempts: bool = False, allow_tools: bool = False):
+    def reply_stream(self, history, system_prompt: str, *, think: bool = False, report_attempts: bool = False, allow_tools: bool = False, thinking_level: str = "quick"):
         self.calls.append({"allow_tools": allow_tools, "system_prompt": system_prompt})
         self.histories.append(list(history))
         script = self.scripts.pop(0) if self.scripts else []

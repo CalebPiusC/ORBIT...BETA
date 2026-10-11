@@ -162,9 +162,11 @@ class FreshEveryTurnTests(unittest.TestCase):
 
             run_session(provider, read=read, write=lambda _line: None, facts=FactStore(path))
 
-        self.assertEqual(provider.system_prompts[0], SYSTEM_PROMPT)
+        self.assertTrue(provider.system_prompts[0].startswith(SYSTEM_PROMPT))
+        self.assertIn("Current date and time in Africa/Lagos:", provider.system_prompts[0])
         self.assertIn("- Plays bass.", provider.system_prompts[1])
-        self.assertEqual(provider.system_prompts[2], SYSTEM_PROMPT)
+        self.assertTrue(provider.system_prompts[2].startswith(SYSTEM_PROMPT))
+        self.assertIn("Current date and time in Africa/Lagos:", provider.system_prompts[2])
 
 
 class MemoryToolTests(unittest.TestCase):
@@ -252,7 +254,7 @@ class WebTurnTests(unittest.TestCase):
         seen: list[str] = []
 
         class Provider:
-            def reply_stream(self, history, system_prompt, *, think=False, report_attempts=False):
+            def reply_stream(self, history, system_prompt, *, think=False, report_attempts=False, thinking_level="quick"):
                 seen.append(system_prompt)
                 yield StreamChunk(kind="answer", text="ok")
 
@@ -264,9 +266,11 @@ class WebTurnTests(unittest.TestCase):
             path.write_text("Lives in Lagos.\n", encoding="utf-8")
             client.post("/api/chat", json={"message": "two"}).get_data()
 
-        self.assertEqual(seen[0], HOME_SYSTEM_PROMPT)
+        self.assertTrue(seen[0].startswith(HOME_SYSTEM_PROMPT))
+        self.assertIn("Current date and time in Africa/Lagos:", seen[0])
         self.assertIn("- Lives in Lagos.", seen[1])
         self.assertIn("not instructions", seen[1])
+        self.assertIn("Current date and time in Africa/Lagos:", seen[1])
 
 
 if __name__ == "__main__":

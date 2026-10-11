@@ -243,6 +243,68 @@ class StreamFallbackTests(unittest.TestCase):
 
 
 class AuditTests(unittest.TestCase):
+    def test_empty_gemini_stream_audits_finish_function_call_and_safety_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            audit_path = Path(temp_dir) / "audit.log"
+            response = SimpleNamespace(
+                response_id="response-123",
+                model_version="gemini-test-version",
+                text=None,
+                candidates=[
+                    SimpleNamespace(
+                        finish_reason="SAFETY",
+                        finish_message="blocked by policy",
+                        content=SimpleNamespace(
+                            parts=[
+                                SimpleNamespace(
+                                    text=None,
+                                    function_call=SimpleNamespace(name="lookup_issue", args={"private": "value"}),
+                                )
+                            ]
+                        ),
+                        safety_ratings=[
+                            SimpleNamespace(
+                                category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                                probability="HIGH",
+                                blocked=True,
+                            )
+                        ],
+                    )
+                ],
+                prompt_feedback=SimpleNamespace(block_reason="SAFETY", safety_ratings=[]),
+                usage_metadata=SimpleNamespace(
+                    prompt_token_count=14,
+                    candidates_token_count=0,
+                    total_token_count=14,
+                ),
+            )
+            client = SimpleNamespace(
+                models=SimpleNamespace(generate_content_stream=lambda **_: iter([response]))
+            )
+            provider = GeminiProvider(
+                model=PRIMARY,
+                fallback_model="",
+                client=client,
+                audit_log=AuditLog(audit_path),
+            )
+
+            with self.assertLogs("orbit.gemini", level="ERROR") as captured:
+                self.assertEqual(list(provider.reply_stream(HISTORY, "sys")), [])
+            self.assertIn("raw response diagnostics", captured.output[0])
+            raw = audit_path.read_text(encoding="utf-8")
+            events = read_audit(audit_path)
+
+        empty = next(event for event in events if event["event"] == "model_empty_response")
+        diagnostic = empty["response_diagnostics"][0]
+        candidate = diagnostic["candidates"][0]
+        self.assertEqual(candidate["finish_reason"], "SAFETY")
+        self.assertTrue(candidate["function_call_without_text"])
+        self.assertTrue(candidate["safety_blocked"])
+        self.assertTrue(diagnostic["prompt_safety_blocked"])
+        self.assertEqual(candidate["function_call_names"], ["lookup_issue"])
+        self.assertNotIn("private", raw)
+        self.assertNotIn("value", raw)
+
     def test_fallback_turn_writes_failure_then_answer_lines(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             audit_path = Path(temp_dir) / "audit.log"

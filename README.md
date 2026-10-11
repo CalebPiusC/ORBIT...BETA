@@ -1,6 +1,6 @@
 # ORBIT...BETA
 
-ORBIT's brain and the two screens it lives in. The provider seam accepts conversation history and a system prompt and returns plain text or a stream. Gemini is the only provider implemented; there is exactly one tool, `write_note(content: str)`, and a reusable confirmation gate plus registration-time audit wrapper exist from tool #1 — nothing runs silently. Heartbeat reminders (a missing daily plan, a check-in gap, and phone push through ntfy.sh) are built. Agent mode, sub-agents, and voice are still out of scope; see `docs/HANDOFF.md` for what comes next and why.
+ORBIT's brain and the two screens it lives in. The provider seam accepts conversation history and a system prompt and returns plain text or a stream. Gemini is the only provider implemented; there is exactly one tool, `write_note(content: str)`, and a reusable confirmation gate plus registration-time audit wrapper exist from tool #1 — nothing runs silently. Heartbeat reminders (a missing daily plan, a check-in gap, and phone push through ntfy.sh), Agent mode, Quick/Deep response depth, and browser voice are built. Sub-agents remain out of scope; see `docs/HANDOFF.md` for current state and load-bearing rules.
 
 **Read `docs/HANDOFF.md` before changing anything.** It states which rules are load-bearing, which files from the previous build already exist here, and what the next two phases are.
 
@@ -172,6 +172,34 @@ Run the offline suite (model stubbed) with:
 python -m unittest discover -s tests -v
 ```
 
+## Browser voice and response depth
+
+Typed chat remains the default. The microphone button is push-to-talk: hold it to
+record with the browser's `MediaRecorder`, then release to upload the clip. The
+server transcribes it with `faster-whisper` and submits the resulting text through
+the same home-chat or task-chat endpoint as a typed message. Voice-originated turns
+also request a spoken reply; typed turns do not. The server streams Edge TTS MP3
+audio using `en-US-GuyNeural` at `-15Hz`, and the browser plays it as the chunks
+arrive where Media Source Extensions support MP3 (otherwise it buffers the audio
+before playback).
+
+The default Whisper model is `base`, running on CPU with `int8`. The first voice
+transcription downloads the model into the normal Hugging Face cache; uploaded
+recordings are held in a temporary file only while transcribing and are deleted
+afterward. Adjust `ORBIT_WHISPER_MODEL`, `ORBIT_WHISPER_DEVICE`, and
+`ORBIT_WHISPER_COMPUTE_TYPE` in `.env` if the host has different resources. Browser
+microphone access requires HTTPS or localhost. Uploads are capped at 25 MiB and
+recordings stop after two minutes.
+
+The **Quick / Deep** selector sits beside **Chat / Agent** and applies to the next
+streamed UI reply. Quick calls the configured primary Gemini model with a 512-token
+output cap. Deep uses a 4096-token cap and prefers `GEMINI_FALLBACK_MODEL`; if that
+model fails before any reply chunk is sent, it falls back to the primary model.
+With no fallback configured, Deep keeps the larger budget on the primary. Agent
+activity names the model actually being called (Titan for primary, Europa for
+fallback), including Deep-first and failover turns. The depth selection is shared
+between home and task screens for the life of the app process.
+
 ## Browser tools (Chat mode)
 
 In Chat mode on the home screen, Orbit can ask to use one of six tools: `write_note`,
@@ -215,4 +243,19 @@ knows the topic can read your notices, so keep it private. Leave it blank to tur
 
 State lives in `runtime/heartbeat.json` (schedule, paused flag, notices) and
 `runtime/plans.json` (dated plans). Both are gitignored. Settings are in `.env.example`.
+
+## Current turn context and response controls
+
+Every CLI, home-chat, and task-agent model turn receives the current date and time in
+`Africa/Lagos` in its system prompt. Gemini responses that complete without visible text
+write safe diagnostics to `audit.log`, including candidate finish reason, function-call
+presence without text, and safety-block metadata. No prompt, reply, or function-call
+arguments are written. The user-visible `model_returned_nothing` fallback and provider
+stream failures are also audited for future diagnosis.
+
+Orbit replies have compact copy, regenerate, and feedback controls. Regenerate applies to
+the latest completed response; Send becomes Stop while a stream is active. The composer
+includes an attachment picker and GitHub shortcut. File selections are shown locally but
+are not uploaded to the model yet; the GitHub shortcut opens GitHub rather than selecting a
+repository. The settings/account controls open a summary of the current local workspace.
 
