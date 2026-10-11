@@ -467,6 +467,63 @@ class PaletteAndBubbleTests(unittest.TestCase):
             self.assertNotIn('class="who"', body, path)
 
 
+class AgentScrollbarTests(unittest.TestCase):
+    """Scrollbars are hidden on the Agent panels, but those panels still scroll."""
+
+    ROOT = Path(__file__).resolve().parent.parent
+    PANELS = (".task-work", ".task-chat-log", ".home-thread", ".step-row", ".activity-section", ".change-list")
+
+    def _css(self, name: str) -> str:
+        text = (self.ROOT / name).read_text(encoding="utf-8")
+        return re.sub(r"/\*.*?\*/", "", text, flags=re.S)  # comments would bleed into selectors
+
+    def _rules_for(self, css: str, selector: str) -> list[str]:
+        """Every declaration block whose selector list names this panel exactly."""
+        blocks = re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+        found = []
+        for head, body in blocks:
+            names = [part.strip() for part in head.split(",")]
+            if any(re.fullmatch(re.escape(selector) + r"(::-webkit-scrollbar)?", n) for n in names):
+                found.append(body)
+        return found
+
+    def test_every_panel_hides_its_scrollbar_in_all_three_engines(self) -> None:
+        for name in ("app/templates/layout.html", "design/orbit_mockup.html"):
+            css = self._css(name)
+            self.assertIn("scrollbar-width: none", css, name)
+            self.assertIn("-ms-overflow-style: none", css, name)
+            self.assertRegex(css, r"::-webkit-scrollbar\s*\{\s*display:\s*none;", name)
+            for panel in self.PANELS:
+                self.assertTrue(
+                    any("scrollbar-width: none" in body for body in self._rules_for(css, panel)),
+                    f"{name}: {panel} lacks scrollbar-width: none",
+                )
+                self.assertTrue(
+                    any(re.search(r"-ms-overflow-style:\s*none", body) for body in self._rules_for(css, panel)),
+                    f"{name}: {panel} lacks -ms-overflow-style: none",
+                )
+                webkit = [b for b in self._rules_for(css, panel + "::-webkit-scrollbar")]
+                self.assertTrue(webkit, f"{name}: {panel} lacks a ::-webkit-scrollbar rule")
+
+    def test_scrolling_is_not_disabled_on_the_scroll_containers(self) -> None:
+        css = self._css("app/templates/layout.html")
+        for panel in (".task-work", ".task-chat-log", ".home-thread"):
+            bodies = self._rules_for(css, panel)
+            self.assertTrue(bodies, panel)
+            for body in bodies:
+                self.assertNotRegex(body, r"overflow(-[xy])?:\s*hidden", panel)
+        self.assertRegex(self._rules_for(css, ".task-work")[0], r"overflow-y:\s*auto")
+        self.assertRegex(self._rules_for(css, ".task-chat-log")[0], r"overflow-y:\s*auto")
+
+    def test_the_proposed_changes_list_is_a_named_panel_in_the_markup(self) -> None:
+        body = self.client_body()
+        self.assertRegex(body, r'<div class="change-list">\s*<div class="change-row">')
+
+    def client_body(self) -> str:
+        store = Store()
+        return create_app(provider=FakeStreamingProvider(), store=store).test_client().get("/task/T1").get_data(as_text=True)
+
+
 class RecordingProvider:
     """Yields the given pieces as answers, recording how many have left so far."""
 
