@@ -23,7 +23,7 @@ class ScriptedProvider:
         self._fail_times = fail_times
 
     def reply(self, history, system_prompt: str) -> str:
-        if system_prompt != SYSTEM_PROMPT:
+        if not system_prompt.startswith(SYSTEM_PROMPT):
             raise AssertionError("the chat CLI must send ORBIT's system prompt")
         self.calls.append(list(history))
         if self._fail_times > 0:
@@ -97,7 +97,7 @@ class CancelOnceProvider:
         self.model = "gemini-test-model"
 
     def reply(self, history, system_prompt: str) -> str:
-        if system_prompt != SYSTEM_PROMPT:
+        if not system_prompt.startswith(SYSTEM_PROMPT):
             raise AssertionError("the chat CLI must send ORBIT's system prompt")
         self.histories.append(list(history))
         if len(self.histories) == 1:

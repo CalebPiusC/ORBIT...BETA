@@ -23,6 +23,7 @@ from collections.abc import Callable
 from typing import Any
 
 from config import Settings, load_settings
+from memory.facts import FactStore
 from providers.base import ChatMessage
 from providers.gemini import GeminiProvider
 from tools import build_tool_registry
@@ -30,8 +31,10 @@ from tools import build_tool_registry
 SYSTEM_PROMPT = (
     "You are ORBIT, a helpful assistant. Reply clearly and concisely. "
     "Use write_note only when the user explicitly asks you to save a note, "
-    "and pass the exact one-line note text they requested. Never claim it was "
-    "saved unless the tool reports success. If the person declines, do not retry."
+    "and pass the exact one-line note text they requested. Use remember_fact or "
+    "forget_fact only when the person explicitly asks you to remember or forget a "
+    "fact about them. Never claim anything was saved or removed unless the tool "
+    "reports success. If the person declines, do not retry."
 )
 
 # History is capped so a long session cannot grow the request without limit.
@@ -63,13 +66,16 @@ def run_session(
     *,
     read: Callable[[str], str] = input,
     write: Callable[[str], None] = print,
+    facts: FactStore | None = None,
 ) -> int:
     """Drive the prompt/reply loop. Returns a process exit code.
 
     ``read``/``write`` are injectable so the loop is testable offline, and so a
-    non-interactive stdin (EOF) exits cleanly instead of raising.
+    non-interactive stdin (EOF) exits cleanly instead of raising. ``facts`` is
+    re-read on every turn, so a fact edited mid-session is used on the next reply.
     """
     history: list[ChatMessage] = []
+    fact_store = facts if facts is not None else FactStore()
     write(HELP)
 
     while True:
@@ -98,7 +104,8 @@ def run_session(
         model_name = getattr(provider, "model", "the model")
         write(WAIT_TEMPLATE.format(model=model_name))
         try:
-            answer = provider.reply(history=history, system_prompt=SYSTEM_PROMPT)
+            system_prompt = fact_store.system_prompt(SYSTEM_PROMPT)
+            answer = provider.reply(history=history, system_prompt=system_prompt)
         except KeyboardInterrupt:
             # Cancel the wait, not the conversation: keep the turn queued.
             history.pop()

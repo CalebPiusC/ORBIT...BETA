@@ -30,6 +30,7 @@ from flask import Flask, Response, render_template, request, stream_with_context
 from providers.base import ChatMessage as ProvChatMessage, StreamChunk
 
 from app.store import Store, now_label
+from memory.facts import FactStore
 
 HOME_SYSTEM_PROMPT = (
     "You are ORBIT, a helpful assistant. Reply clearly and concisely. "
@@ -66,17 +67,23 @@ def _history_from_thread(
     return history
 
 
-def create_app(provider: Any | None = None, store: Store | None = None) -> Flask:
+def create_app(
+    provider: Any | None = None,
+    store: Store | None = None,
+    facts: FactStore | None = None,
+) -> Flask:
     """Build the Flask app.
 
     ``provider`` is the ChatProvider used for streaming. If omitted, the app
     lazily constructs a real ``GeminiProvider`` on first use (which needs
-    GEMINI_API_KEY). Tests pass a stubbed provider directly.
+    GEMINI_API_KEY). Tests pass a stubbed provider directly. ``facts`` is the
+    background-fact file; it is re-read on every turn.
     """
     app = Flask(__name__, template_folder="templates")
     app.secret_key = "orbit-dev-secret"
     app.config["PROVIDER"] = provider
     app.config["STORE"] = store or Store()
+    app.config["FACTS"] = facts if facts is not None else FactStore()
 
     def get_provider() -> Any:
         prov = app.config["PROVIDER"]
@@ -149,8 +156,11 @@ def create_app(provider: Any | None = None, store: Store | None = None) -> Flask
         st.home_thread.append(StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False))
         history = _history_from_thread(st.home_thread)
 
+        # Read the facts now, once per turn, so an edit lands on the next reply.
+        system_prompt = app.config["FACTS"].system_prompt(HOME_SYSTEM_PROMPT)
+
         def chunk_source() -> Iterator[StreamChunk]:
-            return get_provider().reply_stream(history, HOME_SYSTEM_PROMPT, think=False)
+            return get_provider().reply_stream(history, system_prompt, think=False)
 
         def on_done(answer: str) -> None:
             if answer:
@@ -190,10 +200,12 @@ def create_app(provider: Any | None = None, store: Store | None = None) -> Flask
 
         history = _history_from_thread(task_obj.chat, extra_user=extra_user)
 
+        system_prompt = app.config["FACTS"].system_prompt(TASK_SYSTEM_PROMPT)
+
         def chunk_source() -> Iterator[StreamChunk]:
             # Agent mode names the model being asked (report_attempts); Chat does not.
             return get_provider().reply_stream(
-                history, TASK_SYSTEM_PROMPT, think=True, report_attempts=True
+                history, system_prompt, think=True, report_attempts=True
             )
 
         def on_done(answer: str) -> None:
