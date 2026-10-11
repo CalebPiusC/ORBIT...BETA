@@ -561,8 +561,10 @@ def events_as_they_arrive(client, url: str, body: dict, provider: RecordingProvi
 class RouteStreamingTests(unittest.TestCase):
     PIECES = ["Hel", "lo ", "there, ", "Caleb."]
 
-    def _client(self, provider):
-        return create_app(provider=provider, store=Store()).test_client()
+    def _client(self, provider, mode: str = "chat"):
+        store = Store()
+        store.set_mode(mode)
+        return create_app(provider=provider, store=store).test_client()
 
     def test_home_answer_reaches_the_client_piece_by_piece(self) -> None:
         provider = RecordingProvider(self.PIECES)
@@ -589,11 +591,19 @@ class RouteStreamingTests(unittest.TestCase):
     def test_agent_mode_asks_for_status_lines_and_shows_them(self) -> None:
         provider = RecordingProvider(self.PIECES)
         seen = events_as_they_arrive(
-            self._client(provider), "/api/task/T1/stream", {"message": "steer"}, provider
+            self._client(provider, mode="agent"), "/api/task/T1/stream", {"message": "steer"}, provider
         )
         self.assertEqual(provider.calls, [{"think": True, "report_attempts": True}])
         self.assertIn("status", [event for event, _ in seen])
         self.assertEqual(seen[0][0], "status")
+
+    def test_chat_mode_task_view_is_unlabeled(self) -> None:
+        provider = RecordingProvider(self.PIECES)
+        seen = events_as_they_arrive(
+            self._client(provider, mode="chat"), "/api/task/T1/stream", {"message": "steer"}, provider
+        )
+        self.assertEqual(provider.calls, [{"think": True, "report_attempts": False}])
+        self.assertNotIn("status", [event for event, _ in seen])
 
 
 if __name__ == "__main__":

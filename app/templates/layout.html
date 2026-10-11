@@ -323,6 +323,12 @@
     background: var(--bg-sunken); border-radius: var(--radius-sm);
     border-left: 2px solid var(--accent-dim);
   }
+  /* Agent mode only: names the model whose answer this narration belongs to. */
+  .thinking-label {
+    font-style: normal; font-size: 11px; color: var(--accent-bright);
+    white-space: nowrap; margin-right: 8px;
+  }
+  .thinking-label[hidden] { display: none; }
   .thinking-block .thinking-text::after {
     content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
   }

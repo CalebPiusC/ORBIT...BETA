@@ -174,12 +174,22 @@
   function makeOrbitBubble(log) {
     var bubble = makeRow(log, "orbit").bubble;
     var think = el("div", "thinking-block");
+    var thinkLabel = el("span", "thinking-label", "");
+    thinkLabel.hidden = true;
+    think.appendChild(thinkLabel);
     var thinkText = el("span", "thinking-text", "");
     think.appendChild(thinkText);
     bubble.appendChild(think);
     var parts = makeOrbitBody(bubble);
     log.scrollTop = log.scrollHeight;
-    return { bubble: bubble, think: think, thinkText: thinkText, body: parts.body, reply: parts.reply };
+    return {
+      bubble: bubble,
+      think: think,
+      thinkText: thinkText,
+      thinkLabel: thinkLabel,
+      body: parts.body,
+      reply: parts.reply,
+    };
   }
 
   // A body's streamed text goes into its own span so a notice appended beside it
@@ -199,8 +209,21 @@
       .replace(/>/g, "&gt;");
   }
 
-  // Agent-mode status lines ("Asking Chidi…") go into the task's live activity
-  // feed, newest first, the same order the server renders saved activity in.
+  // Agent-mode status lines ("Asking Chidi…", or "Chidi didn't answer … Asking
+  // Ada…") label the narration with the model that is being asked. Only the
+  // trailing "Asking <name>…" is shown as the label; the full line goes to the
+  // activity feed.
+  var ASKING_RE = /Asking [A-Za-z]+\u2026\s*$/;
+  function showModelLabel(labelNode, text) {
+    if (!labelNode) return;
+    var match = ASKING_RE.exec(text || "");
+    if (!match) return;
+    labelNode.textContent = match[0].trim();
+    labelNode.hidden = false;
+  }
+
+  // Agent-mode status lines go into the task's live activity feed, newest first,
+  // the same order the server renders saved activity in.
   function addActivity(text) {
     var section = document.getElementById("taskActivity");
     if (!section) return;
@@ -312,6 +335,7 @@
     var log = document.getElementById("taskChatLog");
     var thinkBlock = document.getElementById("thinkingBlock");
     var thinkText = document.getElementById("thinkingText");
+    var thinkLabel = document.getElementById("thinkingLabel");
     var input = document.getElementById("taskInput");
     var send = document.getElementById("taskSend");
 
@@ -326,6 +350,7 @@
       // threw on the first thinking chunk, which froze the bubble.
       var targetThink = useTop ? thinkText : orbit.thinkText;
       var targetBlock = useTop ? thinkBlock : orbit.think;
+      var targetLabel = useTop ? thinkLabel : orbit.thinkLabel;
       if (!useTop && targetBlock) targetBlock.style.display = "none";
 
       function revealThinking() {
@@ -338,6 +363,7 @@
         function (event, data) {
           if (event === "status") {
             addActivity(data);
+            showModelLabel(targetLabel, data);
           } else if (event === "thinking") {
             if (!targetThink) return;
             revealThinking();

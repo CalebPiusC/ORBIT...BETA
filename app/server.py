@@ -202,11 +202,12 @@ def create_app(
         history = _history_from_thread(task_obj.chat, extra_user=extra_user)
 
         system_prompt = app.config["FACTS"].system_prompt(TASK_SYSTEM_PROMPT)
+        # Agent mode names the model being asked ("Asking Chidi…"); Chat mode stays unlabeled.
+        label_models = st.mode == "agent"
 
         def chunk_source() -> Iterator[StreamChunk]:
-            # Agent mode names the model being asked (report_attempts); Chat does not.
             return get_provider().reply_stream(
-                history, system_prompt, think=True, report_attempts=True
+                history, system_prompt, think=True, report_attempts=label_models
             )
 
         def on_done(answer: str) -> None:

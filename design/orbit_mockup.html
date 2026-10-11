@@ -346,6 +346,11 @@
     background: var(--bg-sunken); border-radius: var(--radius-sm);
     border-left: 2px solid var(--accent-dim);
   }
+  .thinking-label {
+    font-style: normal; font-size: 11px; color: var(--accent-bright);
+    white-space: nowrap; margin-right: 8px;
+  }
+  .thinking-label[hidden] { display: none; }
   .thinking-block .thinking-text::after {
     content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
   }
@@ -555,6 +560,7 @@
           <span class="brain-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 2.8A3 3 0 0 0 5 15a3 3 0 0 0 3 3h1v2M15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 2.8A3 3 0 0 1 19 15a3 3 0 0 1-3 3h-1v2M9 4a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3M15 4a3 3 0 0 0-3 3v9a3 3 0 0 0 3 3"/></svg>
           </span>
+          <span class="thinking-label" id="thinkingLabel">Asking Chidi…</span>
           <span class="thinking-text" id="thinkingText">Checking how orders.py currently stores state before adding a new field — the order model is small, so a single status string with a controlled set of values is simpler than a separate status table.</span>
         </div>
 

@@ -1,8 +1,9 @@
 """Model display names and status lines, offline.
 
 Rules under test:
-- Names follow slot order: slot 0 (primary) is Chidi, slot 1 (fallback) is Ada,
-  then Obi, Chika, Zara, Jiden, Oma. Nothing is named past that.
+- Names follow slot order: slot 0 (primary) is Chidi, slot 1 (fallback) is Ada.
+  Obi, Kemi, Tobi and Amina are reserved for future slots. Nothing is named past
+  the assigned slots.
 - Status lines ("Asking Chidi…") appear only when the caller asks for them
   (Agent mode). Chat mode gets no status line, even when the primary fails.
 - Status lines never mix into the reply or thinking text.
@@ -20,7 +21,7 @@ from google.genai.errors import APIError
 
 from providers.base import ChatMessage
 from providers.gemini import GeminiProvider
-from providers.personas import SLOT_NAMES, slot_name
+from providers.personas import RESERVED_NAMES, SLOT_NAMES, slot_name
 
 PRIMARY = "primary-test-model"
 FALLBACK = "fallback-test-model"
@@ -64,15 +65,17 @@ class SlotNameTests(unittest.TestCase):
     def test_names_follow_slot_order(self) -> None:
         self.assertEqual(slot_name(0), "Chidi")  # primary
         self.assertEqual(slot_name(1), "Ada")  # fallback
-        self.assertEqual(
-            SLOT_NAMES[2:], ("Obi", "Chika", "Zara", "Jiden", "Oma")
-        )
-        for slot, name in enumerate(SLOT_NAMES):
-            self.assertEqual(slot_name(slot), name)
+        self.assertEqual(SLOT_NAMES, ("Chidi", "Ada"))
 
-    def test_no_name_past_the_reserved_list(self) -> None:
-        with self.assertRaises(ValueError):
+    def test_reserved_names_are_not_handed_out(self) -> None:
+        for name in ("Obi", "Kemi", "Tobi", "Amina"):
+            self.assertIn(name, RESERVED_NAMES)
+            self.assertNotIn(name, SLOT_NAMES)
+
+    def test_no_name_past_the_assigned_slots(self) -> None:
+        with self.assertRaises(ValueError) as caught:
             slot_name(len(SLOT_NAMES))
+        self.assertIn("Obi", str(caught.exception))  # the error says what is reserved
 
 
 class AgentModeStatusTests(unittest.TestCase):
