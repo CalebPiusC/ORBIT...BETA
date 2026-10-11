@@ -24,12 +24,12 @@
     --text: #F4F0EA;          /* Warm White — primary text, wordmark */
     --text-dim: #A09FA8;      /* Ash Grey — secondary text */
     --text-faint: #A09FA8;    /* Ash Grey — muted text (kept AA-readable) */
-    /* Brand accent — dark blue (values from the mockup) */
-    --accent: #4a84c9;        /* Blue — user bubble fill, primary buttons */
-    --accent-bright: #7aa8e2; /* Light blue — active labels, Orbit icon */
-    --accent-dim: #2d4a73;    /* Dark blue — borders, thinking-block edge */
-    --accent-wash: rgba(74, 132, 201, 0.14); /* selected background */
-    --accent-soft: rgba(74, 132, 201, 0.35); /* focus ring */
+    /* Brand accent — dark blue. Light text (--text) sits on --accent. */
+    --accent: #1f4a8f;        /* Dark blue — user bubble fill, primary buttons */
+    --accent-bright: #6b98de; /* Light blue — active labels, Orbit icon (AA on the navy surfaces) */
+    --accent-dim: #16336a;    /* Deeper blue — borders, thinking-block edge */
+    --accent-wash: rgba(31, 74, 143, 0.22); /* selected background */
+    --accent-soft: rgba(31, 74, 143, 0.45); /* focus ring */
     /* Functional status colors — kept distinct from brand */
     --green: #78B88A;         /* Success */
     --amber: #E5B567;         /* Warning */
@@ -117,8 +117,8 @@
     padding: 6px 16px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
     display: flex; align-items: center; gap: 6px;
   }
-  .mode-toggle button.active { background: var(--accent); color: #10131C; font-weight: 600; }
-  .mode-toggle button.active:hover { background: var(--accent-bright); }
+  .mode-toggle button.active { background: var(--accent); color: var(--text); font-weight: 600; }
+  .mode-toggle button.active:hover { filter: brightness(1.15); }
   .plus-badge {
     position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
     font-size: 11px; color: var(--accent-bright); border: 1px solid var(--accent-dim);
@@ -160,13 +160,13 @@
   }
   .send-btn-round {
     width: 32px; height: 32px; border-radius: 50%;
-    background: var(--accent); border: none; color: #10131C;
+    background: var(--accent); border: none; color: var(--text);
     display: flex; align-items: center; justify-content: center; cursor: pointer;
     /* The mockup drew this as a div; as a real <button> it must not inherit
        the browser's button font/padding, and it needs a visible focus ring. */
     font: inherit; padding: 0;
   }
-  .send-btn-round:hover { background: var(--accent-bright); }
+  .send-btn-round:hover { filter: brightness(1.15); }
   .send-btn-round:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-soft); }
   button:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
 
@@ -282,7 +282,7 @@
     display: flex; flex-direction: column;
   }
   .chat-bubble.user {
-    background: var(--accent); color: #10131C;
+    background: var(--accent); color: var(--text);
     border-bottom-right-radius: 3px;
   }
   .chat-bubble.orbit {
@@ -290,7 +290,7 @@
     border: 1px solid var(--border-soft); border-bottom-left-radius: 3px;
   }
   .chat-bubble .body { color: var(--text); line-height: 1.5; }
-  .chat-bubble.user .body { color: #10131C; }
+  .chat-bubble.user .body { color: var(--text); }
   .chat-meta { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; padding: 0 2px; }
   .task-chat-input { border-top: 1px solid var(--border-soft); padding: 10px 12px; display: flex; gap: 8px; align-items: center; background: var(--bg-card); }
   .task-chat-input input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font-size: 12.5px; }

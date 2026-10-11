@@ -106,6 +106,7 @@ def create_app(
             active_conversation_id=st.active_conversation_id,
             connections=st.connections,
             connected_count=st.connected_count(),
+            thread=st.home_thread,
         )
 
     @app.get("/task/<task_id>")

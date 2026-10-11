@@ -393,6 +393,80 @@ class DesignMockupSyncTests(unittest.TestCase):
         self.assertIn('class="chat-meta"', mock_text)
 
 
+def _root_tokens(path: Path) -> dict[str, str]:
+    text = path.read_text(encoding="utf-8")
+    block = re.search(r":root\s*\{(.*?)\}", text, re.S)
+    assert block is not None
+    return {name: value.strip() for name, value in re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", block.group(1))}
+
+
+def _hex_luminance(color: str) -> float:
+    """WCAG relative luminance of a #rrggbb colour."""
+    channels = [int(color[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+    linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _contrast(a: str, b: str) -> float:
+    hi, lo = sorted((_hex_luminance(a), _hex_luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+class PaletteAndBubbleTests(unittest.TestCase):
+    """Dark-blue accent, readable text on it, and the bubble markup the UI relies on."""
+
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def setUp(self) -> None:
+        self.tokens = _root_tokens(self.ROOT / "app" / "templates" / "layout.html")
+        self.store = Store()
+        self.client = create_app(provider=FakeStreamingProvider(), store=self.store).test_client()
+
+    def test_accent_is_dark_blue_not_copper(self) -> None:
+        for token in ("--accent", "--accent-dim", "--accent-bright"):
+            hex_value = self.tokens[token]
+            red, green, blue = (int(hex_value[i : i + 2], 16) for i in (1, 3, 5))
+            self.assertGreater(blue, red, f"{token} must be blue, not warm/copper")
+            self.assertGreater(blue, green, f"{token} must be blue, not warm/copper")
+        self.assertLess(_hex_luminance(self.tokens["--accent"]), 0.1, "--accent must be dark")
+
+    def test_text_on_the_accent_bubble_is_readable(self) -> None:
+        self.assertGreaterEqual(_contrast(self.tokens["--text"], self.tokens["--accent"]), 4.5)
+
+    def test_accent_labels_are_readable_on_the_navy_surfaces(self) -> None:
+        for surface in ("--bg", "--bg-raised", "--bg-card"):
+            self.assertGreaterEqual(
+                _contrast(self.tokens["--accent-bright"], self.tokens[surface]), 4.5, surface
+            )
+
+    def test_home_thread_renders_every_orbit_message_with_brain_icon(self) -> None:
+        from app.store import ChatMessage as StoreChatMessage
+
+        self.store.home_thread.extend(
+            [
+                StoreChatMessage(who="You", time="09:41", body="First question", is_orbit=False),
+                StoreChatMessage(who="Orbit", time="09:41", body="First answer", is_orbit=True),
+                StoreChatMessage(who="Orbit", time="09:43", body="Second answer", is_orbit=True),
+            ]
+        )
+        body = self.client.get("/").get_data(as_text=True)
+        self.assertIn('<div class="chat-row user">', body)
+        self.assertEqual(body.count('<div class="chat-row orbit">'), 2)
+        # Every Orbit body starts with the brain icon, not only while streaming.
+        self.assertEqual(
+            len(re.findall(r'<div class="body"><span class="brain-icon">.*?</span><span class="reply">', body, re.S)),
+            2,
+        )
+        self.assertRegex(body, r'<div class="chat-meta">09:43</div>')
+
+    def test_no_speaker_name_labels_on_either_screen(self) -> None:
+        for path in ("/", "/task/T1"):
+            body = self.client.get(path).get_data(as_text=True)
+            self.assertNotIn("YOU:", body, path)
+            self.assertNotIn("ORBIT:", body, path)
+            self.assertNotIn('class="who"', body, path)
+
+
 class RecordingProvider:
     """Yields the given pieces as answers, recording how many have left so far."""
 
