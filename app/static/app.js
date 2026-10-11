@@ -234,6 +234,89 @@
     section.insertBefore(row, heading ? heading.nextSibling : section.firstChild);
   }
 
+  // --- sidebar history ----------------------------------------------------
+  // "+ New conversation" resets the server's active conversation, then reloads
+  // to a fresh, centered composer.
+  function wireNewConversation() {
+    var btn = document.getElementById("newConvo");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      fetch("/api/conversations/new", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      }).finally(function () {
+        window.location.href = "/";
+      });
+    });
+  }
+
+  function findHistoryItem(id) {
+    var items = document.querySelectorAll(".history-item[data-conv-id]");
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].getAttribute("data-conv-id") === id) return items[i];
+    }
+    return null;
+  }
+
+  // A new conversation appears at the top of the Today group, highlighted as
+  // the active one, the same place the server puts it on the next page load.
+  function addHistoryItem(id, title) {
+    var groups = document.querySelectorAll(".history-group");
+    var today = null;
+    for (var i = 0; i < groups.length; i++) {
+      var h = groups[i].querySelector("h4");
+      if (h && h.textContent.trim() === "Today") today = groups[i];
+    }
+    if (!today) {
+      today = el("div", "history-group");
+      today.appendChild(el("h4", null, "Today"));
+      var sidebar = document.querySelector(".sidebar");
+      var search = sidebar && sidebar.querySelector(".sidebar-search");
+      if (sidebar && search) sidebar.insertBefore(today, search.nextSibling);
+    }
+    var prev = document.querySelectorAll(".history-item.active");
+    Array.prototype.forEach.call(prev, function (n) {
+      n.classList.remove("active");
+    });
+    var item = el("div", "history-item active", escapeHtml(title));
+    item.setAttribute("data-conv-id", id);
+    var heading = today.querySelector("h4");
+    today.insertBefore(item, heading ? heading.nextSibling : today.firstChild);
+  }
+
+  function setHistoryTitle(id, title) {
+    var item = findHistoryItem(id);
+    if (item) item.textContent = title;
+    else addHistoryItem(id, title);
+  }
+
+  // Lift the centered composer into the fixed bottom bar on the first send. The
+  // composer is measured before and after the layout change, then animated
+  // from its old place with a transform (FLIP), so it visibly slides down. With
+  // reduced motion it just moves.
+  function dockComposer() {
+    var main = document.getElementById("homeMain");
+    var composer = main && main.querySelector(".home-composer");
+    if (!main || !composer || main.classList.contains("is-docked")) return;
+    var before = composer.getBoundingClientRect();
+    main.classList.add("is-docked");
+    var after = composer.getBoundingClientRect();
+    var reduce =
+      window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return;
+    var dy = before.top - after.top;
+    if (!dy) return;
+    composer.style.transition = "none";
+    composer.style.transform = "translateY(" + dy + "px)";
+    void composer.offsetWidth; // apply the start position before animating
+    composer.style.transition = "transform 380ms cubic-bezier(0.2, 0.7, 0.2, 1)";
+    composer.style.transform = "";
+    setTimeout(function () {
+      composer.style.transition = "";
+    }, 420);
+  }
+
   // --- mode toggle (Chat / Agent) ----------------------------------------
   function wireModeToggles() {
     var buttons = document.querySelectorAll(".mode-toggle button[data-mode]");
@@ -254,6 +337,7 @@
   // --- HOME --------------------------------------------------------------
   function bootstrapHome() {
     wireModeToggles();
+    wireNewConversation();
     var chips = document.querySelectorAll(".chip[data-goto-task]");
     Array.prototype.forEach.call(chips, function (chip) {
       chip.addEventListener("click", function () {
@@ -281,6 +365,7 @@
       }
       inflight = true;
       input.value = "";
+      dockComposer();
       thread.classList.add("visible");
       makeUserBubble(thread, text);
       var orbit = makeRow(thread, "orbit").bubble;
@@ -297,6 +382,14 @@
           if (event === "answer") {
             reply.textContent += data;
             thread.scrollTop = thread.scrollHeight;
+          } else if (event === "conversation") {
+            // The first send created it: show it in history before any reply.
+            var created = JSON.parse(data);
+            addHistoryItem(created.id, created.title);
+          } else if (event === "title") {
+            // Named after the first completed exchange, not a truncation.
+            var named = JSON.parse(data);
+            setHistoryTitle(named.id, named.title);
           } else if (event === "done") {
             body.classList.remove("streaming");
           } else if (event === "error") {
@@ -332,6 +425,7 @@
     // server decides (see app.server.task) so a refresh is not a model call.
     var wantInitialTurn = opts.initialTurn !== false;
     wireModeToggles();
+    wireNewConversation();
     var log = document.getElementById("taskChatLog");
     var thinkBlock = document.getElementById("thinkingBlock");
     var thinkText = document.getElementById("thinkingText");

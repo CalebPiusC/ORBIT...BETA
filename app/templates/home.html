@@ -4,14 +4,14 @@
 <div class="screen screen--active" id="screen-home">
   <div class="sidebar">
     <div class="sidebar-brand"><span class="brand-mark"></span>ORBIT</div>
-    <div class="new-convo">+ New conversation</div>
+    <div class="new-convo" id="newConvo">+ New conversation</div>
     <div class="sidebar-search">⌕ Search chats</div>
 
     {% for group, items in conversations.items() %}
     <div class="history-group">
       <h4>{{ group }}</h4>
       {% for conv in items %}
-      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}">{{ conv.title }}</div>
+      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}" data-conv-id="{{ conv.id }}">{{ conv.title }}</div>
       {% endfor %}
     </div>
     {% endfor %}
@@ -29,7 +29,7 @@
     </div>
   </div>
 
-  <div class="home-main">
+  <div class="home-main{% if docked %} is-docked{% endif %}" id="homeMain">
     <div class="home-topbar">
       <div class="mode-toggle">
         <button class="{% if mode == 'chat' %}active{% endif %}" data-arena="mode-chat" data-mode="chat">◐ Chat</button>
@@ -56,13 +56,15 @@
         {% endfor %}
       </div>
 
-      <div class="home-composer">
-        <input type="text" id="homeInput" placeholder="Ask Orbit to review a PR, generate code, or explain a diff…" />
-        <div class="composer-controls">
-          <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
-          <div class="spacer"></div>
-          <div class="icon-btn-round" title="Voice">🎙</div>
-          <button type="button" class="send-btn-round" id="homeSend" aria-label="Send message">➤</button>
+      <div class="composer-dock">
+        <div class="home-composer">
+          <input type="text" id="homeInput" placeholder="Ask Orbit to review a PR, generate code, or explain a diff…" />
+          <div class="composer-controls">
+            <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
+            <div class="spacer"></div>
+            <div class="icon-btn-round" title="Voice">🎙</div>
+            <button type="button" class="send-btn-round" id="homeSend" aria-label="Send message">➤</button>
+          </div>
         </div>
       </div>
 

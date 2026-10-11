@@ -16,6 +16,7 @@ Two rules from Phase 2 are enforced here, not just displayed:
 from __future__ import annotations
 
 import os
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
@@ -44,6 +45,9 @@ class Conversation:
     # Namespaced per person from the start, while there is still only one real
     # user, so that adding "friends" later is an extension and not a rewrite.
     user_id: str = DEFAULT_USER_ID
+    # Whether the one-time naming call has been made. It is made once, after
+    # the first completed exchange, whether or not it succeeds.
+    titled: bool = False
 
 
 @dataclass
@@ -65,6 +69,9 @@ class Change:
 class Activity:
     text: str
     time: str
+
+
+PLACEHOLDER_TITLE = "New conversation"
 
 
 def now_label() -> str:
@@ -197,12 +204,14 @@ class Store:
         self.user = _SEED_USER
         self.connections: list[Connection] = list(_SEED_CONNECTIONS)
         self.conversations: list[Conversation] = list(_SEED_CONVERSATIONS)
-        self.active_conversation_id: str = "c1"
+        # None is a fresh, empty conversation: the composer is centered and no
+        # history item is highlighted. The first send creates one.
+        self.active_conversation_id: str | None = None
         # Chat/Agent mode toggle — the same toggle surfaced in the UI.
         self.mode: Literal["chat", "agent"] = "chat"
         self.tasks: dict[str, Task] = {"T1": _seed_task()}
-        # Home chat thread (user + Orbit turns) for the streaming chat.
-        self.home_thread: list[ChatMessage] = []
+        # Home chat threads (user + Orbit turns), one per conversation id.
+        self.threads: dict[str, list[ChatMessage]] = {}
 
     # ----- connections -----
     def connected_count(self) -> int:
@@ -216,6 +225,48 @@ class Store:
         return [t for t in self.tasks.values() if t.user_id == user_id]
 
     # ----- conversations -----
+    @property
+    def home_thread(self) -> list[ChatMessage]:
+        """The active conversation's messages. Empty on a fresh conversation."""
+        if self.active_conversation_id is None:
+            return []
+        return self.threads.get(self.active_conversation_id, [])
+
+    def get_conversation(self, conv_id: str) -> Conversation | None:
+        for conv in self.conversations:
+            if conv.id == conv_id:
+                return conv
+        return None
+
+    def start_conversation(self) -> Conversation:
+        """Create the conversation the first send belongs to, and make it active.
+
+        It goes to the top of the Today group. It keeps the placeholder title
+        until the naming call lands.
+        """
+        conv = Conversation(
+            id=f"h-{uuid.uuid4().hex[:10]}",
+            title=PLACEHOLDER_TITLE,
+            group="Today",
+            user_id=self.user.id,
+        )
+        self.conversations.insert(0, conv)
+        self.threads[conv.id] = []
+        self.active_conversation_id = conv.id
+        return conv
+
+    def new_conversation(self) -> None:
+        """"+ New conversation": the next view is a fresh, centered composer."""
+        self.active_conversation_id = None
+
+    def append_message(self, conv_id: str, message: ChatMessage) -> None:
+        self.threads.setdefault(conv_id, []).append(message)
+
+    def set_title(self, conv_id: str, title: str) -> None:
+        conv = self.get_conversation(conv_id)
+        if conv is not None:
+            conv.title = title
+
     def conversations_grouped(self) -> dict[str, list[Conversation]]:
         groups: dict[str, list[Conversation]] = {}
         # Grouping the *current user's* conversations (all of them, while there

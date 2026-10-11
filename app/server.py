@@ -29,7 +29,8 @@ from typing import Any, Callable
 from flask import Flask, Response, render_template, request, stream_with_context
 from providers.base import ChatMessage as ProvChatMessage, StreamChunk
 
-from app.store import Store, now_label
+from app.store import PLACEHOLDER_TITLE, Store, now_label
+from app.titles import request_title
 from memory.facts import FactStore
 
 HOME_SYSTEM_PROMPT = (
@@ -107,6 +108,9 @@ def create_app(
             connections=st.connections,
             connected_count=st.connected_count(),
             thread=st.home_thread,
+            # Once a conversation exists its composer is the fixed bottom bar.
+            # Only a fresh, empty conversation centers it.
+            docked=st.active_conversation_id is not None,
         )
 
     @app.get("/task/<task_id>")
@@ -143,6 +147,12 @@ def create_app(
             return Response(json.dumps({"error": str(exc)}), status=400, mimetype="application/json")
         return Response(json.dumps({"mode": st.mode}), mimetype="application/json")
 
+    @app.post("/api/conversations/new")
+    def api_new_conversation() -> Response:
+        st: Store = app.config["STORE"]
+        st.new_conversation()
+        return Response(json.dumps({"active_conversation_id": None}), mimetype="application/json")
+
     @app.post("/api/chat")
     def api_chat() -> Response:
         st: Store = app.config["STORE"]
@@ -153,9 +163,18 @@ def create_app(
 
         from app.store import ChatMessage as StoreChatMessage
 
+        # The first send in a fresh conversation creates it. Every event of this
+        # turn is tied to this id, so switching conversations mid-stream cannot
+        # file the reply under the wrong one.
+        created = None
+        if st.active_conversation_id is None:
+            created = st.start_conversation()
+        conv_id = st.active_conversation_id
+        assert conv_id is not None
+
         sent_at = now_label()
-        st.home_thread.append(StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False))
-        history = _history_from_thread(st.home_thread)
+        st.append_message(conv_id, StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False))
+        history = _history_from_thread(st.threads[conv_id])
 
         # Read the facts now, once per turn, so an edit lands on the next reply.
         system_prompt = app.config["FACTS"].system_prompt(HOME_SYSTEM_PROMPT)
@@ -165,11 +184,24 @@ def create_app(
 
         def on_done(answer: str) -> None:
             if answer:
-                st.home_thread.append(
-                    StoreChatMessage(who="Orbit", time=sent_at, body=answer, is_orbit=True)
+                st.append_message(
+                    conv_id, StoreChatMessage(who="Orbit", time=sent_at, body=answer, is_orbit=True)
                 )
 
-        return _sse_response(chunk_source, on_done)
+        def after_done(answer: str) -> tuple[str, str] | None:
+            """Name the conversation after its first completed exchange, once."""
+            conv = st.get_conversation(conv_id)
+            if not answer or conv is None or conv.titled:
+                return None
+            conv.titled = True  # one attempt only, success or not
+            title = request_title(get_provider(), message, answer)
+            st.set_title(conv_id, title)
+            return "title", json.dumps({"id": conv_id, "title": title})
+
+        start_event = None
+        if created is not None:
+            start_event = ("conversation", json.dumps({"id": conv_id, "title": PLACEHOLDER_TITLE}))
+        return _sse_response(chunk_source, on_done, start_event=start_event, after_done=after_done)
 
     @app.post("/api/task/<task_id>/stream")
     def api_task_stream(task_id: str) -> Response:
@@ -259,12 +291,17 @@ def create_app(
     def _sse_response(
         chunk_source: Callable[[], Iterator[StreamChunk]],
         on_done: Callable[[str], None],
+        *,
+        start_event: tuple[str, str] | None = None,
+        after_done: Callable[[str], tuple[str, str] | None] | None = None,
     ) -> Response:
         @stream_with_context
         def generate() -> Iterator[str]:
             answer_parts: list[str] = []
             saw_thinking = False
             failed = False
+            if start_event is not None:
+                yield _sse(*start_event)
             try:
                 for chunk in chunk_source():
                     if chunk.kind == "status":
@@ -290,7 +327,13 @@ def create_app(
                     "GEMINI_MODEL and GEMINI_API_KEY in .env.",
                 )
             yield _sse("done", "")
-            on_done("".join(answer_parts))
+            answer = "".join(answer_parts)
+            on_done(answer)
+            if after_done is not None:
+                # Sent after "done", so the reply is never held up by naming.
+                extra = after_done(answer)
+                if extra is not None:
+                    yield _sse(*extra)
 
         return Response(
             generate(),

@@ -173,7 +173,10 @@ class StreamingEndpointTests(unittest.TestCase):
         events = parse_sse(resp.get_data(as_text=True))
         kinds = [e[0] for e in events]
         self.assertIn("answer", kinds)
-        self.assertEqual(events[-1][0], "done")
+        # "done" ends the reply. A naming event may follow it, never precede it.
+        self.assertIn("done", kinds)
+        self.assertEqual(kinds[kinds.index("done")], "done")
+        self.assertTrue(all(k in ("done", "title") for k in kinds[kinds.index("done") :]))
         answer = "".join(d for k, d in events if k == "answer")
         self.assertIn("Hello from Orbit.", answer)
         # The reply was persisted to the home thread.
@@ -442,6 +445,7 @@ class PaletteAndBubbleTests(unittest.TestCase):
     def test_home_thread_renders_every_orbit_message_with_brain_icon(self) -> None:
         from app.store import ChatMessage as StoreChatMessage
 
+        self.store.start_conversation()
         self.store.home_thread.extend(
             [
                 StoreChatMessage(who="You", time="09:41", body="First question", is_orbit=False),

@@ -29,13 +29,13 @@
 <div class="screen screen--active" id="screen-task">
   <div class="sidebar">
     <div class="sidebar-brand"><span class="brand-mark"></span>ORBIT</div>
-    <div class="new-convo">+ New conversation</div>
+    <div class="new-convo" id="newConvo">+ New conversation</div>
     <div class="sidebar-search">⌕ Search chats</div>
     {% for group, items in conversations.items() %}
     <div class="history-group">
       <h4>{{ group }}</h4>
       {% for conv in items %}
-      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}">{{ conv.title }}</div>
+      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}" data-conv-id="{{ conv.id }}">{{ conv.title }}</div>
       {% endfor %}
     </div>
     {% endfor %}

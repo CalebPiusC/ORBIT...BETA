@@ -12,7 +12,7 @@ from google.genai import types
 from google.genai.errors import APIError
 
 from config import DEFAULT_GEMINI_FALLBACK_MODEL, DEFAULT_GEMINI_MODEL, load_settings
-from providers.base import ChatMessage, ChatProvider, StreamChunk
+from providers.base import TITLE_SYSTEM_PROMPT, ChatMessage, ChatProvider, StreamChunk, title_request
 from providers.personas import slot_name
 from tools.registry import AuditLog, ToolRegistry
 
@@ -264,6 +264,21 @@ class GeminiProvider(ChatProvider):
         )
         first = next(stream, _END)
         return stream, first
+
+    def title(self, user_text: str, answer: str) -> str:
+        """One no-tools call that names the conversation.
+
+        The config carries no tool declarations, so a title request can never
+        propose an action. Fallback and audit apply as they do for any call.
+        """
+        self.last_attempts = []
+        contents = [
+            types.Content(role="user", parts=[types.Part.from_text(text=title_request(user_text, answer))])
+        ]
+        config = types.GenerateContentConfig(system_instruction=TITLE_SYSTEM_PROMPT)
+        response, _model = self._generate(contents, config, model=self.model, allow_fallback=True)
+        text = getattr(response, "text", None)
+        return text if isinstance(text, str) else ""
 
     def reply(self, history: Sequence[ChatMessage], system_prompt: str) -> str:
         if not isinstance(system_prompt, str):

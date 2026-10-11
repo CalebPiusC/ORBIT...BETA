@@ -41,6 +41,21 @@ class ChatMessage:
             raise ValueError("ChatMessage content must not be empty.")
 
 
+TITLE_SYSTEM_PROMPT = (
+    "You write short titles for chat conversations. Reply with only the title: "
+    "three to six words, no quotes, no trailing punctuation, no label such as "
+    "'Title:'."
+)
+
+
+def title_request(user_text: str, answer: str) -> str:
+    """The user turn sent with TITLE_SYSTEM_PROMPT. Only the first exchange is sent."""
+    return (
+        "Title this conversation from its first exchange.\n\n"
+        f"User: {user_text[:1000]}\n\nAssistant: {answer[:1000]}"
+    )
+
+
 class ChatProvider(ABC):
     """The chat-only seam between ORBIT and a language-model provider."""
 
@@ -48,6 +63,17 @@ class ChatProvider(ABC):
     def reply(self, history: Sequence[ChatMessage], system_prompt: str) -> str:
         """Return the provider's text reply to a conversation."""
         raise NotImplementedError
+
+    def title(self, user_text: str, answer: str) -> str:
+        """Return a short title for a conversation's first exchange.
+
+        One lightweight call, made once per conversation. The default goes
+        through ``reply()``. A provider that can make a call with no tools
+        attached should override this, so a title request can never propose
+        an action.
+        """
+        history = [ChatMessage(role="user", content=title_request(user_text, answer))]
+        return self.reply(history, TITLE_SYSTEM_PROMPT)
 
     def reply_stream(
         self,
