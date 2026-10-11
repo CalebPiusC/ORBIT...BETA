@@ -98,7 +98,7 @@ class ChatProvider(ABC):
 
         When ``report_attempts`` is True, the provider also yields
         ``kind="status"`` chunks as it asks each model (for example "Asking
-        Chidi…", then a fallback notice). Chat mode leaves it False, so no
+        Titan…", then a fallback notice). Chat mode leaves it False, so no
         status line appears there.
         """
         raise NotImplementedError

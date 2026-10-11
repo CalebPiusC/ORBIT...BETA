@@ -234,7 +234,7 @@ def create_app(
         history = _history_from_thread(task_obj.chat, extra_user=extra_user)
 
         system_prompt = app.config["FACTS"].system_prompt(TASK_SYSTEM_PROMPT)
-        # Agent mode names the model being asked ("Asking Chidi…"); Chat mode stays unlabeled.
+        # Agent mode names the model being asked ("Asking Titan…"); Chat mode stays unlabeled.
         label_models = st.mode == "agent"
 
         def chunk_source() -> Iterator[StreamChunk]:

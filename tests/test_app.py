@@ -542,7 +542,7 @@ class RecordingProvider:
     def reply_stream(self, history, system_prompt: str, *, think: bool = False, report_attempts: bool = False):
         self.calls.append({"think": think, "report_attempts": report_attempts})
         if report_attempts:
-            yield StreamChunk(kind="status", text="Asking Chidi…")
+            yield StreamChunk(kind="status", text="Asking Titan…")
         for piece in self.pieces:
             self.produced += 1
             yield StreamChunk(kind="answer", text=piece)

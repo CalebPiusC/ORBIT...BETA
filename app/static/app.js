@@ -209,8 +209,8 @@
       .replace(/>/g, "&gt;");
   }
 
-  // Agent-mode status lines ("Asking Chidi…", or "Chidi didn't answer … Asking
-  // Ada…") label the narration with the model that is being asked. Only the
+  // Agent-mode status lines ("Asking Titan…", or "Titan didn't answer … Asking
+  // Europa…") label the narration with the model that is being asked. Only the
   // trailing "Asking <name>…" is shown as the label; the full line goes to the
   // activity feed.
   var ASKING_RE = /Asking [A-Za-z]+\u2026\s*$/;
