@@ -353,16 +353,84 @@
     labelNode.hidden = false;
   }
 
-  // Agent-mode status lines go into the task's live activity feed, newest first,
-  // the same order the server renders saved activity in.
-  function addActivity(text) {
-    var section = document.getElementById("taskActivity");
-    if (!section) return;
-    var row = el("div", "activity-row");
-    row.appendChild(el("span", null, escapeHtml(text)));
-    row.appendChild(el("span", "time", nowLabel()));
-    var heading = section.querySelector("h4");
-    section.insertBefore(row, heading ? heading.nextSibling : section.firstChild);
+  // --- live turn status ---------------------------------------------------
+  // A status line is only ever shown when it is true. Waiting on the model says
+  // so; a long wait says so too; and once text is arriving the label describes
+  // what is arriving. Nothing here claims work the stream has not shown — a
+  // wrong status is worse than no status, and this project has already paid for
+  // one ("Orbit is working" that stayed up while nothing was).
+  var SLOW_TURN_MS = 12000;
+
+  function TurnStatus(bar, textNode) {
+    this.bar = bar;
+    this.textNode = textNode;
+    this.timer = null;
+    this.waiting = false;
+  }
+
+  TurnStatus.prototype.begin = function () {
+    var self = this;
+    this.waiting = true;
+    this._say("Thinking…");
+    this._clearTimer();
+    this.timer = window.setTimeout(function () {
+      if (self.waiting) self._say("Still thinking…");
+    }, SLOW_TURN_MS);
+  };
+
+  // Called when content starts to arrive: the label now describes that content.
+  TurnStatus.prototype.arriving = function (text) {
+    this.waiting = false;
+    this._clearTimer();
+    this._say(text);
+  };
+
+  TurnStatus.prototype.clear = function () {
+    this.waiting = false;
+    this._clearTimer();
+    if (this.bar) this.bar.hidden = true;
+    if (this.textNode) this.textNode.textContent = "";
+  };
+
+  TurnStatus.prototype._say = function (text) {
+    if (!this.bar) return;
+    this.bar.hidden = false;
+    if (this.textNode) this.textNode.textContent = text;
+  };
+
+  TurnStatus.prototype._clearTimer = function () {
+    if (this.timer) {
+      window.clearTimeout(this.timer);
+      this.timer = null;
+    }
+  };
+
+  function turnStatusFor(barId, textId) {
+    var bar = document.getElementById(barId);
+    if (!bar) return new TurnStatus(null, null);
+    return new TurnStatus(bar, document.getElementById(textId));
+  }
+
+  // --- suggested next steps ------------------------------------------------
+  // Follow-up chips are only rendered when the server says the last reply gives
+  // them something real to act on (app/followups.py). An empty list hides the
+  // row: a chip that suggests something Orbit was never asked about is worse
+  // than no chip at all.
+  function renderFollowups(box, items) {
+    if (!box) return;
+    box.textContent = "";
+    if (!items || !items.length) {
+      box.hidden = true;
+      return;
+    }
+    items.forEach(function (item) {
+      var chip = el("button", "followup-chip");
+      chip.type = "button";
+      chip.textContent = item.label;
+      chip.setAttribute("data-followup", item.prompt);
+      box.appendChild(chip);
+    });
+    box.hidden = false;
   }
 
   // --- sidebar history ----------------------------------------------------
@@ -996,29 +1064,52 @@
         state: "pending",
       });
     });
-    var chips = document.querySelectorAll(".chip[data-goto-task], .chip[data-suggestion]");
-    Array.prototype.forEach.call(chips, function (chip) {
-      chip.addEventListener("click", function () {
-        var taskId = chip.getAttribute("data-goto-task");
-        if (taskId) {
-          window.location.href = "/task/" + taskId;
-          return;
-        }
-        var prompt = chip.getAttribute("data-suggestion");
-        var promptInput = document.getElementById("homeInput");
-        if (promptInput && prompt) {
-          promptInput.value = prompt;
-          promptInput.focus();
-        }
-      });
-    });
-
+    var welcome = document.getElementById("welcome");
     var input = document.getElementById("homeInput");
     var send = document.getElementById("homeSend");
     var voiceButton = document.getElementById("homeVoice");
     var voiceStatus = document.getElementById("homeVoiceStatus");
     var thread = document.getElementById("homeThread");
+    var followupsBox = document.getElementById("followupChips");
+    var turnStatus = turnStatusFor("turnStatusBar", "turnStatusText");
     if (!input || !send || !thread) return;
+
+    // The welcome screen's three shortcuts send a real prompt through the
+    // ordinary composer path — they are starting points, not labels.
+    Array.prototype.forEach.call(document.querySelectorAll(".welcome-action[data-starter]"), function (button) {
+      button.addEventListener("click", function () {
+        sendPrompt(button.getAttribute("data-starter"));
+      });
+    });
+
+    // One ring instance, two speeds. Idle on the welcome screen the mark turns
+    // slowly; the moment Orbit starts responding the same mark shrinks, speeds
+    // up and sits beside the status line.
+    function welcomeResponding() {
+      if (welcome) welcome.classList.add("is-responding");
+      if (turnStatus.bar) turnStatus.bar.classList.add("no-rings");
+    }
+
+    function welcomeDone() {
+      if (welcome) welcome.hidden = true;
+    }
+
+    // The turn did not land, so the welcome screen goes back to idle with its
+    // shortcuts available rather than staying half-collapsed.
+    function welcomeIdle() {
+      if (welcome) welcome.classList.remove("is-responding");
+      if (turnStatus.bar) turnStatus.bar.classList.remove("no-rings");
+    }
+
+    // Follow-up chips: one click sends the prompt they stand for. Delegated, so
+    // chips rendered by the server on page load behave like streamed ones.
+    if (followupsBox) {
+      followupsBox.addEventListener("click", function (event) {
+        var chip = event.target.closest ? event.target.closest(".followup-chip") : null;
+        if (!chip) return;
+        sendPrompt(chip.getAttribute("data-followup"));
+      });
+    }
 
     // One turn at a time. The send control becomes a cancel action while the
     // active stream is being read; a typed Enter still never discards input.
@@ -1037,6 +1128,9 @@
       body.classList.add("streaming");
       refreshRegenerateActions(thread);
       var fullReply = "";
+      var sawText = false;
+      turnStatus.begin();
+      welcomeResponding();
       thread.scrollTop = thread.scrollHeight;
 
       postSSE(
@@ -1044,6 +1138,12 @@
         payload,
         function (event, data) {
           if (event === "answer") {
+            if (!sawText) {
+              sawText = true;
+              // The first chunk is on screen, so the label stops saying we are
+              // waiting and starts saying what is arriving.
+              turnStatus.arriving("Writing your answer…");
+            }
             row.classList.remove("is-generating");
             row.classList.add("is-streaming");
             reply.textContent += data;
@@ -1058,13 +1158,17 @@
           } else if (event === "action") {
             appendActionCard(thread, JSON.parse(data));
             refreshRegenerateActions(thread);
+          } else if (event === "followups") {
+            renderFollowups(followupsBox, JSON.parse(data));
           } else if (event === "notice") {
             showLine(body, data, "warn");
           } else if (event === "done") {
             body.classList.remove("streaming");
+            turnStatus.clear();
           } else if (event === "error") {
             row.classList.add("has-error");
             body.classList.remove("streaming");
+            turnStatus.clear();
             showLine(body, data, "error");
           }
         },
@@ -1074,14 +1178,19 @@
           activeRequest = null;
           setSendButton(send, false);
           if (voiceButton) voiceButton.disabled = false;
+          turnStatus.clear();
           row.classList.remove("is-generating", "is-streaming");
           row.classList.toggle("was-stopped", stopped);
           body.classList.remove("streaming");
           if (err) {
             row.classList.add("has-error");
             showLine(body, err, "error");
-          } else if (voiceReply && fullReply.trim()) {
-            playReplyAudio(fullReply, body);
+            welcomeIdle();
+          } else {
+            // Answered or stopped: the conversation has started, so the welcome
+            // screen has done its job and steps out.
+            welcomeDone();
+            if (voiceReply && fullReply.trim()) playReplyAudio(fullReply, body);
           }
           refreshRegenerateActions(thread);
         },
@@ -1097,7 +1206,21 @@
       Array.prototype.forEach.call(body.querySelectorAll(".notice"), function (notice) { notice.remove(); });
       reply.textContent = "";
       row.classList.remove("has-error");
+      renderFollowups(followupsBox, []);
       startStream(row, body, reply, { regenerate: true }, false);
+    }
+
+    // A starter button or a follow-up chip: put the prompt in the composer and
+    // send it through the ordinary path, so it is a real turn, not a decoration.
+    function sendPrompt(prompt) {
+      if (!prompt) return;
+      if (inflight) {
+        var pending = thread.querySelector(".chat-row.orbit:last-child .body");
+        if (pending) showLine(pending, "Still waiting on the reply above — send this after it finishes.", "warn");
+        return;
+      }
+      input.value = prompt;
+      sendMessage();
     }
 
     function sendMessage(options) {
@@ -1112,6 +1235,9 @@
       }
       setVoiceStatus(voiceStatus, "");
       input.value = "";
+      // Suggestions belong to the reply that produced them, so they go the
+      // moment a new turn starts and come back only if the next reply earns them.
+      renderFollowups(followupsBox, []);
       dockComposer();
       thread.classList.add("visible");
       makeUserBubble(thread, text);
@@ -1144,6 +1270,111 @@
     }, function () { return inflight; });
   }
 
+  // --- TASK PANEL ---------------------------------------------------------
+  // The panel is drawn from the run state the server streams (app/taskplan.py).
+  // Every line is either planned from the request text or taken from what the
+  // stream actually produced, so nothing here fills a gap with a guess.
+  var RUN_LABEL = { running: "IN PROGRESS", idle: "WAITING FOR YOU", failed: "STOPPED" };
+  var CHECK_ICON = { done: "✓", active: "◐", pending: "○" };
+
+  function setText(id, text) {
+    var node = document.getElementById(id);
+    if (node) node.textContent = text;
+  }
+
+  function renderSteps(steps) {
+    var list = document.getElementById("stepChecklist");
+    if (!list) return;
+    list.textContent = "";
+    (steps || []).forEach(function (step) {
+      var item = el("li", "checklist-step " + step.status);
+      var icon = el("span", "check-icon", CHECK_ICON[step.status] || CHECK_ICON.pending);
+      icon.setAttribute("aria-hidden", "true");
+      var body = el("span", "check-body");
+      body.appendChild(el("span", "check-title", escapeHtml(step.title)));
+      // The sentence from Orbit's narration that moved this step, when there is
+      // one. A step with no line behind it stays "Not started".
+      var detail = step.evidence ? "Orbit: “" + step.evidence + "”" : "Not started";
+      body.appendChild(el("span", "check-detail", escapeHtml(detail)));
+      item.appendChild(icon);
+      item.appendChild(body);
+      list.appendChild(item);
+    });
+  }
+
+  function renderFiles(files) {
+    var box = document.getElementById("fileChips");
+    var empty = document.getElementById("filesEmpty");
+    var names = files || [];
+    if (box) {
+      box.textContent = "";
+      names.forEach(function (item) {
+        var chip = el("span", "file-chip", escapeHtml(item.name));
+        chip.appendChild(el("em", null, item.source === "request" ? "your request" : "Orbit"));
+        box.appendChild(chip);
+      });
+    }
+    if (empty) empty.hidden = names.length > 0;
+    setText("statusBarFiles", names.length + " file(s) named");
+  }
+
+  function renderOperation(state) {
+    var node = document.getElementById("currentOperation");
+    if (node) {
+      node.className =
+        "operation" +
+        (state.status === "running" ? " is-running" : state.status === "failed" ? " is-failed" : " is-idle");
+      node.textContent = "";
+      node.appendChild(el("span", "dot"));
+      node.appendChild(el("span", "op-text", escapeHtml(state.operation || "Not running")));
+    }
+    // The topbar indicator only exists while a run is genuinely in flight.
+    var indicator = document.getElementById("workingIndicator");
+    if (indicator) {
+      indicator.hidden = state.status !== "running";
+      setText("workingIndicatorText", state.operation || "");
+    }
+  }
+
+  function renderActivity(rows) {
+    var section = document.getElementById("taskActivity");
+    if (!section) return;
+    Array.prototype.forEach.call(section.querySelectorAll(".activity-row"), function (row) { row.remove(); });
+    var list = rows || [];
+    section.hidden = list.length === 0;
+    if (!list.length) return;
+    var heading = section.querySelector("h4");
+    var fragment = document.createDocumentFragment();
+    list.forEach(function (row) {
+      var line = el("div", "activity-row");
+      line.appendChild(el("span", null, escapeHtml(row.text)));
+      line.appendChild(el("span", "time", escapeHtml(row.time)));
+      fragment.appendChild(line);
+    });
+    section.insertBefore(fragment, heading ? heading.nextSibling : section.firstChild);
+  }
+
+  function renderTaskPanel(state) {
+    var panel = document.getElementById("taskPanel");
+    if (!state || !panel) return;
+    panel.hidden = false;
+    var startBox = document.getElementById("taskStart");
+    if (startBox) startBox.hidden = true;
+    setText("taskRunState", RUN_LABEL[state.status] || "NOT STARTED");
+    renderSteps(state.steps);
+    renderFiles(state.files);
+    renderOperation(state);
+    var approval = document.getElementById("approvalStateLine");
+    if (approval) {
+      approval.textContent = state.applied
+        ? "✓ Changes applied."
+        : state.approved
+          ? "✓ You approved — safe to apply."
+          : "Nothing is waiting on your approval.";
+    }
+    renderActivity(state.activity);
+  }
+
   // --- TASK --------------------------------------------------------------
   function bootstrapTask(taskId, options) {
     var opts = options || {};
@@ -1167,7 +1398,89 @@
     var voiceStatus = document.getElementById("taskVoiceStatus");
     var inflight = false;
     var activeRequest = null;
+    var turnStatus = turnStatusFor("taskTurnStatus", "taskTurnStatusText");
     wireMessageActions(log, regenerateTask);
+
+    // A task that has not run has no panel: the start box offers the request and
+    // a way to begin (or to describe a new one).
+    var startBox = document.getElementById("taskStart");
+    var startExisting = document.getElementById("taskStartExisting");
+    var composeBox = document.getElementById("taskStartCompose");
+    var newTaskInput = document.getElementById("newTaskInput");
+    var newTaskError = document.getElementById("newTaskError");
+    var hasRun = !!(document.getElementById("taskPanel") && !document.getElementById("taskPanel").hidden);
+
+    function showStartBox(compose) {
+      if (!startBox || !startExisting || !composeBox) return;
+      startBox.hidden = false;
+      startExisting.hidden = !!compose;
+      composeBox.hidden = !compose;
+      var panel = document.getElementById("taskPanel");
+      if (panel) panel.hidden = true;
+      if (compose && newTaskInput) newTaskInput.focus();
+    }
+
+    function restoreAfterCompose() {
+      if (newTaskError) newTaskError.textContent = "";
+      var panel = document.getElementById("taskPanel");
+      if (hasRun && panel) {
+        panel.hidden = false;
+        if (startBox) startBox.hidden = true;
+        return;
+      }
+      showStartBox(false);
+    }
+
+    var newTaskBtn = document.getElementById("newTaskBtn");
+    if (newTaskBtn) {
+      newTaskBtn.addEventListener("click", function () {
+        if (newTaskError) newTaskError.textContent = "";
+        showStartBox(true);
+      });
+    }
+
+    var cancelTaskBtn = document.getElementById("cancelTaskBtn");
+    if (cancelTaskBtn) cancelTaskBtn.addEventListener("click", restoreAfterCompose);
+
+    var createTaskBtn = document.getElementById("createTaskBtn");
+    if (createTaskBtn && newTaskInput) {
+      createTaskBtn.addEventListener("click", function () {
+        var request = newTaskInput.value.trim();
+        if (!request) {
+          if (newTaskError) newTaskError.textContent = "Describe what Orbit should work on first.";
+          newTaskInput.focus();
+          return;
+        }
+        createTaskBtn.disabled = true;
+        if (newTaskError) newTaskError.textContent = "";
+        fetch("/api/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ request: request }),
+        })
+          .then(function (res) {
+            return res.json().catch(function () { return {}; }).then(function (data) {
+              if (!res.ok) throw new Error(data.error || "HTTP " + res.status);
+              return data;
+            });
+          })
+          .then(function (data) {
+            // The new task has no reply yet, so its opening turn runs on load.
+            window.location.href = "/task/" + encodeURIComponent(data.id);
+          })
+          .catch(function (err) {
+            if (newTaskError) newTaskError.textContent = (err && err.message) || "Could not start that task.";
+            createTaskBtn.disabled = false;
+          });
+      });
+    }
+
+    var startTaskBtn = document.getElementById("startTaskBtn");
+    if (startTaskBtn) {
+      startTaskBtn.addEventListener("click", function () {
+        streamTurn({ initial: true, useTopThinking: true });
+      });
+    }
 
     // Stream one Orbit turn. The page-level block narrates the opening turn;
     // follow-up turns keep their own compact thought block in the chat.
@@ -1183,12 +1496,19 @@
       var useTop = !!opts.useTopThinking;
       var orbit = makeOrbitBubble(log, opts.replaceRow || null);
       var fullReply = "";
+      var sawText = false;
       var targetThink = useTop ? thinkText : orbit.thinkText;
       var targetBlock = useTop ? thinkBlock : orbit.think;
       var targetLabel = useTop ? thinkLabel : orbit.thinkLabel;
       if (!useTop && targetBlock) targetBlock.style.display = "none";
       orbit.row.classList.add("is-generating");
       orbit.body.classList.add("streaming");
+      // The panel has state to show as soon as the run exists.
+      hasRun = true;
+      if (startBox) startBox.hidden = true;
+      var panelNode = document.getElementById("taskPanel");
+      if (panelNode) panelNode.hidden = false;
+      turnStatus.begin();
       refreshRegenerateActions(log);
 
       function revealThinking() {
@@ -1199,15 +1519,24 @@
         "/api/task/" + encodeURIComponent(taskId) + "/stream",
         { message: opts.message || "", initial: !!opts.initial, regenerate: !!opts.regenerate },
         function (event, data) {
-          if (event === "status") {
-            addActivity(data);
+          if (event === "task_state") {
+            // Steps, files, the current operation, approvals and the activity
+            // log — all of it derived from this run, never from seeded numbers.
+            renderTaskPanel(JSON.parse(data));
+          } else if (event === "status") {
             showModelLabel(targetLabel, data);
           } else if (event === "thinking") {
+            if (!sawText) {
+              sawText = true;
+              turnStatus.arriving("Working through it…");
+            }
             if (!targetThink) return;
             revealThinking();
             targetThink.textContent += data;
             log.scrollTop = log.scrollHeight;
           } else if (event === "answer") {
+            if (!sawText) turnStatus.arriving("Writing your answer…");
+            sawText = true;
             if (targetBlock && !targetBlock.classList.contains("done")) targetBlock.classList.add("done");
             orbit.row.classList.remove("is-generating");
             orbit.row.classList.add("is-streaming");
@@ -1217,10 +1546,12 @@
           } else if (event === "done") {
             if (targetBlock) targetBlock.classList.add("done");
             orbit.body.classList.remove("streaming");
+            turnStatus.clear();
           } else if (event === "error") {
             if (targetBlock) targetBlock.classList.add("done");
             orbit.row.classList.add("has-error");
             orbit.body.classList.remove("streaming");
+            turnStatus.clear();
             showLine(orbit.body, data, "error");
           }
         },
@@ -1231,6 +1562,7 @@
           setSendButton(send, false);
           if (voiceButton) voiceButton.disabled = false;
           if (targetBlock) targetBlock.classList.add("done");
+          turnStatus.clear();
           orbit.row.classList.remove("is-generating", "is-streaming");
           orbit.row.classList.toggle("was-stopped", stopped);
           orbit.body.classList.remove("streaming");
@@ -1294,68 +1626,11 @@
       thinkBlock.classList.add("done");
     }
 
-    // Approval gate: explicit approve, then apply/push (which refuses if not approved).
-    var approveBtn = document.getElementById("approveBtn");
-    var applyBtn = document.getElementById("applyBtn");
-    var state = document.getElementById("approvalState");
-
-    if (approveBtn) {
-      approveBtn.addEventListener("click", function () {
-        approveBtn.disabled = true;
-        if (state) state.textContent = "Approving…";
-        fetch("/api/task/" + encodeURIComponent(taskId) + "/approve", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ approve: true }),
-        })
-          .then(function (r) {
-            return r.json().then(function (j) {
-              return { ok: r.ok, j: j };
-            });
-          })
-          .then(function (res) {
-            if (res.ok && res.j.approved) {
-              if (state) {
-                state.textContent = "✓ Approved — safe to apply";
-                state.classList.add("ok");
-              }
-              if (applyBtn) applyBtn.classList.add("approved");
-            } else {
-              if (state) state.textContent = "Approval rejected.";
-              approveBtn.disabled = false;
-            }
-          })
-          .catch(function () {
-            if (state) state.textContent = "Approval failed.";
-            approveBtn.disabled = false;
-          });
-      });
-    }
-
-    if (applyBtn) {
-      applyBtn.addEventListener("click", function () {
-        fetch("/api/task/" + encodeURIComponent(taskId) + "/apply", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        })
-          .then(function (r) {
-            return r.json().then(function (j) {
-              return { ok: r.ok, j: j };
-            });
-          })
-          .then(function (res) {
-            if (res.ok) {
-              if (state) {
-                state.textContent = "✓ Changes applied.";
-                state.classList.add("ok");
-              }
-            } else {
-              if (state) state.textContent = "⛔ " + (res.j.error || "Not approved.");
-            }
-          });
-      });
-    }
+    // The approval gate lives in the store, not in a button: app.store.apply_changes
+    // refuses unless the task was explicitly approved, and /api/task/<id>/apply
+    // answers 403. There is deliberately no Approve control here — with nothing
+    // proposed there is nothing to approve, and a button that only looks like a
+    // gate is worse than the honest line the panel shows instead.
   }
 
   window.Orbit = {

@@ -44,7 +44,15 @@ class StubStreamingProvider:
                 text=f"STUB: no model called for {thinking_level.title()} mode",
             )
         if think:
-            yield StreamChunk(kind="thinking", text="STUB: no model called — showing the thinking block.")
+            # Narrated in character so the Agent panel has real evidence to work
+            # with: the checklist moves because a narration line mentioned it.
+            yield StreamChunk(
+                kind="thinking",
+                text=(
+                    "STUB: no model called — narrating as if I had read the "
+                    "repository and found the order code in orders.py."
+                ),
+            )
             yield StreamChunk(kind="answer", text="STUB: this text is canned. Run `python -m app.server` with GEMINI_API_KEY in .env for your real model.")
         else:
             yield StreamChunk(kind="answer", text="STUB: this text is canned, not Gemini. Run `python -m app.server` with GEMINI_API_KEY in .env.")

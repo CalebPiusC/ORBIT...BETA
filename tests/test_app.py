@@ -149,18 +149,50 @@ class AppRoutesTests(unittest.TestCase):
         # Sanity: there is no "connected" pill for Linear or Vercel.
         self.assertEqual(body.count("tool-pill connected"), 1)
 
-    def test_task_renders_steps_changes_activity(self):
+    def test_task_panel_is_planned_from_the_request(self):
+        """The checklist comes from this request's wording, not a fixed workflow."""
         resp = self.client.get("/task/T1")
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
         self.assertIn("Add order tracking to WhatsApp bot", body)
-        self.assertIn("Read repository context", body)  # a step
-        self.assertIn("orders.py", body)  # a proposed change file
-        self.assertIn("Running tests against the updated order lookup", body)  # activity
+        # Steps are derived from the request: its own clause, and a verify step
+        # because it asks for a change and mentions no tests.
+        self.assertIn("Find the code for a status field", body)
+        self.assertIn("Plan how to add a status field", body)
+        self.assertIn("Summarize it for your review", body)
+        self.assertNotIn("Read repository context", body)  # the old fixed step list
+        # Files come from the request text and say where the name came from.
+        self.assertIn("orders.py", body)
+        self.assertIn("your request", body)
         # The approval gate note is present and verbatim.
         self.assertIn("No commits will be pushed without your explicit approval.", body)
         self.assertIn("No pushes without approval", body)
-        self.assertIn("Orbit is working", body)
+
+    def test_a_task_that_has_not_run_has_no_panel(self):
+        """No run means no panel: no standing empty checklist on the screen."""
+        from app.store import ChatMessage as StoreChatMessage
+
+        task = self.store.get_task("T1")
+        assert task is not None
+        task.chat.append(StoreChatMessage(who="Orbit", time="09:42", body="On it.", is_orbit=True))
+        body = self.client.get("/task/T1").get_data(as_text=True)
+        self.assertIn('<section class="task-panel" id="taskPanel" aria-live="polite" hidden>', body)
+        self.assertIn('<div class="task-start" id="taskStart">', body)
+        # The start control is real, and the seeded fake numbers are gone.
+        self.assertIn('id="startTaskBtn"', body)
+        for fake in ("6 files scanned", "38 → 61", "Running tests against the updated order lookup"):
+            self.assertNotIn(fake, body)
+
+    def test_the_working_indicator_only_appears_while_a_run_is_in_flight(self):
+        """A status that says Orbit is working when it is idle is not a status."""
+        from app.store import ChatMessage as StoreChatMessage
+
+        task = self.store.get_task("T1")
+        assert task is not None
+        task.chat.append(StoreChatMessage(who="Orbit", time="09:42", body="On it.", is_orbit=True))
+        body = self.client.get("/task/T1").get_data(as_text=True)
+        self.assertIn('id="workingIndicator" hidden', body)
+        self.assertNotIn(">Orbit is working<", body)
 
     def test_unknown_task_404(self):
         resp = self.client.get("/task/NOPE")
@@ -281,13 +313,48 @@ class StreamingEndpointTests(unittest.TestCase):
         kinds = [e[0] for e in events]
         self.assertIn("thinking", kinds)
         self.assertIn("answer", kinds)
-        self.assertEqual(kinds[0], "thinking")
+        # The panel's opening state leads, so the client can draw the plan
+        # before the first word arrives; narration still precedes the answer.
+        self.assertEqual(kinds[0], "task_state")
+        self.assertLess(kinds.index("thinking"), kinds.index("answer"))
         thinking = "".join(d for k, d in events if k == "thinking")
         self.assertIn("checking the repository", thinking)
         # Persisted as an Orbit chat message.
         task = self.store.get_task("T1")
         assert task is not None
         self.assertTrue(any(m.is_orbit for m in task.chat))
+        # The panel's state is derived from this run, not seeded: the narration
+        # mentions reading the repository, so a step moved and says why.
+        states = [json.loads(d) for k, d in events if k == "task_state"]
+        self.assertTrue(states, "the task stream must report panel state")
+        final = states[-1]
+        self.assertEqual(final["status"], "idle")
+        self.assertIn("Waiting for your input", final["operation"])
+        moved = [s for s in final["steps"] if s["status"] != "pending"]
+        self.assertTrue(moved, "narration that reads the code should move a step")
+        self.assertTrue(moved[0]["evidence"], "a moved step keeps the line that moved it")
+        self.assertTrue(final["activity"], "the run's real events are reported")
+
+    def test_a_task_run_marks_no_step_without_evidence(self):
+        """A turn that narrates nothing leaves every step pending."""
+
+        class Blank:
+            calls: list[dict] = []
+
+            def reply_stream(self, history, system_prompt, **kwargs):
+                Blank.calls.append({"think": kwargs.get("think")})
+                yield StreamChunk(kind="answer", text="Nothing to narrate.")
+
+        app = create_app(provider=Blank(), store=self.store)
+        events = parse_sse(
+            app.test_client().post("/api/task/T1/stream", json={"initial": True}).get_data(as_text=True)
+        )
+        states = [json.loads(d) for k, d in events if k == "task_state"]
+        final = states[-1]
+        self.assertEqual([s["status"] for s in final["steps"]], ["pending"] * len(final["steps"]))
+        # Files the request named are still listed; nothing Orbit never said was
+        # added to them.
+        self.assertEqual({f["source"] for f in final["files"]}, {"request"})
 
     def test_task_initial_response_can_be_regenerated_without_duplicate_messages(self):
         first = self.client.post("/api/task/T1/stream", json={"initial": True})
@@ -625,7 +692,7 @@ class AgentScrollbarTests(unittest.TestCase):
     """Scrollbars are hidden on the Agent panels, but those panels still scroll."""
 
     ROOT = Path(__file__).resolve().parent.parent
-    PANELS = (".task-work", ".task-chat-log", ".home-thread", ".step-row", ".activity-section", ".change-list")
+    PANELS = (".task-work", ".task-chat-log", ".home-thread", ".activity-section")
 
     def _css(self, name: str) -> str:
         text = (self.ROOT / name).read_text(encoding="utf-8")
@@ -669,13 +736,214 @@ class AgentScrollbarTests(unittest.TestCase):
         self.assertRegex(self._rules_for(css, ".task-work")[0], r"overflow-y:\s*auto")
         self.assertRegex(self._rules_for(css, ".task-chat-log")[0], r"overflow-y:\s*auto")
 
-    def test_the_proposed_changes_list_is_a_named_panel_in_the_markup(self) -> None:
+    def test_the_agent_panel_is_a_named_panel_in_the_markup(self) -> None:
         body = self.client_body()
-        self.assertRegex(body, r'<div class="change-list">\s*<div class="change-row">')
+        self.assertRegex(body, r'<section class="task-panel" id="taskPanel"[^>]*>\s*<div class="panel-section">')
+        self.assertIn('<ol class="checklist" id="stepChecklist">', body)
 
     def client_body(self) -> str:
         store = Store()
         return create_app(provider=FakeStreamingProvider(), store=store).test_client().get("/task/T1").get_data(as_text=True)
+
+
+class CodeStreamingProvider:
+    """A provider whose reply contains a code block — the one signal that earns follow-up chips."""
+
+    PIECES = [
+        "Here is the helper:\n\n```python\ndef status_for(order):\n    return order.get('status')\n```\n"
+    ]
+
+    def reply(self, history, system_prompt: str) -> str:
+        return "".join(self.PIECES)
+
+    def reply_stream(self, history, system_prompt: str, **kwargs):
+        for piece in self.PIECES:
+            yield StreamChunk(kind="answer", text=piece)
+
+
+def _script() -> str:
+    return (Path(__file__).resolve().parent.parent / "app" / "static" / "app.js").read_text(encoding="utf-8")
+
+
+def _layout() -> str:
+    return (Path(__file__).resolve().parent.parent / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
+
+
+class WelcomeScreenTests(unittest.TestCase):
+    """The welcome screen belongs to a genuinely empty conversation, and only to that."""
+
+    def setUp(self) -> None:
+        self.store = Store()
+        self.app = create_app(provider=FakeStreamingProvider(), store=self.store)
+        self.client = self.app.test_client()
+
+    def test_an_empty_conversation_shows_the_welcome_screen(self) -> None:
+        body = self.client.get("/").get_data(as_text=True)
+        self.assertIn('<div class="welcome" id="welcome">', body)
+        self.assertIn("Your ideas, in orbit.", body)
+        self.assertIn("Think it. Build it. Let’s work on it together.", body)
+
+    def test_the_three_shortcuts_are_real_prompts_that_send(self) -> None:
+        from app.starters import WELCOME_STARTERS
+
+        body = self.client.get("/").get_data(as_text=True)
+        self.assertEqual([s.label for s in WELCOME_STARTERS], ["Build something", "Explore an idea", "Review my work"])
+        import html
+
+        rendered = html.unescape(body)  # Jinja escapes the apostrophes in the prompts
+        self.assertEqual(rendered.count('class="welcome-action" data-starter="'), 3)
+        for starter in WELCOME_STARTERS:
+            self.assertIn(starter.label, rendered)
+            # The prompt is on the button, so a click sends a real turn.
+            self.assertIn(starter.prompt, rendered)
+        # And a click goes through the composer, not a decorative handler.
+        self.assertIn('sendPrompt(button.getAttribute("data-starter"))', _script())
+
+    def test_a_returning_conversation_with_history_never_shows_it(self) -> None:
+        self.client.post("/api/chat", json={"message": "Hello Orbit"}).get_data(as_text=True)
+        self.assertTrue(self.store.home_thread, "the turn was stored")
+        body = self.client.get("/").get_data(as_text=True)
+        self.assertNotIn("Your ideas, in orbit.", body)
+        self.assertNotIn("Think it. Build it.", body)
+        self.assertNotIn('id="welcome"', body)
+
+    def test_the_orbit_rings_turn_slowly_idle_and_speed_up_once_orbit_responds(self) -> None:
+        css = _layout()
+        script = _script()
+        self.assertRegex(css, r"\.rings-slow img \{ animation: orbit-ring-turn 20s")
+        self.assertRegex(css, r"\.rings-fast img \{ animation: orbit-ring-turn 1\.6s")
+        # Same mark, faster: the responding state re-times the spin rather than
+        # swapping in a second icon.
+        self.assertRegex(css, r"\.welcome\.is-responding \.welcome-rings img \{ animation: orbit-ring-turn 1\.6s")
+        self.assertIn('welcome.classList.add("is-responding")', script)
+        self.assertIn('turnStatus.bar.classList.add("no-rings")', script)
+
+
+class FollowupChipTests(unittest.TestCase):
+    """Chips appear only when the reply gives them something real to act on."""
+
+    def setUp(self) -> None:
+        self.store = Store()
+        self.app = create_app(provider=CodeStreamingProvider(), store=self.store)
+        self.client = self.app.test_client()
+
+    def test_a_reply_with_code_offers_chips_after_the_reply_lands(self) -> None:
+        events = parse_sse(self.client.post("/api/chat", json={"message": "write it"}).get_data(as_text=True))
+        kinds = [k for k, _ in events]
+        self.assertIn("followups", kinds)
+        self.assertLess(kinds.index("done"), kinds.index("followups"), "chips never hold up the reply")
+        chips = json.loads([d for k, d in events if k == "followups"][0])
+        self.assertEqual([c["label"] for c in chips], ["Explain this code", "Find potential bugs", "Improve implementation"])
+
+    def test_a_plain_reply_offers_no_chips_at_all(self) -> None:
+        app = create_app(provider=FakeStreamingProvider(), store=Store())
+        events = parse_sse(app.test_client().post("/api/chat", json={"message": "hi"}).get_data(as_text=True))
+        self.assertNotIn("followups", [k for k, _ in events])
+
+    def test_a_failed_turn_offers_no_chips(self) -> None:
+        class Broken:
+            def reply_stream(self, history, system_prompt, **kwargs):
+                raise RuntimeError("boom")
+                yield  # pragma: no cover - keeps this a generator
+
+        app = create_app(provider=Broken(), store=Store())
+        events = parse_sse(app.test_client().post("/api/chat", json={"message": "hi"}).get_data(as_text=True))
+        self.assertIn("error", [k for k, _ in events])
+        self.assertNotIn("followups", [k for k, _ in events])
+
+    def test_chips_are_rendered_above_the_composer_on_page_load(self) -> None:
+        self.client.post("/api/chat", json={"message": "write it"}).get_data(as_text=True)
+        body = self.client.get("/").get_data(as_text=True)
+        self.assertIn('<div class="followup-chips" id="followupChips"', body)
+        self.assertIn('data-followup="Walk me through the code you just wrote', body)
+        self.assertNotIn('id="followupChips" aria-label="Follow-up suggestions" hidden', body)
+
+    def test_the_row_is_hidden_not_empty_when_there_is_nothing_to_suggest(self) -> None:
+        app = create_app(provider=FakeStreamingProvider(), store=Store())
+        body = app.test_client().get("/").get_data(as_text=True)
+        self.assertIn('id="followupChips" aria-label="Follow-up suggestions" hidden', body)
+
+    def test_chips_clear_the_moment_a_new_turn_starts(self) -> None:
+        script = _script()
+        self.assertIn("renderFollowups(followupsBox, [])", script)
+        self.assertIn('sendPrompt(chip.getAttribute("data-followup"))', script)
+
+
+class AgentTaskCreationTests(unittest.TestCase):
+    """A task starts from a request typed in the UI, and the panel plans from it."""
+
+    def setUp(self) -> None:
+        self.store = Store()
+        self.app = create_app(provider=FakeStreamingProvider(), store=self.store)
+        self.client = self.app.test_client()
+
+    def test_a_task_is_created_from_the_request_text(self) -> None:
+        resp = self.client.post("/api/tasks", json={"request": "Add a status field to orders.py."})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        task = self.store.get_task(data["id"])
+        assert task is not None
+        self.assertEqual(task.description, "Add a status field to orders.py.")
+        self.assertEqual(task.title, "Add a status field to orders.py.")
+        self.assertIsNone(task.run, "a task that has not run has no panel state")
+        self.assertEqual([a.text for a in task.activity], ["Task created from your request."])
+
+    def test_an_empty_request_is_refused(self) -> None:
+        for payload in ({}, {"request": ""}, {"request": "   "}, {"request": None}):
+            resp = self.client.post("/api/tasks", json=payload)
+            self.assertEqual(resp.status_code, 400, payload)
+
+    def test_the_new_task_plans_its_checklist_from_that_request(self) -> None:
+        created = self.client.post(
+            "/api/tasks", json={"request": "Fix the crash in checkout.py when the cart is empty."}
+        ).get_json()
+        body = self.client.get("/task/" + created["id"]).get_data(as_text=True)
+        self.assertIn("Find the code for the crash", body)
+        self.assertIn("Reproduce the failure", body)
+        self.assertIn("checkout.py", body)
+        # Not the old fixed workflow, and no invented numbers.
+        self.assertNotIn("Read repository context", body)
+        self.assertNotIn("6 files scanned", body)
+
+    def test_each_task_gets_its_own_id(self) -> None:
+        first = self.client.post("/api/tasks", json={"request": "One."}).get_json()["id"]
+        second = self.client.post("/api/tasks", json={"request": "Two."}).get_json()["id"]
+        self.assertNotEqual(first, second)
+        self.assertEqual(len(self.store.tasks_for()), 3)  # the seeded task plus these two
+
+
+class TurnStatusLabelTests(unittest.TestCase):
+    """The generating label says what is actually happening — nothing it does not know."""
+
+    def test_the_label_only_claims_states_the_stream_can_prove(self) -> None:
+        script = _script()
+        self.assertIn('"Thinking…"', script)
+        self.assertIn('"Still thinking…"', script)  # a long wait says so, it does not pretend
+        self.assertIn('"Writing your answer…"', script)
+        self.assertIn('"Working through it…"', script)
+
+    def test_the_label_never_claims_work_that_is_not_happening(self) -> None:
+        # Attachments are not uploaded to the model yet (handoff §5.3), so a
+        # "reading your files" label would be a lie.
+        self.assertNotIn("Analyzing the provided files", _script())
+        # The old standing badge claimed Orbit was working even while idle.
+        task = (
+            create_app(provider=FakeStreamingProvider(), store=Store())
+            .test_client()
+            .get("/task/T1")
+            .get_data(as_text=True)
+        )
+        self.assertNotIn("Orbit is working", task)
+        self.assertNotIn("Orbit is thinking", task)
+
+    def test_the_status_line_is_wired_on_both_screens(self) -> None:
+        home = create_app(provider=FakeStreamingProvider(), store=Store()).test_client().get("/").get_data(as_text=True)
+        task = create_app(provider=FakeStreamingProvider(), store=Store()).test_client().get("/task/T1").get_data(as_text=True)
+        self.assertIn('id="turnStatusBar"', home)
+        self.assertIn('id="turnStatusText"', home)
+        self.assertIn('id="taskTurnStatus"', task)
+        self.assertIn('id="taskTurnStatusText"', task)
+        self.assertIn('turnStatusFor("taskTurnStatus", "taskTurnStatusText")', _script())
 
 
 class RecordingProvider:
@@ -761,7 +1029,11 @@ class RouteStreamingTests(unittest.TestCase):
         )
         self.assertEqual(provider.calls, [{"think": True, "report_attempts": True, "thinking_level": "quick"}])
         self.assertIn("status", [event for event, _ in seen])
-        self.assertEqual(seen[0][0], "status")
+        # "task_state" is panel bookkeeping, not content: the first thing the
+        # model was asked for is still the status line.
+        content = [event for event, _ in seen if event != "task_state"]
+        self.assertEqual(content[0], "status")
+        self.assertEqual(seen[0][0], "task_state")
 
     def test_chat_mode_task_view_is_unlabeled(self) -> None:
         provider = RecordingProvider(self.PIECES)

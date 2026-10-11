@@ -66,10 +66,26 @@
     </div>
 
     <div class="home-center">
-      <div class="home-greeting">
-        <h1>{{ greeting }}</h1>
-        <p>Your ideas, in orbit.</p>
+      {% if welcome %}
+      {# The welcome screen belongs to a genuinely empty conversation. A
+         returning conversation with history gets the thread, never this. The
+         rings idle slowly here and are replaced by the fast pair beside the
+         status line the moment Orbit starts responding. #}
+      <div class="welcome" id="welcome">
+        <p class="welcome-greeting">{{ greeting }}</p>
+        <div class="welcome-rings rings-slow" aria-hidden="true">
+          <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" />
+        </div>
+        <h1>Your ideas, in orbit.</h1>
+        <p class="welcome-sub">Think it. Build it. Let’s work on it together.</p>
+        <div class="welcome-actions" id="welcomeActions">
+          {% for starter in starters %}
+          {# A real prompt, sent through the ordinary composer path. #}
+          <button type="button" class="welcome-action" data-starter="{{ starter.prompt }}">{{ starter.label }}</button>
+          {% endfor %}
+        </div>
       </div>
+      {% endif %}
 
       {% if heartbeat %}
       <div class="heartbeat-notices" id="heartbeatNotices"{% if not heartbeat.notices %} hidden{% endif %}>
@@ -81,6 +97,16 @@
         {% endfor %}
       </div>
       {% endif %}
+
+      {# While a turn is generating: what is actually happening, in words. The
+         label is never a guess — waiting on the model says so, waiting a long
+         time says so, and text on the way says so. #}
+      <div class="turn-status-bar" id="turnStatusBar" role="status" aria-live="polite" hidden>
+        <div class="turn-rings rings-fast" aria-hidden="true">
+          <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" />
+        </div>
+        <span class="turn-status-text" id="turnStatusText"></span>
+      </div>
 
       <div class="home-thread{% if thread %} visible{% endif %}" id="homeThread" aria-live="polite" aria-atomic="false">
         {% for msg in thread %}
@@ -118,6 +144,15 @@
         {% endfor %}
       </div>
 
+      {# Follow-up chips sit above the composer and only when the last reply
+         really gives them something to act on (app.followups). An irrelevant
+         suggestion is worse than none, so this stays empty most turns. #}
+      <div class="followup-chips" id="followupChips" aria-label="Follow-up suggestions"{% if not followups %} hidden{% endif %}>
+        {% for item in followups %}
+        <button type="button" class="followup-chip" data-followup="{{ item.prompt }}">{{ item.label }}</button>
+        {% endfor %}
+      </div>
+
       <div class="composer-dock">
         <div class="home-composer">
           <input type="text" id="homeInput" placeholder="Message Orbit…" autocomplete="off" />
@@ -134,13 +169,6 @@
           </div>
           <div class="attachment-note" id="homeAttachmentNote" aria-live="polite" hidden></div>
         </div>
-      </div>
-
-      <div class="suggestion-chips" aria-label="Suggested prompts">
-        <button type="button" class="chip" data-goto-task="T1">Review a PR</button>
-        <button type="button" class="chip" data-suggestion="Help me sketch an implementation for a new feature.">Sketch an idea</button>
-        <button type="button" class="chip" data-suggestion="Help me run and interpret the tests for my current branch.">Run branch tests</button>
-        <button type="button" class="chip" data-suggestion="Explain the latest changes in my current branch.">Explain a diff</button>
       </div>
 
       <div class="connected-tools">

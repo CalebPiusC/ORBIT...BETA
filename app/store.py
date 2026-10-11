@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import os
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
+
+from app.taskplan import TaskRun, summarize_request
 
 # Every record in the store carries this id. It is a constant today because
 # there is one user; it exists now because threading it in later means editing
@@ -27,8 +29,6 @@ from typing import Literal
 DEFAULT_USER_ID = os.getenv("ORBIT_USER_ID", "caleb")
 
 ConnectionStatus = Literal["connected", "not_connected"]
-StepStatus = Literal["done", "active", "pending"]
-ChangeStatus = Literal["proposed", "checking"]
 
 
 @dataclass
@@ -48,21 +48,6 @@ class Conversation:
     # Whether the one-time naming call has been made. It is made once, after
     # the first completed exchange, whether or not it succeeds.
     titled: bool = False
-
-
-@dataclass
-class Step:
-    title: str
-    status: StepStatus
-    detail: str
-
-
-@dataclass
-class Change:
-    file: str
-    delta: str
-    desc: str
-    status: ChangeStatus
 
 
 @dataclass
@@ -100,15 +85,21 @@ class ChatMessage:
 
 @dataclass
 class Task:
+    """One Agent task: the request, the chat around it, and its run (if any).
+
+    ``run`` is ``None`` until the task runs. The Agent panel is rendered from it
+    and from nothing else, so a task that has never run has no panel — no
+    standing empty checklist, and no seeded numbers standing in for progress.
+    """
+
     id: str
     user_id: str
     breadcrumb: str
     title: str
     description: str
-    steps: list[Step]
-    changes: list[Change]
     activity: list[Activity]
     chat: list[ChatMessage]
+    run: TaskRun | None = None
     approved: bool = False
     applied: bool = False
     last_turn_prompt: str | None = None
@@ -143,57 +134,25 @@ _SEED_USER = User(name="Caleb", workspace="Personal workspace", id=DEFAULT_USER_
 
 
 def _seed_task() -> Task:
+    """The example task, seeded the way conversations are.
+
+    Its request text is the only thing the Agent panel plans from. There are no
+    steps, no file diffs and no activity lines here: those used to be seeded
+    with invented numbers ("6 files scanned", "orders.py 38 → 61"), which read
+    as progress the agent had made and never had.
+    """
     return Task(
         id="T1",
         user_id=DEFAULT_USER_ID,
         breadcrumb="GitHub / whatsapp-ordering-bot / main",
         title="Add order tracking to WhatsApp bot",
         description=(
-            'Add a status field to each order, expose it through the existing '
-            'order-lookup command, and update the vendor-facing summary so a '
-            'customer can ask "where\'s my order" and get a real answer.'
+            "Add a status field to each order in orders.py, expose it through the "
+            "existing order-lookup command in bot.py, and update the vendor-facing "
+            'summary so a customer can ask "where\'s my order" and get a real '
+            "answer. Do not push anything."
         ),
-        steps=[
-            Step(
-                title="Read repository context",
-                status="done",
-                detail="6 files scanned · order model located",
-            ),
-            Step(
-                title="Extract order status logic",
-                status="done",
-                detail="1 shared status helper created",
-            ),
-            Step(
-                title="Run tests",
-                status="active",
-                detail="4 tests passing · 2 in progress",
-            ),
-            Step(
-                title="Ready for your review",
-                status="pending",
-                detail="1 file changed · 1 approval required",
-            ),
-        ],
-        changes=[
-            Change(
-                file="orders.py",
-                delta="38 → 61",
-                desc="Added <code>status</code> field and lookup-by-status helper",
-                status="proposed",
-            ),
-            Change(
-                file="bot.py",
-                delta="22 → 30",
-                desc='Wired status into the "where\'s my order" reply',
-                status="checking",
-            ),
-        ],
-        activity=[
-            Activity(text="Running tests against the updated order lookup…", time="just now"),
-            Activity(text="Added status field to the order model.", time="1m ago"),
-            Activity(text="Read orders.py and bot.py for current structure.", time="3m ago"),
-        ],
+        activity=[],
         chat=[
             ChatMessage(
                 who="You",
@@ -321,6 +280,29 @@ class Store:
     # ----- tasks -----
     def get_task(self, task_id: str) -> Task | None:
         return self.tasks.get(task_id)
+
+    def create_task(self, request: str) -> Task:
+        """A task from a request the person typed.
+
+        The title comes from the request itself (no model call for a heading),
+        and the task starts with no run: the Agent panel appears once it runs
+        and plans its checklist from this text.
+        """
+        text = " ".join((request or "").split())
+        if not text:
+            raise ValueError("a task needs a request to work from.")
+        task_id = f"t-{uuid.uuid4().hex[:8]}"
+        task = Task(
+            id=task_id,
+            user_id=self.user.id,
+            breadcrumb="New task",
+            title=summarize_request(text),
+            description=text,
+            activity=[Activity(text="Task created from your request.", time=now_label())],
+            chat=[],
+        )
+        self.tasks[task_id] = task
+        return task
 
     def add_chat(self, task_id: str, message: ChatMessage) -> None:
         task = self.tasks.get(task_id)

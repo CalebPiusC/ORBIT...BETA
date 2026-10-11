@@ -200,11 +200,13 @@ a live key in this checkout. Say so in any status report instead of implying oth
   description still says "the local notes.txt". Phase 4 should move note storage into the
   versioned memory store and leave `audit.log` as disposable local state. Until then do
   not delete or relocate `notes.txt` — it is somebody's notes.
-- **`Store` is in-memory scaffolding.** The seeded conversations, task, steps, changes and
-  activity are real data structures the templates render, but they are seeded, and
-  `home_thread`/mode changes die with the process. Phase 4 replaces this with the
-  persistent store; keep the read paths (`conversations_grouped`, `get_task`) as the
-  interface and swap what is behind them.
+- **`Store` is in-memory scaffolding.** The seeded conversations and the example task `T1`
+  are seeded data the templates render, but `home_thread`/mode changes die with the
+  process. Phase 4 replaces this with the persistent store; keep the read paths
+  (`conversations_grouped`, `get_task`, `conversations_for`, `tasks_for`) as the interface
+  and swap what is behind them. The task's *steps, files and activity* are no longer
+  seeded at all — they come from `Task.run`, which is `None` until the task runs
+  (§5.4.4). Do not add seed data back to make the panel look busier.
 - **`user_id` is seeded, not threaded.** `DEFAULT_USER_ID` comes from the environment and
   every record carries it, so the column exists before the second user does. Do not build
   auth, login, or multi-tenancy now — just keep writing queries through the
@@ -362,3 +364,88 @@ brain.
 - Composer attachment controls currently open the file picker but do not upload files to
   the model. Selected filenames are shown locally with that limitation stated. The GitHub
   shortcut opens GitHub; it does not choose a repository.
+
+### 5.4 Welcome screen, truthful status labels, follow-up chips, and the dynamic Agent panel
+
+Four UI behaviours were rebuilt around one rule: **a status, a step or a suggestion that
+cannot be traced to something real does not ship.** Each of the four had a version of the
+same failure before this — a thing that looked like information but was decoration.
+
+**Files:** `app/starters.py`, `app/followups.py`, `app/taskplan.py` (new);
+`app/store.py`, `app/server.py`, `app/static/app.js`, `app/templates/{layout,home,task}.html`;
+tests in `tests/test_taskplan.py`, `tests/test_followups.py` and `tests/test_app.py`.
+
+#### 5.4.1 Welcome screen (empty conversations only)
+
+- Rendered when — and only when — `Store.active_conversation_id is None` **and** the home
+  thread is empty. A returning conversation never sees it again; the server decides, not
+  the client (`home()` passes `welcome=…`).
+- Heading "Your ideas, in orbit.", subtitle "Think it. Build it. Let's work on it
+  together.", and the time-based greeting above it.
+- The three shortcuts are real prompts (`app/starters.WELCOME_STARTERS`), sent through
+  `sendPrompt()` → the ordinary composer path. They are not labels that fill the box.
+- **Orbital motion:** the same orbit mark carries both states. Idle on the welcome screen
+  it turns slowly (`rings-slow`, 20s); when a turn starts the block takes
+  `is-responding`, which hides the heading and shortcuts, shrinks the mark and re-times it
+  (`1.6s`). The status bar sets `no-rings` in that case so there is never a second mark.
+  `prefers-reduced-motion` stops both — the mark stays visible, just still.
+
+#### 5.4.2 Status labels while generating
+
+- `TurnStatus` in `app.js` has exactly three truthful phases: `Thinking…` → `Still
+  thinking…` (after 12s with nothing back) → `Writing your answer…` on the first chunk.
+  Agent mode says `Working through it…` while narration arrives. The label clears on
+  `done`, on `error`, and on stop.
+- **"Analyzing the provided files…" deliberately does not exist.** Attachments are still
+  not uploaded to the model (§5.3), so that label would be a lie. It stays out until
+  uploads are real. A test pins this (`TurnStatusLabelTests`).
+- The task topbar's old standing `<div class="working-indicator">Orbit is working</div>`
+  is gone: the indicator is now hidden unless a run is in flight, and it shows the real
+  operation.
+
+#### 5.4.3 Follow-up chips
+
+- `app/followups.py` offers chips for exactly one observable property: the last Orbit
+  reply contains a fenced code block. Then it offers *Explain this code · Find potential
+  bugs · Improve implementation*, each a real prompt naming the work.
+- Everything else offers nothing, and the row is hidden rather than left empty. Chips are
+  computed server-side (so they are testable offline), streamed as a `followups` event
+  **after** `done`, rendered on page load from the stored thread, and cleared the moment a
+  new turn starts or is regenerated. A failed or empty turn offers none.
+
+#### 5.4.4 The Agent panel is planned, never seeded
+
+The old panel shipped with the task: four fixed steps (`Read repository context` →
+`Extract order status logic` → `Run tests` → `Ready for your review`) with invented
+details ("6 files scanned", "4 tests passing"), two invented diffs (`orders.py 38 → 61`)
+and three invented activity lines. All of it is gone, and `Store.Task` no longer has
+`steps` or `changes` fields.
+
+- `app/taskplan.plan_steps(request)` builds the checklist from the request's wording:
+  intent keywords plus the leading clause, so "Fix the crash in checkout.py" plans
+  *Reproduce the failure* → *Fix the root cause* while "Review the diff in orders.py"
+  plans *Read the code closely* → *Report what you find*. A request that names the work
+  does not get a duplicate generic step beside it.
+- A step only leaves `pending` when `apply_narration()` finds one of its keywords in
+  Orbit's narration, and the matching sentence is kept as the step's evidence line — so
+  every tick can be read back against what Orbit actually said. Steps Orbit never
+  mentioned stay `pending`. A finished turn completes the step it was narrating.
+- `files_in()` + `add_files()` record files the request named or Orbit mentioned, each
+  labelled `request` or `orbit`. No file is ever guessed, and a task where neither
+  happened shows the empty line instead.
+- The run (`TaskRun`) lives on `Task.run` and is `None` until the task runs. The panel is
+  rendered from it and nothing else: **a task that has never run has no panel at all** —
+  the request and a start control are the whole of it.
+- `POST /api/tasks` creates a task from a request typed in the UI; the task page's
+  `+ New task` opens that composer. The title comes from the request text (no model call).
+- The stream carries the panel: `task_state` events (opening state, then only on change)
+  with steps, files, operation, approval state and the activity list. Activity rows are
+  now real events — model status lines, step transitions with their evidence, and turn
+  ends — and the section is hidden when there are none.
+- **Approvals.** The rule line stays ("No commits will be pushed without your explicit
+  approval"), and the section reports the task's real state. There is no Approve button:
+  with nothing proposed there is nothing to approve, and a control that only looks like a
+  gate is worse than the honest line. The gate itself is untouched — `Store.apply_changes`
+  raises without an explicit approval and `POST /api/task/<id>/apply` answers 403, both
+  pinned by `ApprovalGateTests`. **If a future build proposes real changes, the control
+  and the panel section must arrive together, through `PendingActions`.**
