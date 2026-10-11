@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import sys
-from collections.abc import Callable, Mapping
+import threading
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -67,4 +70,39 @@ class ConsoleConfirmationGate:
         approved = isinstance(answer, str) and answer.strip().casefold() == "yes"
         if not approved:
             self._output("Declined. Nothing was executed.")
+        return approved
+
+
+class DeferredConfirmationGate:
+    """Confirmation for the browser: the person decides on a card, not at a prompt.
+
+    A model proposal is queued and shown to the person. When they click Approve
+    or Decline, the caller opens :meth:`decision` for that one action and then
+    dispatches it. ``confirm`` never waits. It returns the decision recorded for
+    exactly this action (same tool, same arguments), and declines if there is
+    none. The lock is held for the whole dispatch, so two decisions cannot mix.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._decision: tuple[str, dict[str, Any], bool] | None = None
+
+    @contextmanager
+    def decision(
+        self, tool_name: str, arguments: Mapping[str, Any], *, approved: bool
+    ) -> Iterator[None]:
+        with self._lock:
+            self._decision = (tool_name, copy.deepcopy(dict(arguments)), approved is True)
+            try:
+                yield
+            finally:
+                self._decision = None
+
+    def confirm(self, action: ProposedAction) -> bool:
+        recorded = self._decision
+        if recorded is None:
+            return False
+        tool_name, arguments, approved = recorded
+        if action.tool_name != tool_name or dict(action.arguments) != arguments:
+            return False
         return approved

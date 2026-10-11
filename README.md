@@ -172,22 +172,41 @@ Run the offline suite (model stubbed) with:
 python -m unittest discover -s tests -v
 ```
 
+## Browser tools (Chat mode)
+
+In Chat mode on the home screen, Orbit can ask to use one of six tools: `write_note`,
+`remember_fact`, `forget_fact`, `save_plan`, `pause_heartbeat`, `resume_heartbeat`.
+The same registry and audit log as the terminal are used, with one difference: the
+decision comes from a card, not a console prompt.
+
+- Each reply may ask for **at most one** tool call. Extra calls in the same reply are
+  refused and audited as `tool_call_limit`.
+- The request is queued and shown as a card with the exact action in plain words. **Nothing
+  runs until you click Approve.** Decline records the decision and runs nothing.
+- Each card's outcome is audited (`confirmation`: `confirmed` or `declined`, `execution`:
+  `succeeded`, `not_run`, or a rejection reason). The card shows the final result, and the
+  next turn tells the model how it ended.
+- Agent mode stays text-only. Tools are offered only in Chat mode.
+- Pending cards are held in memory. Restarting the server clears them, and a card left
+  pending is never run.
+
 ## Heartbeat reminders
 
 When the web app starts (`python -m app.server` or `python run_demo.py`), a background
 thread checks two things, in Africa/Lagos time:
 
 - **Missing plan:** after `HEARTBEAT_PLAN_HOUR` (default 10:00), if no plan is saved for
-  today. Save one in the terminal chat (`python chat.py`) by asking Orbit to save it. That
-  is a gated tool, so you type `yes` to approve. The browser home chat does not run tools yet.
+  today. Save one by asking Orbit to save it in the terminal chat (`python chat.py`, you type
+  `yes` to approve) or in Chat mode on the home screen (you click Approve on the card; see
+  [Browser tools](#browser-tools-chat-mode)).
 - **Check-in gap:** after `HEARTBEAT_CHECKIN_GAP_DAYS` (default 2) with no message on the
   home screen. A home-chat message counts as a check-in.
 
 Each check fires at most once per day. Automatic checks are held during quiet hours
 (22:00-08:00). Asking for a check directly skips the quiet-hours hold, but still fires at
 most once per day. A notice appears as a card on the home screen; dismiss it with ✕. The
-Reminders switch in the sidebar pauses everything, and In the terminal chat, the gated
-`pause_heartbeat` and `resume_heartbeat` tools do the same. Every notice fired or dismissed is written to
+Reminders switch in the sidebar pauses everything. In the terminal chat, the gated
+`pause_heartbeat` and `resume_heartbeat` tools do the same, and so do the Chat-mode cards. Every notice fired or dismissed is written to
 `audit.log`.
 
 Phone push: set `NTFY_TOPIC` in `.env` to a long random topic, subscribe to it in the ntfy

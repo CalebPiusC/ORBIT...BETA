@@ -12,7 +12,14 @@ from google.genai import types
 from google.genai.errors import APIError
 
 from config import DEFAULT_GEMINI_FALLBACK_MODEL, DEFAULT_GEMINI_MODEL, load_settings
-from providers.base import TITLE_SYSTEM_PROMPT, ChatMessage, ChatProvider, StreamChunk, title_request
+from providers.base import (
+    TITLE_SYSTEM_PROMPT,
+    ChatMessage,
+    ChatProvider,
+    StreamChunk,
+    ToolProposal,
+    title_request,
+)
 from providers.personas import slot_name
 from tools.registry import AuditLog, ToolRegistry
 
@@ -367,7 +374,8 @@ class GeminiProvider(ChatProvider):
         *,
         think: bool = False,
         report_attempts: bool = False,
-    ) -> Iterator[StreamChunk]:
+        allow_tools: bool = False,
+    ) -> Iterator[StreamChunk | ToolProposal]:
         """Stream the reply chunk by chunk instead of returning it all at once.
 
         Yields :class:`StreamChunk` objects as Gemini generates them. When
@@ -402,6 +410,13 @@ class GeminiProvider(ChatProvider):
                 )
             )
 
+        if allow_tools:
+            if think:
+                raise ValueError("Tool calls are offered only for plain replies (think=False).")
+            if self._tool_registry is not None and self._tool_registry.definitions:
+                yield from self._stream_with_tools(contents, system_prompt)
+                return
+
         call_prompt = system_prompt
         if think:
             call_prompt = f"{system_prompt}\n\n{_THINK_INSTRUCTION}"
@@ -433,6 +448,37 @@ class GeminiProvider(ChatProvider):
         yield from pending
         pending.clear()
 
+    def _stream_with_tools(
+        self, contents: list[types.Content], system_prompt: str
+    ) -> Iterator[StreamChunk | ToolProposal]:
+        """Stream a plain reply that may end in one tool proposal.
+
+        Text is streamed as it arrives. The first function call ends the stream
+        and is returned as a :class:`ToolProposal`, which nothing executes here.
+        Any further calls in the same reply are audited as rejected, so one
+        reply can never ask for more than one action.
+        """
+        assert self._tool_registry is not None
+        config = self._generation_config(system_prompt)
+        for response in self._stream_responses(contents, config):
+            parts = _response_parts(response)
+            text = "".join(part.text for part in parts if isinstance(getattr(part, "text", None), str))
+            if text:
+                yield StreamChunk(kind="answer", text=text)
+            calls = [part.function_call for part in parts if getattr(part, "function_call", None)]
+            if not calls:
+                continue
+            for extra in calls[1:]:
+                self._tool_registry.reject_call(
+                    extra.name or "unknown_tool",
+                    extra.args or {},
+                    execution="tool_call_limit",
+                    message="Chat mode allows one tool call per reply; this extra call did not run.",
+                )
+            first = calls[0]
+            yield ToolProposal(name=first.name or "unknown_tool", arguments=dict(first.args or {}))
+            return
+
     def _generation_config(self, system_prompt: str) -> types.GenerateContentConfig:
         config: dict[str, Any] = {"system_instruction": system_prompt}
         if self._tool_registry is not None and self._tool_registry.definitions:
@@ -451,6 +497,14 @@ class GeminiProvider(ChatProvider):
                 disable=True
             )
         return types.GenerateContentConfig(**config)
+
+
+def _response_parts(response: Any) -> list[Any]:
+    """The parts of a streamed response's first candidate, or an empty list."""
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates or candidates[0].content is None:
+        return []
+    return list(candidates[0].content.parts or [])
 
 
 def _chunk_text(response: Any) -> str:

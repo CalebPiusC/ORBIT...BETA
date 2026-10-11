@@ -418,6 +418,29 @@
   .reminders-toggle[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
   .reminders-toggle[aria-checked="true"] .knob { left: 16px; background: var(--text); }
   .reminders-toggle:disabled { opacity: 0.5; cursor: default; }
+
+  /* ===================== proposed tool actions (Chat mode) ===================== */
+  /* A card sits in an Orbit bubble. Nothing runs until Approve; the card then
+     shows the final state and what the tool reported. */
+  .action-card { display: flex; flex-direction: column; gap: 0; }
+  .action-label {
+    display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--accent-bright); margin-bottom: 4px;
+  }
+  .action-summary { display: block; color: var(--text); line-height: 1.5; }
+  .action-buttons { display: flex; gap: 8px; margin-top: 10px; }
+  .action-buttons button {
+    font: inherit; font-size: 12px; padding: 5px 14px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg-sunken); color: var(--text-dim);
+  }
+  .action-buttons button:hover { color: var(--text); border-color: var(--accent-dim); }
+  .action-buttons button:disabled { opacity: 0.5; cursor: default; }
+  .action-buttons .action-approve { background: var(--accent); border-color: var(--accent); color: var(--text); }
+  .action-buttons button:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
+  .action-result { margin-top: 8px; font-size: 12px; color: var(--text-dim); }
+  .action-card[data-state="approved"] .action-result { color: var(--green); }
+  .action-card[data-state="failed"] .action-result,
+  .action-card[data-state="expired"] .action-result { color: var(--amber); }
 </style>
 </head>
 <body>

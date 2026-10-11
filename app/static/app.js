@@ -237,6 +237,79 @@
   // --- sidebar history ----------------------------------------------------
   // "+ New conversation" resets the server's active conversation, then reloads
   // to a fresh, centered composer.
+  // --- proposed tool actions (Chat mode) ----------------------------------
+  // The card is the only place a tool runs from. Text the model supplied goes in
+  // through textContent, never innerHTML.
+  var ACTION_STATE_TEXT = { approved: "Approved", declined: "Declined", failed: "Failed", expired: "Expired" };
+
+  function appendActionCard(log, card) {
+    var bubble = makeRow(log, "orbit").bubble;
+    var container = el("div", "action-card");
+    container.setAttribute("data-action-id", card.id);
+    bubble.appendChild(container);
+    renderActionCard(container, card);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function renderActionCard(container, card) {
+    container.textContent = "";
+    container.setAttribute("data-state", card.state);
+    var body = el("div", "body");
+    body.appendChild(el("span", "action-label", null));
+    body.lastChild.textContent = "Proposed action · nothing runs until you approve";
+    var summary = el("span", "action-summary", null);
+    summary.textContent = card.summary;
+    body.appendChild(summary);
+    container.appendChild(body);
+    if (card.state === "pending") {
+      var bar = el("div", "action-buttons", null);
+      var approve = el("button", "action-approve", null);
+      approve.type = "button";
+      approve.textContent = "Approve";
+      var decline = el("button", "action-decline", null);
+      decline.type = "button";
+      decline.textContent = "Decline";
+      approve.addEventListener("click", function () { decideAction(container, card, true); });
+      decline.addEventListener("click", function () { decideAction(container, card, false); });
+      bar.appendChild(approve);
+      bar.appendChild(decline);
+      container.appendChild(bar);
+    } else {
+      var text = ACTION_STATE_TEXT[card.state] || card.state;
+      if (card.result) text += " — " + card.result;
+      var result = el("div", "action-result", null);
+      result.textContent = text;
+      container.appendChild(result);
+    }
+  }
+
+  function decideAction(container, card, approved) {
+    Array.prototype.forEach.call(container.querySelectorAll("button"), function (b) { b.disabled = true; });
+    fetch("/api/actions/" + encodeURIComponent(card.id) + "/" + (approved ? "approve" : "decline"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (res.status === 404) {
+            // Already answered, or the server restarted: nothing ran.
+            renderActionCard(container, { id: card.id, summary: card.summary, state: "expired", result: data.error || "" });
+            return;
+          }
+          if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+          renderActionCard(container, { id: card.id, summary: card.summary, state: data.state, result: data.result || "" });
+        });
+      })
+      .catch(function (err) {
+        // The outcome is unknown, so the buttons come back and nothing is claimed.
+        Array.prototype.forEach.call(container.querySelectorAll("button"), function (b) { b.disabled = false; });
+        var line = el("div", "notice warn", null);
+        line.textContent = "Could not confirm that with the server, so nothing is marked done. Try again. (" + ((err && err.message) || err) + ")";
+        container.appendChild(line);
+      });
+  }
+
   // Reminders: dismiss a notice card, or switch reminders off and on. The server
   // is the source of truth; the page only changes once the server agrees.
   function wireReminders() {
@@ -401,6 +474,15 @@
     wireModeToggles();
     wireNewConversation();
     wireReminders();
+    // Cards still waiting on a decision (rendered by the server on reload).
+    Array.prototype.forEach.call(document.querySelectorAll(".action-card[data-state='pending']"), function (container) {
+      var summary = container.querySelector(".action-summary");
+      renderActionCard(container, {
+        id: container.getAttribute("data-action-id"),
+        summary: summary ? summary.textContent : "",
+        state: "pending",
+      });
+    });
     var chips = document.querySelectorAll(".chip[data-goto-task]");
     Array.prototype.forEach.call(chips, function (chip) {
       chip.addEventListener("click", function () {
@@ -453,6 +535,11 @@
             // Named after the first completed exchange, not a truncation.
             var named = JSON.parse(data);
             setHistoryTitle(named.id, named.title);
+          } else if (event === "action") {
+            // The model asked for a tool. It is queued and waits for Approve/Decline.
+            appendActionCard(thread, JSON.parse(data));
+          } else if (event === "notice") {
+            showLine(body, data, "warn");
           } else if (event === "done") {
             body.classList.remove("streaming");
           } else if (event === "error") {

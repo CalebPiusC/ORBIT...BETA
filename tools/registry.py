@@ -29,7 +29,12 @@ ExecutionStatus = Literal[
     "tool_call_limit",
     "invalid_model_response",
 ]
-RejectedExecutionStatus = Literal["tool_call_limit", "invalid_model_response"]
+RejectedExecutionStatus = Literal[
+    "tool_call_limit",
+    "invalid_model_response",
+    "unknown_tool",
+    "invalid_arguments",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +67,7 @@ class ToolOutcome:
 @dataclass(frozen=True, slots=True)
 class _RegisteredTool:
     definition: ToolDefinition
+    handler: Callable[..., Any]
     invoke: Callable[..., ToolOutcome]
 
 
@@ -218,11 +224,31 @@ class ToolRegistry:
 
             self._tools[name] = _RegisteredTool(
                 definition=definition,
+                handler=handler,
                 invoke=confirmed_and_audited,
             )
             return confirmed_and_audited
 
         return decorator
+
+    def validate(
+        self, tool_name: str, arguments: Mapping[str, Any] | None
+    ) -> tuple[RejectedExecutionStatus, str] | None:
+        """Check a call without running it or asking for consent.
+
+        Returns ``None`` when the call could be dispatched, otherwise the
+        rejection status and a message. Nothing is audited here; the caller
+        decides what to record.
+        """
+        if not isinstance(tool_name, str) or tool_name not in self._tools:
+            return "unknown_tool", "This tool is not registered; nothing was executed."
+        if not isinstance(arguments, Mapping):
+            return "invalid_arguments", "Invalid arguments: expected an object of named values."
+        try:
+            signature(self._tools[tool_name].handler).bind(**arguments)
+        except TypeError as exc:
+            return "invalid_arguments", f"Invalid arguments: {exc}"
+        return None
 
     def dispatch(self, tool_name: str, arguments: Mapping[str, Any] | None) -> ToolOutcome:
         """Dispatch a model function call through the registered wrapper."""

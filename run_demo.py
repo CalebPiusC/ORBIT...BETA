@@ -29,7 +29,13 @@ class StubStreamingProvider:
         return "STUB: canned one-shot reply. No model was called."
 
     def reply_stream(
-        self, history, system_prompt: str, *, think: bool = False, report_attempts: bool = False
+        self,
+        history,
+        system_prompt: str,
+        *,
+        think: bool = False,
+        report_attempts: bool = False,
+        allow_tools: bool = False,
     ) -> Iterator[StreamChunk]:
         if report_attempts:
             yield StreamChunk(kind="status", text="STUB: asking Titan… (no model is called)")

@@ -55,7 +55,10 @@ def _empty_state() -> dict[str, Any]:
 
 
 def _plan_text(plan_hour: int) -> str:
-    return f"It is past {plan_hour:02d}:00 and there is no plan saved for today yet."
+    return (
+        f"It is past {plan_hour:02d}:00 and there is no plan saved for today yet. "
+        "Tell Orbit your plan in chat to save it."
+    )
 
 
 def _gap_text(days: int) -> str:

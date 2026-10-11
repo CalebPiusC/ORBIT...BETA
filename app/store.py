@@ -80,11 +80,22 @@ def now_label() -> str:
 
 
 @dataclass
+class ActionCard:
+    """A tool call proposed in the home chat. ``state`` moves pending -> one final state, once."""
+
+    id: str
+    summary: str
+    state: str = "pending"  # pending | approved | declined | failed | expired
+    result: str = ""
+
+
+@dataclass
 class ChatMessage:
     who: str
     time: str
     body: str
     is_orbit: bool
+    action: ActionCard | None = None
 
 
 @dataclass
@@ -261,6 +272,17 @@ class Store:
 
     def append_message(self, conv_id: str, message: ChatMessage) -> None:
         self.threads.setdefault(conv_id, []).append(message)
+
+    def resolve_action(self, action_id: str, state: str, result: str) -> bool:
+        """Record the final state of a proposed action on its card. Only a pending card changes."""
+        for messages in self.threads.values():
+            for message in messages:
+                card = message.action
+                if card is not None and card.id == action_id and card.state == "pending":
+                    card.state = state
+                    card.result = result
+                    return True
+        return False
 
     def set_title(self, conv_id: str, title: str) -> None:
         conv = self.get_conversation(conv_id)

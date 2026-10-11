@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
-from typing import Literal
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 ChatRole = Literal["user", "assistant"]
 
@@ -23,6 +23,17 @@ class StreamChunk:
 
     kind: StreamKind
     text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ToolProposal:
+    """A tool call the model asked for. Nothing has run; the person must approve it first.
+
+    Chat mode yields at most one of these per reply, and then the stream ends.
+    """
+
+    name: str
+    arguments: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +93,8 @@ class ChatProvider(ABC):
         *,
         think: bool = False,
         report_attempts: bool = False,
-    ) -> Iterator[StreamChunk]:
+        allow_tools: bool = False,
+    ) -> Iterator["StreamChunk | ToolProposal"]:
         """Yield the reply as it is generated, chunk by chunk.
 
         This is an *addition* to the one-shot ``reply()``: chat mode's quick
@@ -100,5 +112,10 @@ class ChatProvider(ABC):
         ``kind="status"`` chunks as it asks each model (for example "Asking
         Titan…", then a fallback notice). Chat mode leaves it False, so no
         status line appears there.
+
+        When ``allow_tools`` is True, the model may ask for one tool call. The
+        provider then yields a :class:`ToolProposal` and stops reading the
+        stream. It never runs the tool: the caller queues the proposal for the
+        person to approve. Providers that cannot offer tools ignore the flag.
         """
         raise NotImplementedError
