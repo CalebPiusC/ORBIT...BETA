@@ -183,6 +183,17 @@ class AppRoutesTests(unittest.TestCase):
         for fake in ("6 files scanned", "38 → 61", "Running tests against the updated order lookup"):
             self.assertNotIn(fake, body)
 
+    def test_a_planned_run_is_not_reported_as_in_progress(self):
+        """The panel can draw its checklist before the stream starts. It must not
+        say IN PROGRESS until something is actually running."""
+        created = self.client.post("/api/tasks", json={"request": "Fix the crash in checkout.py."}).get_json()
+        body = self.client.get("/task/" + created["id"]).get_data(as_text=True)
+        self.assertIn("taskRunState\">NOT STARTED", body)
+        self.assertIn('id="workingIndicator" hidden', body)
+        self.assertIn("currentOperation\">Starting…", body)
+        # The plan is still there to look at — it just is not claimed as done.
+        self.assertIn("Find the code for the crash", body)
+
     def test_the_working_indicator_only_appears_while_a_run_is_in_flight(self):
         """A status that says Orbit is working when it is idle is not a status."""
         from app.store import ChatMessage as StoreChatMessage

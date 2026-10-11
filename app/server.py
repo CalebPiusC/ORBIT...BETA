@@ -191,7 +191,8 @@ def create_app(
         payload["activity"] = [{"text": a.text, "time": a.time} for a in task_obj.activity]
         payload["approved"] = bool(task_obj.approved)
         payload["applied"] = bool(task_obj.applied)
-        payload["running"] = run.status == RUNNING
+        # A planned-but-not-started run is not yet working on anything.
+        payload["running"] = run.status == RUNNING and run.started
         return payload
 
     def _note(task_obj: Any, text: str) -> None:
@@ -661,6 +662,7 @@ def create_app(
         run = task_obj.run or new_run(task_obj.description)
         task_obj.run = run
         run.status = RUNNING
+        run.started = True
         run.operation = "Thinking…"
 
         def chunk_source() -> Iterator[StreamChunk]:

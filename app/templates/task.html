@@ -72,7 +72,7 @@
     <div class="task-body">
       <div class="task-work">
         <div class="task-work-head">
-          <div class="task-work-eyebrow">CODING AGENT · <span id="taskRunState">{% if not panel %}NOT STARTED{% elif panel.status == 'running' %}IN PROGRESS{% elif panel.status == 'failed' %}STOPPED{% else %}WAITING FOR YOU{% endif %}</span></div>
+          <div class="task-work-eyebrow">CODING AGENT · <span id="taskRunState">{% if not panel or not panel.started %}NOT STARTED{% elif panel.status == 'running' %}IN PROGRESS{% elif panel.status == 'failed' %}STOPPED{% else %}WAITING FOR YOU{% endif %}</span></div>
           <button type="button" class="new-task-btn" id="newTaskBtn">+ New task</button>
         </div>
         <h2>{{ task.title }}</h2>

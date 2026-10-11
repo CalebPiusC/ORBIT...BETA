@@ -1323,7 +1323,7 @@
     if (node) {
       node.className =
         "operation" +
-        (state.status === "running" ? " is-running" : state.status === "failed" ? " is-failed" : " is-idle");
+        (state.running ? " is-running" : state.status === "failed" ? " is-failed" : " is-idle");
       node.textContent = "";
       node.appendChild(el("span", "dot"));
       node.appendChild(el("span", "op-text", escapeHtml(state.operation || "Not running")));
@@ -1331,7 +1331,7 @@
     // The topbar indicator only exists while a run is genuinely in flight.
     var indicator = document.getElementById("workingIndicator");
     if (indicator) {
-      indicator.hidden = state.status !== "running";
+      indicator.hidden = !state.running;
       setText("workingIndicatorText", state.operation || "");
     }
   }
@@ -1360,7 +1360,8 @@
     panel.hidden = false;
     var startBox = document.getElementById("taskStart");
     if (startBox) startBox.hidden = true;
-    setText("taskRunState", RUN_LABEL[state.status] || "NOT STARTED");
+    // A planned run is not an in-flight one, so "in progress" waits for the stream.
+    setText("taskRunState", !state.started ? "NOT STARTED" : RUN_LABEL[state.status] || "WAITING FOR YOU");
     renderSteps(state.steps);
     renderFiles(state.files);
     renderOperation(state);

@@ -161,6 +161,10 @@ class TaskRun:
     operation: str = "Starting…"
     steps: list[PlanStep] = field(default_factory=list)
     files: list[PlanFile] = field(default_factory=list)
+    # True once the first chunk of a run has been asked for. A run can be
+    # planned (so the panel can draw its checklist) without being in flight,
+    # and "in progress" must not be claimed before the stream starts.
+    started: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -168,6 +172,7 @@ class TaskRun:
             "operation": self.operation,
             "steps": [step.as_dict() for step in self.steps],
             "files": [item.as_dict() for item in self.files],
+            "started": self.started,
         }
 
 

@@ -170,8 +170,15 @@ class FileTests(unittest.TestCase):
 
     def test_run_state_serialises_for_the_browser(self) -> None:
         payload = new_run("Add a status field to orders.py.").as_dict()
-        self.assertEqual(set(payload), {"status", "operation", "steps", "files"})
+        self.assertEqual(set(payload), {"status", "operation", "steps", "files", "started"})
         self.assertEqual(payload["steps"][0]["title"], "Find the code for a status field")
+
+    def test_a_planned_run_has_not_started(self) -> None:
+        """The panel can draw a plan before the stream begins. That is not 'in progress'."""
+        run = new_run("Fix the crash in checkout.py.")
+        self.assertFalse(run.started)
+        run.started = True
+        self.assertTrue(run.as_dict()["started"])
 
 
 class TitleTests(unittest.TestCase):
