@@ -12,6 +12,9 @@ from google.genai import types
 from config import (
     DEFAULT_GEMINI_MODEL,
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    OPENROUTER_API_KEY_ENV_VAR,
+    OPENROUTER_FALLBACK_MODEL_ENV_VAR,
+    OPENROUTER_MODEL_ENV_VARS,
     TIMEOUT_ENV_VAR,
     Settings,
     load_settings,
@@ -63,6 +66,37 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.gemini_model, "gemini-test-model")
         self.assertNotIn("local-test-key", repr(settings))
 
+    def test_loads_optional_openrouter_chain_in_pinned_order(self) -> None:
+        values = {
+            "GEMINI_API_KEY": "local-test-key",
+            OPENROUTER_API_KEY_ENV_VAR: "local-openrouter-key",
+            OPENROUTER_MODEL_ENV_VARS[0]: "vendor/first:free",
+            OPENROUTER_MODEL_ENV_VARS[1]: "vendor/second:free",
+            OPENROUTER_MODEL_ENV_VARS[2]: "vendor/third:free",
+            OPENROUTER_FALLBACK_MODEL_ENV_VAR: "openrouter/free",
+        }
+        with patch.dict(os.environ, values, clear=True), patch("config.load_dotenv"):
+            settings = load_settings()
+
+        self.assertEqual(
+            settings.openrouter_models,
+            ("vendor/first:free", "vendor/second:free", "vendor/third:free"),
+        )
+        self.assertEqual(settings.openrouter_fallback_model, "openrouter/free")
+        self.assertEqual(settings.openrouter_api_key, "local-openrouter-key")
+        self.assertNotIn("local-openrouter-key", repr(settings))
+
+    def test_unset_openrouter_models_keep_their_slot_positions(self) -> None:
+        values = {
+            "GEMINI_API_KEY": "local-test-key",
+            OPENROUTER_MODEL_ENV_VARS[1]: "vendor/second:free",
+            OPENROUTER_FALLBACK_MODEL_ENV_VAR: "openrouter/free",
+        }
+        with patch.dict(os.environ, values, clear=True), patch("config.load_dotenv"):
+            settings = load_settings()
+
+        self.assertEqual(settings.openrouter_models, ("", "vendor/second:free", ""))
+
     def test_requires_a_non_placeholder_key(self) -> None:
         with patch.dict(os.environ, {}, clear=True), patch("config.load_dotenv"):
             with self.assertRaisesRegex(RuntimeError, "GEMINI_API_KEY"):
@@ -84,6 +118,11 @@ class SettingsTests(unittest.TestCase):
         """
         values = _env_example_values()
         self.assertEqual(values["GEMINI_MODEL"], DEFAULT_GEMINI_MODEL)
+        self.assertEqual(
+            tuple(values[name] for name in OPENROUTER_MODEL_ENV_VARS),
+            ("google/gemma-4-31b-it:free", "qwen/qwen3.8-27b:free", "nvidia/nemotron-3-super-120b-a12b:free"),
+        )
+        self.assertEqual(values[OPENROUTER_FALLBACK_MODEL_ENV_VAR], "openrouter/free")
         with patch.dict(os.environ, {"GEMINI_API_KEY": values["GEMINI_API_KEY"]}, clear=True), patch(
             "config.load_dotenv"
         ):
@@ -93,14 +132,21 @@ class SettingsTests(unittest.TestCase):
     def test_model_id_is_configured_in_exactly_one_code_place(self) -> None:
         """Model ids live in config.py and .env only — never in a provider or route."""
         offenders: list[str] = []
-        for path in (_ROOT / "providers").glob("*.py"):
-            for number, line in enumerate(
-                path.read_text(encoding="utf-8").splitlines(), start=1
-            ):
+        provider_sources = {
+            path: path.read_text(encoding="utf-8") for path in (_ROOT / "providers").glob("*.py")
+        }
+        for path, source in provider_sources.items():
+            for number, line in enumerate(source.splitlines(), start=1):
                 if line.lstrip().startswith("#"):
                     continue
                 if "gemini-" in line.lower():
                     offenders.append(f"{path.name}:{number}")
+        values = _env_example_values()
+        for name in (*OPENROUTER_MODEL_ENV_VARS, OPENROUTER_FALLBACK_MODEL_ENV_VAR):
+            model_id = values[name]
+            for path, source in provider_sources.items():
+                if model_id in source:
+                    offenders.append(f"{path.name}:{model_id}")
         self.assertEqual(offenders, [], f"hard-coded model id in provider code: {offenders}")
 
 

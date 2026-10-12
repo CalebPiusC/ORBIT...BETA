@@ -128,7 +128,10 @@
               <a class="composer-tool github-shortcut" href="https://github.com" target="_blank" rel="noopener noreferrer" aria-label="Open GitHub">● <span>GitHub</span></a>
             </div>
             <div class="spacer"></div>
-            <button type="button" class="icon-btn-round voice-btn" id="homeVoice" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
+            <div class="voice-control-group">
+              <button type="button" class="icon-btn-round voice-btn" id="homeVoice" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
+              <button type="button" class="voice-expand-btn" id="homeVoiceExpand" aria-label="Open voice chat view" aria-controls="voiceChatView" aria-expanded="false" title="Open voice chat view">⌃</button>
+            </div>
             <button type="button" class="send-btn-round" id="homeSend" aria-label="Send message" title="Send message">➤</button>
           </div>
           <div class="attachment-note" id="homeAttachmentNote" aria-live="polite" hidden></div>
@@ -150,6 +153,28 @@
 
     <div class="home-footer">🔒 Just you and Orbit. Your conversations stay private.</div>
   </div>
+
+  <section class="voice-chat-view" id="voiceChatView" role="dialog" aria-modal="true" aria-label="Voice chat" hidden>
+    <header class="voice-view-topbar">
+      <button type="button" class="voice-view-back" id="voiceChatBack" aria-label="Back to text chat">
+        <span aria-hidden="true">←</span> Back to text chat
+      </button>
+      <span class="voice-view-title">Voice chat</span>
+      <span class="voice-view-topbar-spacer" aria-hidden="true"></span>
+    </header>
+    <div class="voice-view-main">
+      <div class="voice-view-rings" id="voiceViewRings" data-state="idle" aria-hidden="true">
+        <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" />
+      </div>
+      <p class="voice-view-state" id="voiceViewState" role="status" aria-live="polite">Ready when you are</p>
+      <div class="voice-view-conversation" aria-live="polite" aria-atomic="false">
+        <p class="voice-view-transcript" id="voiceViewTranscript" hidden></p>
+        <p class="voice-view-reply" id="voiceViewReply" hidden></p>
+      </div>
+      <div class="voice-view-mic" id="voiceViewMic"></div>
+      <p class="voice-view-hint">Hold to talk, then release to send</p>
+    </div>
+  </section>
 </div>
 <dialog class="settings-dialog" id="settingsDialog" aria-labelledby="settingsDialogTitle">
   <form method="dialog">

@@ -19,7 +19,7 @@ before, and they are in better shape than the plan expected:
 | 2 — tools + confirmation gate in the same pass | **Done** | `tools/registry.py` (gate + audit wrap), `tools/confirmation.py`, `tools/notes.py` |
 | 3 — UI from a real file, not a description | **Done**, offline-verified | `design/orbit_mockup.html` → `app/templates/`, `app/server.py`, `app/store.py` |
 | 4 — memory, heartbeat, browser voice | **Partly done**: memory and heartbeat foundations exist; browser push-to-talk, speech replies, and Quick/Deep selection are built in Phase 4c and offline-tested | `heartbeat/`, `memory/`, `app/voice.py`, `app/static/app.js`, `runtime/heartbeat.json`, `runtime/plans.json` |
-| 5 — second provider, agent mode | **Partly done**: Agent UI and truthful Gemini model labels exist; no second provider or sub-agents | seam exists: `ChatProvider` + `max_tool_rounds`, task stream in `app/server.py` |
+| 5 — second provider, agent mode | **Partly done**: Agent UI plus an OpenRouter chain for Deep-mode streaming exist; no general second-provider selection or sub-agents | `providers/openrouter.py`, `providers/gemini.py`, `ChatProvider`, task stream in `app/server.py` |
 | 6 — `user_id` from the start | **Seeded**, no persistence yet | `app/store.py` (`DEFAULT_USER_ID`, `user_id` on `Conversation`/`Task`/`User`, `conversations_for`, `tasks_for`) |
 
 Offline suite: all green (`sh setup.sh` re-runs them). `google-genai` 1.75.0.
@@ -151,9 +151,10 @@ These are not style preferences. Each one exists because the previous build viol
    an external bind with `ORBIT_HOST=0.0.0.0` (and `PORT` for the port); do not turn on
    debug mode, especially on an externally reachable address.
 12. **Quick/Deep and voice are additions, not new chat paths.** Quick/Deep affects the
-   streamed UI provider request only; Deep prefers the configured fallback model with a
-   larger `max_output_tokens` cap, and Agent activity must identify the actual model after
-   failover. Keep typed input as the default. Voice transcripts re-enter `/api/chat` or
+   streamed UI provider request only; Quick keeps the Gemini primary/fallback chain, while
+   Deep tries the three configured OpenRouter model slots, then its configured auto-router,
+   then Gemini's primary as Europa. Failover is allowed only before output starts, and Agent
+   activity identifies the actual slot. Keep typed input as the default. Voice transcripts re-enter `/api/chat` or
    `/api/task/<id>/stream`; they must not bypass tool approval, task approval, history, or
    safety gates. Audio uploads are bounded and temporary, and generated MP3 bytes are
    streamed from the server rather than synthesized in the browser.
@@ -338,7 +339,9 @@ brain.
 - **Typed chat remains the default.** Press-and-hold mic controls record through the
   browser's `MediaRecorder`; release uploads the clip to `/api/voice/transcribe`. The
   returned transcript is placed into the existing composer and sent through the ordinary
-  `/api/chat` or `/api/task/<id>/stream` route.
+  `/api/chat` or `/api/task/<id>/stream` route. A chevron by the home mic opens a focused
+  voice-chat view: it reuses that same mic element and pipeline, enlarges the Orbit mark
+  for idle/listening/thinking/speaking states, and returns to text chat through Back.
 - **Transcription is local to the server.** `app/voice.py` lazily loads
   `faster-whisper` (`base`, CPU, `int8` by default). The browser upload is capped at
   25 MiB, recordings stop at two minutes, and audio is stored in a temporary file only
@@ -372,14 +375,18 @@ brain.
   The browser uses Media Source Extensions where MP3 streaming is supported and a Blob
   playback fallback otherwise. Typed turns remain text-only.
 - **Quick/Deep is per stream, shared across both screens.** Quick uses the configured
-  primary Gemini model and `max_output_tokens=512`. Deep uses `4096` and prefers the
-  configured fallback model; if it fails before the first chunk, the primary is tried.
-  Agent status names the model actually being called, including Deep-first and failover
-  order. The selection lives in `Store` for the web process lifetime.
-- **Current Agent mode is still one Gemini provider.** It streams a task reply with
-  narration and optional model-attempt labels; Chat mode remains the only browser mode
-  that offers the six gated tools. There are no sub-agents or second provider yet. Keep
-  approvals enforced by `Store` and `PendingActions` before any future execution path.
+  primary Gemini model and `max_output_tokens=512`. Deep uses `4096` and tries the three
+  configured OpenRouter model ids in order, then the configured auto-router, then Gemini's
+  primary as Europa. Failover is allowed only before the first visible text/tool delta;
+  afterwards an error is surfaced rather than restarting and duplicating output. The
+  `OPENROUTER_MODEL_1/2/3` values and `OPENROUTER_FALLBACK_MODEL` live in `.env`; no pinned
+  OpenRouter model id belongs in provider code. Agent activity uses Io, Ganymede, Callisto
+  for the pinned slots. The selection lives in `Store` for the web process lifetime.
+- **Agent mode streams through the same provider seam.** Task replies use narration and
+  optional model-attempt labels; Chat mode remains the only browser mode that offers the
+  six gated tools. Deep Chat-mode tool proposals can come from OpenRouter, but are still
+  returned as proposals and are never executed before approval. There are no sub-agents.
+  Keep approvals enforced by `Store` and `PendingActions` before any future execution path.
 
 ### 5.3 Lagos time context, empty-stream audit, and UI polish
 
@@ -544,9 +551,10 @@ themselves.
   `notes`. Torn and unparseable lines are skipped; naive timestamps are read as UTC.
 - Counted events: `chat_message_received` (now written by both chat paths, home and task),
   `model_answered`, `message_rated`, `heartbeat_notice_fired`,
-  `heartbeat_notice_dismissed`, `heartbeat_checkin_recorded`. Persona names come from
-  `providers.personas.model_persona_map()`, which reads the configured model ids at call
-  time; an unconfigured model keeps its own id as the label.
+  `heartbeat_notice_dismissed`, `heartbeat_checkin_recorded`. New model-answer events
+  record the persona actually used (important when one Gemini id is Titan in Quick and
+  Europa as Deep's last resort). Older records use `providers.personas.model_persona_map()`;
+  an unconfigured model keeps its own id as the label.
 - The view (`GET /analytics`) is neutral by construction: counts, days and shares, with no
   streak, comparison, target or "you should" wording. A missing log is reported as having
   nothing to count, not as a failure.

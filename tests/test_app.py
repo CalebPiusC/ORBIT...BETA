@@ -560,6 +560,13 @@ class ChatBubbleLayoutTests(unittest.TestCase):
         )
         self.assertIn('id="homeVoice"', home)
         self.assertIn('id="taskVoice"', task)
+        self.assertIn('id="homeVoiceExpand"', home)
+        self.assertIn('id="voiceChatView"', home)
+        self.assertIn('id="voiceChatBack"', home)
+        self.assertIn('id="voiceViewRings"', home)
+        self.assertEqual(home.count('id="homeVoice"'), 1)
+        self.assertIn("voiceViewMic.appendChild(voiceButton)", script)
+        self.assertIn("voiceHomeParent.insertBefore(voiceButton, voiceHomeNextSibling)", script)
         self.assertIn("navigator.mediaDevices.getUserMedia({ audio: true })", script)
         self.assertIn("new window.MediaRecorder(stream", script)
         self.assertIn('fetch("/api/voice/transcribe"', script)
@@ -574,6 +581,25 @@ class ChatBubbleLayoutTests(unittest.TestCase):
         # not only the generic sentence.
         self.assertIn("function voiceFailureText(payload, fallback)", script)
         self.assertEqual(script.count('voiceFailureText(payload, "'), 2)  # transcribe + speech
+
+    def test_focused_voice_view_reuses_existing_orbit_ring_state_styles(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        home = self.client.get("/").get_data(as_text=True)
+        script = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
+        styles = (root / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
+        self.assertIn('aria-label="Back to text chat"', home)
+        self.assertIn('aria-modal="true"', home)
+        self.assertIn("voiceChatBack.focus()", script)
+        self.assertIn('event.key === "Escape"', script)
+        self.assertIn('event.key !== "Tab"', script)
+        self.assertIn('voiceViewRings.setAttribute("data-state", state || "idle")', script)
+        for state in ("idle", "listening", "thinking", "speaking"):
+            self.assertIn('data-state="' + state + '"', styles)
+        # All four focused states reuse the existing orbital turn keyframe.
+        self.assertIn("animation: orbit-ring-turn 20s linear infinite", styles)
+        self.assertIn("animation: orbit-ring-turn 1.6s linear infinite", styles)
+        self.assertIn("animation: orbit-ring-turn 8s linear infinite", styles)
+        self.assertIn('reportPlayback("speaking", "Speaking…"', script)
 
 
 class ServerMessageTimeTests(unittest.TestCase):

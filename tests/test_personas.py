@@ -1,10 +1,8 @@
 """Model display names and status lines, offline.
 
 Rules under test:
-- Names follow slot order: slot 0 (primary) is Titan, slot 1 (fallback) is Europa.
-  Io, Ganymede, Callisto, Triton and Luna are reserved for future slots, in that
-  order. Nothing is named past
-  the assigned slots.
+- Gemini slots 0 and 1 are Titan and Europa. Deep-mode OpenRouter slots 2-4
+  are Io, Ganymede, and Callisto. Triton and Luna remain reserved.
 - Status lines ("Asking Titan…") appear only when the caller asks for them
   (Agent mode). Chat mode gets no status line, even when the primary fails.
 - Status lines never mix into the reply or thinking text.
@@ -66,20 +64,23 @@ def run(provider: GeminiProvider, **kwargs: Any) -> list[tuple[str, str]]:
 
 class SlotNameTests(unittest.TestCase):
     def test_names_follow_slot_order(self) -> None:
-        self.assertEqual(slot_name(0), "Titan")  # primary
-        self.assertEqual(slot_name(1), "Europa")  # fallback
-        self.assertEqual(SLOT_NAMES, ("Titan", "Europa"))
+        self.assertEqual(slot_name(0), "Titan")
+        self.assertEqual(slot_name(1), "Europa")
+        self.assertEqual(slot_name(2), "Io")
+        self.assertEqual(slot_name(3), "Ganymede")
+        self.assertEqual(slot_name(4), "Callisto")
+        self.assertEqual(SLOT_NAMES, ("Titan", "Europa", "Io", "Ganymede", "Callisto"))
 
-    def test_reserved_names_are_not_handed_out(self) -> None:
+    def test_reserved_names_are_handed_out_only_as_slots_are_added(self) -> None:
         self.assertEqual(RESERVED_NAMES, ("Io", "Ganymede", "Callisto", "Triton", "Luna"))
-        for name in ("Io", "Ganymede", "Callisto", "Triton", "Luna"):
-            self.assertIn(name, RESERVED_NAMES)
-            self.assertNotIn(name, SLOT_NAMES)
+        self.assertEqual(SLOT_NAMES[2:], RESERVED_NAMES[:3])
+        self.assertNotIn("Triton", SLOT_NAMES)
+        self.assertNotIn("Luna", SLOT_NAMES)
 
     def test_no_name_past_the_assigned_slots(self) -> None:
         with self.assertRaises(ValueError) as caught:
             slot_name(len(SLOT_NAMES))
-        self.assertIn("Io", str(caught.exception))  # the error says what is reserved
+        self.assertIn("Triton", str(caught.exception))
 
 
 class AgentModeStatusTests(unittest.TestCase):
@@ -151,26 +152,16 @@ class QuickDeepSelectionTests(unittest.TestCase):
         self.assertEqual([text for kind, text in out if kind == "status"], ["Asking Titan…"])
         self.assertEqual(provider.last_model_used, PRIMARY)
 
-    def test_deep_prefers_fallback_with_larger_budget_and_actual_persona(self) -> None:
-        provider = provider_for({FALLBACK: ["deep answer"]})
+    def test_deep_without_openrouter_uses_gemini_as_europa_final_fallback(self) -> None:
+        provider = provider_for({PRIMARY: ["deep answer"]})
         out = run(provider, thinking_level="deep", report_attempts=True)
         models = provider._client.models
-        self.assertEqual(models.calls, [FALLBACK])
+        self.assertEqual(models.calls, [PRIMARY])
         self.assertEqual(models.configs[0].max_output_tokens, 4096)
         self.assertEqual([text for kind, text in out if kind == "status"], ["Asking Europa…"])
-        self.assertEqual(provider.last_model_used, FALLBACK)
-
-    def test_deep_failover_labels_the_primary_that_actually_answers(self) -> None:
-        provider = provider_for({FALLBACK: api_error(504), PRIMARY: ["primary fallback"]})
-        out = run(provider, thinking_level="deep", report_attempts=True)
-        statuses = [text for kind, text in out if kind == "status"]
-        self.assertEqual(
-            statuses,
-            ["Asking Europa…", "Europa didn't answer (Google returned 504). Asking Titan…"],
-        )
         self.assertEqual(provider.last_model_used, PRIMARY)
 
-    def test_deep_without_a_configured_fallback_uses_primary_with_deep_budget(self) -> None:
+    def test_deep_without_openrouter_still_uses_primary_with_deep_budget(self) -> None:
         provider = GeminiProvider(
             client=SimpleNamespace(models=StreamScript({PRIMARY: ["deep"]})),
             model=PRIMARY,
@@ -181,7 +172,7 @@ class QuickDeepSelectionTests(unittest.TestCase):
         models = provider._client.models
         self.assertEqual(models.calls, [PRIMARY])
         self.assertEqual(models.configs[0].max_output_tokens, 4096)
-        self.assertEqual([text for kind, text in out if kind == "status"], ["Asking Titan…"])
+        self.assertEqual([text for kind, text in out if kind == "status"], ["Asking Europa…"])
 
     def test_rejects_unknown_thinking_level(self) -> None:
         provider = provider_for({PRIMARY: ["not used"]})

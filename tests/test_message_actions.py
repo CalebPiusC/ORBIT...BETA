@@ -31,7 +31,7 @@ from providers.base import ChatMessage, StreamChunk
 from app.analytics import build_analytics
 from app.server import create_app
 from app.store import ChatMessage as StoreChatMessage, Store
-from providers.personas import RESERVED_NAMES, model_persona_map, persona_for_model
+from providers.personas import model_persona_map, persona_for_model
 from tools.registry import AuditLog
 
 APP_JS = Path(__file__).resolve().parent.parent / "app" / "static" / "app.js"
@@ -439,6 +439,29 @@ class AnalyticsModuleTests(unittest.TestCase):
         self.assertEqual(report.checkins, 1)
         self.assertEqual((report.ratings_up, report.ratings_down), (1, 1))
 
+    def test_event_persona_keeps_context_specific_fallback_names(self) -> None:
+        self.write(
+            {
+                "timestamp": self.stamp(),
+                "event": "model_answered",
+                "model": "shared-gemini-model",
+                "persona": "Titan",
+            },
+            {
+                "timestamp": self.stamp(),
+                "event": "model_answered",
+                "model": "shared-gemini-model",
+                "persona": "Europa",
+            },
+        )
+
+        report = build_analytics(self.path, now=self.now)
+
+        self.assertEqual(
+            report.models,
+            [("shared-gemini-model", "Europa", 1), ("shared-gemini-model", "Titan", 1)],
+        )
+
     def test_events_outside_the_window_and_broken_lines_are_ignored(self) -> None:
         self.path.write_text(
             "\n".join(
@@ -505,23 +528,38 @@ class PersonaNamingTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "OPENROUTER_MODEL": "vendor/free-model:free",
+                "OPENROUTER_MODEL_1": "vendor/free-one:free",
+                "OPENROUTER_MODEL_2": "vendor/free-two:free",
+                "OPENROUTER_MODEL_3": "vendor/free-three:free",
                 "GEMINI_MODEL": "titan-model",
                 "GEMINI_FALLBACK_MODEL": "europa-model",
             },
         ):
             mapping = model_persona_map()
 
-        self.assertEqual(mapping["vendor/free-model:free"], RESERVED_NAMES[0])  # Io
+        self.assertEqual(mapping["vendor/free-one:free"], "Io")
+        self.assertEqual(mapping["vendor/free-two:free"], "Ganymede")
+        self.assertEqual(mapping["vendor/free-three:free"], "Callisto")
         self.assertEqual(mapping["titan-model"], "Titan")
         self.assertEqual(mapping["europa-model"], "Europa")
         self.assertEqual(persona_for_model("some/other", mapping), "some/other")
 
-    def test_no_openrouter_model_configured_means_no_io_label(self) -> None:
-        with patch.dict(os.environ, {"OPENROUTER_MODEL": "", "GEMINI_MODEL": "titan-model"}):
+    def test_no_openrouter_models_configured_means_no_openrouter_names(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "OPENROUTER_MODEL_1": "",
+                "OPENROUTER_MODEL_2": "",
+                "OPENROUTER_MODEL_3": "",
+                "GEMINI_MODEL": "titan-model",
+            },
+            clear=True,
+        ):
             mapping = model_persona_map()
 
         self.assertNotIn("Io", mapping.values())
+        self.assertNotIn("Ganymede", mapping.values())
+        self.assertNotIn("Callisto", mapping.values())
 
 
 class AnalyticsRouteTests(AppCase):

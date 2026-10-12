@@ -1,44 +1,41 @@
-"""Display names for model slots. Used only in Agent mode status lines.
+"""Display names for configured model slots, shown in Agent mode status lines.
 
-A slot is a position in the model chain: slot 0 is the primary model and slot 1
-is the fallback. Each slot has one name, handed out in order and carrying no
-meaning beyond its position. Chat mode never shows them.
-
-Names reserved for future model slots, in the order they are handed out:
-Io, Ganymede, Callisto, Triton, Luna. They are kept out of SLOT_NAMES until a
-slot needs them.
+Gemini keeps the first two slots (Titan and Europa). The next three slots are
+used by Deep mode's pinned OpenRouter models: Io, Ganymede, and Callisto. Any
+other configured model, including OpenRouter's auto-router, keeps its own id.
+Chat mode never shows these names or model-attempt status lines.
 """
 
 from __future__ import annotations
 
 import os
 
-SLOT_NAMES: tuple[str, ...] = ("Titan", "Europa")
+SLOT_NAMES: tuple[str, ...] = ("Titan", "Europa", "Io", "Ganymede", "Callisto")
 
 RESERVED_NAMES: tuple[str, ...] = ("Io", "Ganymede", "Callisto", "Triton", "Luna")
 
-# Which configured model answers under which name. Read from the environment at
-# call time, so it always reflects the configuration in force. Only these three
-# names are assigned today; any other model id is reported by its own id rather
-# than being given an invented name.
-_OPENROUTER_ENV_VAR = "OPENROUTER_MODEL"
 _GEMINI_ENV_VAR = "GEMINI_MODEL"
 _GEMINI_FALLBACK_ENV_VAR = "GEMINI_FALLBACK_MODEL"
 
 
 def model_persona_map() -> dict[str, str]:
-    """Map configured model ids to the name used for them in one place: the UI.
+    """Map configured model ids to their display names.
 
-    ``Io`` is reserved for the OpenRouter primary, ``Titan`` for the primary
-    Gemini model and ``Europa`` for the Gemini fallback. Blank or unset values
-    contribute nothing.
+    Names are position-based, not properties of a model. Io is the first
+    pinned OpenRouter model, Ganymede the second, Callisto the third; Titan
+    and Europa retain their Gemini primary/fallback assignments.
     """
-    from config import DEFAULT_GEMINI_FALLBACK_MODEL, DEFAULT_GEMINI_MODEL
+    from config import (
+        DEFAULT_GEMINI_FALLBACK_MODEL,
+        DEFAULT_GEMINI_MODEL,
+        load_openrouter_settings,
+    )
 
     mapping: dict[str, str] = {}
-    openrouter = os.getenv(_OPENROUTER_ENV_VAR, "").strip()
-    if openrouter:
-        mapping[openrouter] = RESERVED_NAMES[0]  # Io
+    for position, model in enumerate(load_openrouter_settings().models, start=2):
+        if model:
+            mapping[model] = slot_name(position)
+
     gemini = os.getenv(_GEMINI_ENV_VAR, "").strip() or DEFAULT_GEMINI_MODEL
     fallback = (
         os.getenv(_GEMINI_FALLBACK_ENV_VAR, "").strip() or DEFAULT_GEMINI_FALLBACK_MODEL
@@ -56,11 +53,13 @@ def persona_for_model(model: str, mapping: dict[str, str] | None = None) -> str:
 
 
 def slot_name(slot: int) -> str:
-    """Return the display name for a model slot (0 = primary, 1 = fallback)."""
+    """Return the display name assigned to a model slot."""
     if not 0 <= slot < len(SLOT_NAMES):
+        reserved_offset = max(0, len(SLOT_NAMES) - 2)
+        still_reserved = RESERVED_NAMES[reserved_offset:]
+        detail = ", ".join(still_reserved) or "none"
         raise ValueError(
             f"No display name is assigned to model slot {slot}. Add one to SLOT_NAMES "
-            f"in providers/personas.py first (reserved, not yet assigned: {', '.join(RESERVED_NAMES)})."
+            f"in providers/personas.py first (still reserved: {detail})."
         )
     return SLOT_NAMES[slot]
-

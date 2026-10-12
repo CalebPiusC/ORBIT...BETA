@@ -22,7 +22,7 @@ echo "dependencies installed in .venv (activate with: . .venv/bin/activate)"
 
 if [ ! -f .env ]; then
     cp .env.example .env
-    echo "created .env from .env.example — add your Gemini key before running chat.py"
+    echo "created .env from .env.example — add your Gemini key; OpenRouter is optional for Deep mode"
 fi
 
 .venv/bin/python -m unittest discover -s tests

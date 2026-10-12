@@ -116,8 +116,8 @@ class ChatProvider(ABC):
         status line appears there.
 
         ``thinking_level`` selects the provider's Quick or Deep response policy.
-        Gemini uses a tight output-token cap and the primary model for Quick;
-        Deep uses a larger cap and prefers the configured fallback model.
+        Quick uses the provider's low-latency route and smaller output-token cap;
+        Deep uses a larger cap and the provider's configured deep-model chain.
 
         When ``allow_tools`` is True, the model may ask for one tool call. The
         provider then yields a :class:`ToolProposal` and stops reading the
