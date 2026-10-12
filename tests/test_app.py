@@ -494,9 +494,11 @@ class ChatBubbleLayoutTests(unittest.TestCase):
     def test_each_message_is_its_own_row_with_a_time_line(self) -> None:
         body = self.client.get("/task/T1").get_data(as_text=True)
         # One row per message; the time sits under the bubble, not beside a label.
+        # Stored messages also carry the id their row actions act on.
         self.assertRegex(
             body,
-            r'(?s)<div class="chat-row orbit">\s*<div class="chat-bubble orbit">.*?</div>\s*'
+            r'(?s)<div class="chat-row orbit"(?: data-message-id="[^"]*")?>\s*'
+            r'<div class="chat-bubble orbit">.*?</div>\s*'
             r'<div class="chat-meta">09:42</div>\s*</div>',
         )
 
@@ -568,6 +570,10 @@ class ChatBubbleLayoutTests(unittest.TestCase):
         self.assertIn("body.appendChild(audio)", script)  # timestamp stays beneath text and player
         self.assertIn('window.MediaSource.isTypeSupported("audio/mpeg")', script)
         self.assertIn("response.blob()", script)  # playback fallback when MSE is absent
+        # A voice failure shows the server's specific reason beside the stable line,
+        # not only the generic sentence.
+        self.assertIn("function voiceFailureText(payload, fallback)", script)
+        self.assertEqual(script.count('voiceFailureText(payload, "'), 2)  # transcribe + speech
 
 
 class ServerMessageTimeTests(unittest.TestCase):

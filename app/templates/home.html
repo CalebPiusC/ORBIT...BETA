@@ -2,43 +2,7 @@
 {% block title %}ORBIT — Home{% endblock %}
 {% block body %}
 <div class="screen screen--active" id="screen-home">
-  <div class="sidebar">
-    <div class="sidebar-brand"><img class="brand-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />ORBIT</div>
-    <button type="button" class="new-convo" id="newConvo"><span class="new-convo-plus" aria-hidden="true">+</span>New conversation</button>
-    <label class="sidebar-search" for="conversationSearch"><span aria-hidden="true">⌕</span><input type="search" id="conversationSearch" placeholder="Search chats" autocomplete="off" /></label>
-
-    {% for group, items in conversations.items() %}
-    <div class="history-group">
-      <h4>{{ group }}</h4>
-      {% for conv in items %}
-      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}" data-conv-id="{{ conv.id }}">{{ conv.title }}</div>
-      {% endfor %}
-    </div>
-    {% endfor %}
-
-    <div class="sidebar-spacer"></div>
-    <div class="sidebar-foot">
-      {% if heartbeat %}
-      <div class="reminders-row">
-        <div class="names">
-          <div class="name">Reminders</div>
-          <div class="sub" id="remindersState" title="Quiet hours 22:00–08:00 (Lagos). Plan check at {{ '%02d' | format(heartbeat.plan_hour) }}:00.">{% if heartbeat.paused %}Paused{% else %}On · quiet 22:00–08:00{% endif %}</div>
-        </div>
-        <button type="button" class="reminders-toggle" id="remindersToggle" role="switch"
-                aria-label="Reminders" aria-checked="{{ 'false' if heartbeat.paused else 'true' }}"><span class="knob"></span></button>
-      </div>
-      {% endif %}
-      <div class="connected-apps-row"><span class="dot"></span>Connected apps · {{ connected_count }} active</div>
-      <div class="user-row">
-        <div class="user-avatar">{{ user.name[:2]|upper }}</div>
-        <div class="names">
-          <div class="name">{{ user.name }}</div>
-          <div class="sub">{{ user.workspace }}</div>
-        </div>
-        <button type="button" class="utility-settings" data-open-settings aria-label="Account and settings" title="Account and settings">⚙</button>
-      </div>
-    </div>
-  </div>
+{% include "_sidebar.html" %}
 
   <div class="home-main{% if docked %} is-docked{% endif %}" id="homeMain">
     <div class="home-topbar app-topbar">
@@ -111,7 +75,7 @@
       <div class="home-thread{% if thread %} visible{% endif %}" id="homeThread" aria-live="polite" aria-atomic="false">
         {% for msg in thread %}
         {# Same markup as app.js builds live: every Orbit message carries the orbital mark. #}
-        <div class="chat-row {% if msg.is_orbit %}orbit{% else %}user{% endif %}">
+        <div class="chat-row {% if msg.is_orbit %}orbit{% else %}user{% endif %}"{% if msg.id %} data-message-id="{{ msg.id }}"{% endif %}>
           <div class="chat-bubble {% if msg.is_orbit %}orbit{% else %}user{% endif %}">
             {% if msg.action %}
             {# A proposed tool call: nothing runs until Approve. Same markup app.js builds live. #}
@@ -133,7 +97,7 @@
             <div class="body"><img class="orbit-icon" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" /><span class="reply">{{ msg.body }}</span></div>
             <div class="message-actions" aria-label="Response actions">
               <button type="button" class="message-action" data-message-action="copy" aria-label="Copy response" title="Copy">⧉</button>
-              <button type="button" class="message-action" data-message-action="regenerate" aria-label="Regenerate response" title="Regenerate">↻</button>
+              <button type="button" class="message-action" data-message-action="regenerate" aria-label="Regenerate response" title="Regenerate this reply">↻</button>
               <button type="button" class="message-action" data-message-action="feedback-up" aria-label="Good response" aria-pressed="false" title="Good response">↑</button>
               <button type="button" class="message-action" data-message-action="feedback-down" aria-label="Poor response" aria-pressed="false" title="Poor response">↓</button>
             </div>

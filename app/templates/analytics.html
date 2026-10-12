@@ -1,0 +1,113 @@
+{% extends "layout.html" %}
+{% block title %}ORBIT — Analytics{% endblock %}
+{% block body %}
+{# Counts read back out of audit.log. Descriptive only: what happened, in
+   numbers, with no streaks, comparisons or targets. #}
+<div class="screen screen--active" id="screen-analytics">
+{% include "_sidebar.html" %}
+
+  <div class="analytics-main">
+    <div class="home-topbar app-topbar">
+      <div class="topbar-title" id="currentConversationTitle" title="Analytics">
+        <span class="topbar-eyebrow">Weekly</span>
+        <span class="topbar-name">Analytics</span>
+      </div>
+      <div class="home-topbar-controls topbar-controls">
+        <div class="mode-toggle" aria-label="Workspace mode">
+          <a class="topbar-icon-button" href="/" aria-label="Back to chat" title="Back to chat">←</a>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" class="topbar-icon-button" data-open-settings aria-label="Settings" title="Settings">⚙</button>
+        <button type="button" class="topbar-account" data-open-settings title="{{ user.name }} · {{ user.workspace }}" aria-label="Account and settings for {{ user.name }}">
+          <span class="topbar-avatar">{{ user.name[:2]|upper }}</span>
+          <span class="topbar-account-name">{{ user.name }}</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="analytics-body">
+      <div class="analytics-inner">
+        <p class="analytics-summary">{{ report.summary }}</p>
+        <p class="analytics-sub">
+          Last {{ report.window_days }} days · {{ report.events_read }} audit events read from
+          <code>{{ report.log_path }}</code>. Counts of what happened, nothing else.
+        </p>
+
+        {% for note in report.notes %}
+        <p class="analytics-note">{{ note }}</p>
+        {% endfor %}
+
+        <div class="analytics-grid">
+          <div class="analytics-card">
+            <h3>Messages per day</h3>
+            <div class="analytics-days">
+              {% for day in report.messages_per_day %}
+              <div class="analytics-day{% if day.is_today %} is-today{% endif %}">
+                <span class="label">{{ day.label }}</span>
+                <span class="analytics-bar"><span style="width: {{ day.bar_percent }}%"></span></span>
+                <span class="count">{{ day.count }}</span>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="analytics-figure-note">{{ report.messages_total }} message{{ '' if report.messages_total == 1 else 's' }} in the window · {{ report.messages_today }} today</div>
+          </div>
+
+          <div class="analytics-card">
+            <h3>Which model answered</h3>
+            {% if report.models %}
+            <div class="analytics-rows">
+              {% for model, name, count in report.models %}
+              <div class="analytics-row">
+                <span class="key">{{ name }}{% if name != model %} <span class="model-id">{{ model }}</span>{% endif %}</span>
+                <span class="value">{{ count }}</span>
+              </div>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="analytics-empty">No model replies recorded in this window.</p>
+            {% endif %}
+          </div>
+
+          <div class="analytics-card">
+            <h3>Reminders</h3>
+            <div class="analytics-rows">
+              <div class="analytics-row"><span class="key">Notices fired</span><span class="value">{{ report.heartbeat_fired }}</span></div>
+              <div class="analytics-row"><span class="key">Notices dismissed</span><span class="value">{{ report.heartbeat_dismissed }}</span></div>
+              <div class="analytics-row"><span class="key">Check-ins logged</span><span class="value">{{ report.checkins }}</span></div>
+            </div>
+          </div>
+
+          <div class="analytics-card">
+            <h3>Message ratings</h3>
+            <div class="analytics-rows">
+              <div class="analytics-row"><span class="key">Thumbs up</span><span class="value">{{ report.ratings_up }}</span></div>
+              <div class="analytics-row"><span class="key">Thumbs down</span><span class="value">{{ report.ratings_down }}</span></div>
+            </div>
+            <div class="analytics-figure-note">Recorded from the buttons under each reply.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+  // The sidebar's collapse toggle and tooltips work here too; the view itself is
+  // rendered server-side from audit.log.
+  try {
+    if (typeof Orbit === "undefined" || !Orbit || typeof Orbit.bootstrapSidebar !== "function") {
+      throw new Error("app.js did not load (window.Orbit is missing).");
+    }
+    Orbit.bootstrapSidebar();
+  } catch (err) {
+    var sidebar = document.getElementById("sidebar");
+    if (sidebar) {
+      var note = document.createElement("div");
+      note.className = "analytics-note";
+      note.textContent = "Sidebar controls unavailable: " + (err && err.message ? err.message : err);
+      sidebar.parentNode.insertBefore(note, sidebar);
+    }
+  }
+</script>
+{% endblock %}

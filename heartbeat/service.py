@@ -104,6 +104,10 @@ class Heartbeat:
             state["last_checkin_at"] = _iso(moment)
 
         self._store.update(change)
+        # Audited like every other heartbeat state change, so the Analytics view
+        # can count check-ins from audit.log alone. It carries a timestamp and a
+        # source, never message text.
+        self._audit.record_event("heartbeat_checkin_recorded", source="chat_message")
 
     def set_paused(self, paused: bool, *, source: str) -> bool:
         def change(state: dict[str, Any]) -> None:

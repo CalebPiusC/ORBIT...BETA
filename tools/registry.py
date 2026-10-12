@@ -6,6 +6,7 @@ import copy
 import json
 import threading
 import time
+import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -18,6 +19,10 @@ from typing import Any, Literal
 from tools.confirmation import ConfirmationGate, ProposedAction
 
 DEFAULT_AUDIT_LOG_PATH = Path(__file__).resolve().parents[1] / "audit.log"
+# Caps for failure diagnostics: enough for a real traceback, small enough that one
+# failure cannot bloat audit.log.
+MAX_AUDIT_ERROR_CHARS = 2_000
+MAX_AUDIT_TRACEBACK_CHARS = 8_000
 ConfirmationStatus = Literal["confirmed", "declined"]
 ExecutionStatus = Literal[
     "succeeded",
@@ -71,6 +76,26 @@ class _RegisteredTool:
     invoke: Callable[..., ToolOutcome]
 
 
+def _describe_exception(error: BaseException) -> dict[str, Any]:
+    """The real failure, flattened into JSON-safe fields: type, message, chain, traceback."""
+    chain: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(f"{type(current).__module__}.{type(current).__qualname__}: {current}")
+        current = current.__cause__ or current.__context__
+    formatted = "".join(
+        traceback.format_exception(type(error), error, error.__traceback__)
+    ).strip()
+    return {
+        "error_type": f"{type(error).__module__}.{type(error).__qualname__}",
+        "error": str(error)[:MAX_AUDIT_ERROR_CHARS],
+        "error_chain": chain,
+        "traceback": formatted[:MAX_AUDIT_TRACEBACK_CHARS],
+    }
+
+
 class AuditLog:
     """Append one JSON-lines audit event for each dispatched tool call."""
 
@@ -117,7 +142,8 @@ class AuditLog:
     def record_event(self, event: str, **fields: Any) -> None:
         """Append one non-tool event, such as a heartbeat notice fired or dismissed.
 
-        Fields must be identifiers, reasons and timings, never message text.
+        Fields must be identifiers, reasons and timings, never message text. Use
+        :meth:`record_error` instead when the point of the event is a failure.
         """
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
@@ -127,6 +153,18 @@ class AuditLog:
             **fields,
         }
         self._write(record)
+
+    def record_error(self, event: str, error: BaseException, **fields: Any) -> None:
+        """Append one failure event carrying the actual exception, not just a summary.
+
+        The browser only has room for one short line, and a log line that says
+        "service unavailable" cannot be acted on. This writes what really went
+        wrong -- exception type, message, cause chain and formatted traceback --
+        so the cause is diagnosable from ``audit.log`` alone. Callers may add
+        identifiers and timings; prompts, replies, audio, and credentials never
+        belong here.
+        """
+        self.record_event(event, **{**_describe_exception(error), **fields})
 
     def _write(self, event: Mapping[str, Any]) -> None:
         line = json.dumps(event, ensure_ascii=False, separators=(",", ":"), default=str)
