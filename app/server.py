@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from collections.abc import Iterable, Iterator
 from typing import Any, Callable
 
@@ -57,6 +58,7 @@ log = logging.getLogger("orbit.server")
 
 MAX_VOICE_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_SPEECH_TEXT_CHARS = 12_000
+MAX_REASON_CHARS = 300
 _AUDIO_SUFFIX_BY_MIME = {
     "audio/webm": ".webm",
     "video/webm": ".webm",
@@ -106,6 +108,70 @@ def _sse(event: str, data: str) -> str:
 
 def _json(payload: Any, status: int = 200) -> Response:
     return Response(json.dumps(payload), status=status, mimetype="application/json")
+
+
+def _failure_reason(error: BaseException, *, limit: int = MAX_REASON_CHARS) -> str:
+    """The short, UI-safe cause of a failed request.
+
+    The browser's status line has room for one sentence, not a stack trace: the
+    full exception belongs in the console log and ``audit.log``. Services that
+    know a better wording than ``Type: message`` expose it as ``reason``.
+    """
+    detail = getattr(error, "reason", None) or f"{type(error).__name__}: {error}"
+    collapsed = " ".join(str(detail).split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 3].rstrip() + "..."
+
+
+def configure_logging() -> None:
+    """Give Orbit's own loggers a console handler that keeps the real exception.
+
+    The Flask development server configures no logging, so ``log.exception``
+    previously fell through to logging's last-resort handler: that prints only
+    the bare message, without a timestamp, level, or logger name, and it drops
+    INFO lines such as "the Whisper model loaded and from where" entirely. A
+    failure whose cause is invisible on the console is the reason this exists.
+
+    ``ORBIT_LOG_LEVEL`` overrides the level (default INFO). The handler is
+    attached once, and only to ``orbit.*`` so third-party libraries keep their
+    own settings.
+    """
+    raw_level = os.environ.get("ORBIT_LOG_LEVEL", "").strip().upper() or "INFO"
+    level = getattr(logging, raw_level, None)
+    if not isinstance(level, int):
+        level = logging.INFO
+    logger = logging.getLogger("orbit")
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        )
+        logger.addHandler(handler)
+        # Orbit's lines are handled here; they must not also hit a root handler
+        # (Flask's debug reloader or a hosting wrapper may add one).
+        logger.propagate = False
+    logger.setLevel(level)
+
+
+def _voice_dependency_dict(service: Any) -> dict[str, Any]:
+    """The voice service's dependency state, when it can report it. Never raises."""
+    dependencies = getattr(service, "dependencies", None)
+    if not callable(dependencies):
+        return {}
+    try:
+        report = dependencies()
+    except Exception:
+        log.exception("could not collect voice dependency diagnostics")
+        return {}
+    as_dict = getattr(report, "as_dict", None)
+    if not callable(as_dict):
+        return {}
+    try:
+        return dict(as_dict())
+    except Exception:
+        log.exception("could not serialize voice dependency diagnostics")
+        return {}
 
 
 def _outcome_text(result: Any) -> str:
@@ -164,8 +230,14 @@ def create_app(
     app.config["STORE"] = store or Store()
     app.config["FACTS"] = facts if facts is not None else FactStore()
     app.config["HEARTBEAT"] = heartbeat
-    app.config["VOICE_SERVICE"] = voice_service if voice_service is not None else VoiceService()
-    app.config["MODEL_AUDIT"] = model_audit if model_audit is not None else AuditLog()
+    # The audit log is built first so the voice service can record a real model
+    # load in it: "did the model actually download and load?" should be
+    # answerable from audit.log, not only from a console line.
+    audit = model_audit if model_audit is not None else AuditLog()
+    app.config["MODEL_AUDIT"] = audit
+    app.config["VOICE_SERVICE"] = (
+        voice_service if voice_service is not None else VoiceService(audit_log=audit)
+    )
     # The queue of tool calls the home chat proposed. Without it, Chat mode is
     # plain text, as before. run_app builds it with the real tools.
     app.config["ACTIONS"] = actions
@@ -233,6 +305,29 @@ def create_app(
         except Exception:
             # Diagnostics must not turn a provider failure into a broken SSE stream.
             log.exception("could not write model diagnostics to audit.log")
+
+    def _record_voice_failure(event_name: str, error: BaseException, **fields: Any) -> None:
+        """Write the real cause of a voice failure to audit.log.
+
+        The browser is shown one short line, so without this the actual reason --
+        no model downloaded, no route to huggingface.co, no audio decoder -- would
+        exist only as a console traceback that scrolls away. Records the exception
+        type, message, cause chain and traceback, plus the voice dependencies;
+        never the audio, the transcript, or a credential.
+        """
+        audit: AuditLog | None = app.config["MODEL_AUDIT"]
+        if audit is None:
+            return
+        try:
+            audit.record_error(
+                event_name,
+                error,
+                diagnostics=_voice_dependency_dict(app.config["VOICE_SERVICE"]),
+                **fields,
+            )
+        except Exception:
+            # A failure to write diagnostics must not replace the failure itself.
+            log.exception("could not write voice diagnostics to audit.log")
 
     @app.get("/")
     def home() -> str:
@@ -341,16 +436,41 @@ def create_app(
         audio = upload.read()
         if not audio:
             return _json({"error": "the recording is empty"}, 400)
+        failure_fields = {
+            "endpoint": "/api/voice/transcribe",
+            "mime_type": mime_type,
+            "extension": extension,
+            "audio_bytes": len(audio),
+        }
         try:
             transcript = app.config["VOICE_SERVICE"].transcribe(audio, extension=extension)
-        except VoiceServiceUnavailable:
-            log.exception("voice transcription service unavailable")
-            return _json({"error": "Voice transcription is unavailable right now."}, 503)
+        except VoiceServiceUnavailable as exc:
+            # The service already logged the traceback next to the cause it found;
+            # this adds the request context, and the reason (missing model,
+            # unreachable Hub, missing decoder) also goes to the browser.
+            log.error("voice transcription unavailable: %s", _failure_reason(exc))
+            _record_voice_failure("voice_transcription_unavailable", exc, **failure_fields)
+            return _json(
+                {
+                    "error": "Voice transcription is unavailable right now.",
+                    "reason": _failure_reason(exc),
+                },
+                503,
+            )
         except ValueError as exc:
+            # The upload itself is unusable (empty, undecodable): the message already
+            # names the cause, so this is not an audit-worthy server failure.
             return _json({"error": str(exc)}, 400)
-        except Exception:
+        except Exception as exc:
             log.exception("voice transcription failed")
-            return _json({"error": "Could not transcribe that recording. Please try again."}, 500)
+            _record_voice_failure("voice_transcription_failed", exc, **failure_fields)
+            return _json(
+                {
+                    "error": "Could not transcribe that recording. Please try again.",
+                    "reason": _failure_reason(exc),
+                },
+                500,
+            )
         if not transcript:
             return _json({"error": "No speech was detected. Try speaking a little closer to the mic."}, 422)
         return _json({"transcript": transcript})
@@ -367,14 +487,38 @@ def create_app(
         try:
             chunks = iter(app.config["VOICE_SERVICE"].stream_speech(text))
             first_chunk = next(chunks)
-        except VoiceServiceUnavailable:
-            log.exception("voice synthesis service unavailable")
-            return _json({"error": "Spoken replies are unavailable right now."}, 503)
+        except VoiceServiceUnavailable as exc:
+            # Logged in full where the cause was found (see app/voice.py).
+            log.error("voice synthesis unavailable: %s", _failure_reason(exc))
+            _record_voice_failure(
+                "voice_synthesis_unavailable", exc, endpoint="/api/voice/speech"
+            )
+            return _json(
+                {
+                    "error": "Spoken replies are unavailable right now.",
+                    "reason": _failure_reason(exc),
+                },
+                503,
+            )
         except StopIteration:
+            _record_voice_failure(
+                "voice_synthesis_failed",
+                RuntimeError("the speech service produced no audio (StopIteration)"),
+                endpoint="/api/voice/speech",
+            )
             return _json({"error": "The speech service returned no audio."}, 502)
-        except Exception:
+        except Exception as exc:
             log.exception("voice synthesis failed before audio started")
-            return _json({"error": "Could not generate spoken audio. Please try again."}, 502)
+            _record_voice_failure(
+                "voice_synthesis_failed", exc, endpoint="/api/voice/speech"
+            )
+            return _json(
+                {
+                    "error": "Could not generate spoken audio. Please try again.",
+                    "reason": _failure_reason(exc),
+                },
+                502,
+            )
 
         @stream_with_context
         def audio_stream() -> Iterator[bytes]:
@@ -874,7 +1018,10 @@ def run_app(app: Flask) -> None:
 
     At boot this also attaches the heartbeat (unless the app already has one) and
     starts its scheduler as a daemon thread in this process. Debug mode is off, so
-    the reloader never runs a second copy of the thread.
+    the reloader never runs a second copy of the thread. Console logging is
+    configured here -- see ``configure_logging`` for why a bare ``log.exception``
+    was not enough -- and the voice dependencies are logged once, so a recording
+    that fails later can be read against what the machine actually had at boot.
     """
     host = os.environ.get("ORBIT_HOST", "").strip() or "127.0.0.1"
     raw_port = os.environ.get("PORT", "").strip() or "5000"
@@ -892,6 +1039,24 @@ def run_app(app: Flask) -> None:
     from tools import build_tool_registry
     from tools.confirmation import DeferredConfirmationGate
     from tools.registry import AuditLog
+
+    configure_logging()
+
+    voice_service = app.config.get("VOICE_SERVICE")
+    voice_report = _voice_dependency_dict(voice_service) if voice_service is not None else {}
+    if voice_report:
+        log.info(
+            "voice dependencies: faster-whisper=%s ctranslate2=%s pyav=%s "
+            "ffmpeg_program=%s ffmpeg_program_required=%s model=%s model_cached=%s source=%s",
+            voice_report.get("faster_whisper") or "MISSING",
+            voice_report.get("ctranslate2") or "MISSING",
+            voice_report.get("pyav") or "MISSING",
+            voice_report.get("ffmpeg_program") or "not installed",
+            voice_report.get("ffmpeg_program_required"),
+            voice_report.get("model"),
+            voice_report.get("model_cached"),
+            voice_report.get("model_source"),
+        )
 
     heartbeat = app.config.get("HEARTBEAT")
     if heartbeat is None:

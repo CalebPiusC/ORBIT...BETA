@@ -773,6 +773,17 @@
     node.classList.toggle("error", !!isError);
   }
 
+  // The server keeps `error` short and stable and puts the specific cause in
+  // `reason` (model not downloaded, huggingface.co unreachable, audio decoder
+  // missing). Show both: a voice failure should be diagnosable from the status
+  // line, not only from the server log.
+  function voiceFailureText(payload, fallback) {
+    var message = (payload && payload.error) || fallback;
+    var reason = payload && payload.reason;
+    if (!reason || reason === message) return message;
+    return message + " " + reason;
+  }
+
   function recordingExtension(mimeType) {
     var mime = (mimeType || "").toLowerCase();
     if (mime.indexOf("ogg") !== -1) return "ogg";
@@ -868,7 +879,7 @@
           fetch("/api/voice/transcribe", { method: "POST", body: form })
             .then(function (response) {
               return response.json().then(function (payload) {
-                if (!response.ok) throw new Error(payload.error || "Transcription failed.");
+                if (!response.ok) throw new Error(voiceFailureText(payload, "Transcription failed."));
                 return payload;
               });
             })
@@ -961,7 +972,7 @@
       .then(function (response) {
         if (!response.ok) {
           return response.json().then(function (payload) {
-            throw new Error(payload.error || "Speech synthesis failed.");
+            throw new Error(voiceFailureText(payload, "Speech synthesis failed."));
           });
         }
         return response;

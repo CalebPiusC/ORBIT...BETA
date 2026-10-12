@@ -332,6 +332,28 @@ brain.
   during transcription; it is removed in `finally`. The first call downloads the model
   to the standard Hugging Face cache. Settings: `ORBIT_WHISPER_MODEL`,
   `ORBIT_WHISPER_DEVICE`, `ORBIT_WHISPER_COMPUTE_TYPE`.
+- **Voice failures log their real cause, not just the fallback sentence.** The browser
+  only gets one line, so `VoiceServiceUnavailable` carries a short `reason` for the UI
+  *and* the chained original exception. `run_app` configures a console handler on
+  `orbit.*` (`ORBIT_LOG_LEVEL`, default INFO) — without it `log.exception` fell through
+  to logging's last-resort handler, which prints the bare message and drops INFO — and
+  the layer that finds the cause logs the traceback once, with a dependency report
+  (engine/decoder versions, bundled FFmpeg libraries, `ffmpeg` program present or not
+  and whether it is needed, model cache state). `AuditLog.record_error` writes the same
+  failure to `audit.log` as `voice_transcription_unavailable` /
+  `voice_transcription_failed` / `voice_synthesis_unavailable` / `voice_synthesis_failed`
+  with `error_type`, `error`, `error_chain` and `traceback`; a successful load is
+  `voice_model_loaded`. Client-side rejects (empty, undecodable) stay 400s and are not
+  audited as faults.
+- **ffmpeg is not a dependency for reading the browser's clips.** `faster-whisper` 1.x
+  decodes through PyAV, whose wheels bundle the FFmpeg libraries (checked on this
+  machine: a MediaRecorder-shaped WebM/Opus clip decoded with no `ffmpeg` program on
+  PATH, and the Silero VAD model ships inside the wheel so `vad_filter=True` works
+  offline). Only a missing/broken PyAV, or a codec the bundled libraries lack, is
+  reported as a decoder problem — and then the message names ffmpeg as the fix.
+  Confirmed 2026-10-12: `huggingface.co` is unreachable from the build sandbox and no
+  model cache exists, so `base` cannot load here; that is now visible at boot
+  (`model_cached=False`) and in `audit.log` instead of surfacing as a generic message.
 - **Voice replies are streamed.** A turn submitted by push-to-talk requests
   `/api/voice/speech`; Edge TTS streams MP3 using `en-US-GuyNeural` at `-15Hz`.
   The browser uses Media Source Extensions where MP3 streaming is supported and a Blob

@@ -192,6 +192,47 @@ afterward. Adjust `ORBIT_WHISPER_MODEL`, `ORBIT_WHISPER_DEVICE`, and
 microphone access requires HTTPS or localhost. Uploads are capped at 25 MiB and
 recordings stop after two minutes.
 
+**ffmpeg is not required.** `faster-whisper` 1.x decodes audio with PyAV, whose
+wheels bundle the FFmpeg libraries, so the WebM/Opus clips `MediaRecorder` produces
+are read directly — no ffmpeg binary, no conversion step. (The older openai/whisper
+subprocess path is the one that needs the program installed.) `pip install -r
+requirements.txt` is therefore enough for audio decoding; the error message names
+ffmpeg only when a decoder genuinely cannot be found.
+
+**The model itself does have to be fetched once.** Loading a named model resolves it
+to a Hugging Face repository (`Systran/faster-whisper-base` for `base`), so the first
+recording needs either network access to huggingface.co or a pre-populated cache. A
+host with neither fails with the reason spelled out, not with a generic message:
+`ORBIT_WHISPER_MODEL` can point at a model directory that is already on disk.
+
+### When voice fails, the cause is logged
+
+The browser status line can only hold one sentence, so the real reason is written
+where it can be acted on:
+
+* **Console** — `run_app` configures a console handler on the `orbit.*` loggers
+  (level via `ORBIT_LOG_LEVEL`, default `INFO`). A failed transcription logs the
+  dependency report (`faster-whisper`/`ctranslate2`/PyAV versions, bundled FFmpeg
+  libraries, whether the `ffmpeg` program exists and whether it is needed, and
+  whether the model is in the cache) next to the full traceback of the exception
+  that caused it. Without that handler, `log.exception` fell through to logging's
+  last-resort handler, which prints the bare message and drops INFO lines entirely.
+* **`audit.log`** — one JSON line per failure, written by `AuditLog.record_error`:
+  `voice_transcription_unavailable`, `voice_transcription_failed`,
+  `voice_synthesis_unavailable` or `voice_synthesis_failed`, each with
+  `error_type`, `error`, the `error_chain` (so `LocalEntryNotFoundError ←
+  ConnectError ← SSLZeroReturnError` survives) and the formatted `traceback`. A
+  successful model load is recorded once as `voice_model_loaded`.
+* **The response** — the stable one-line `error` is joined by a `reason` field with
+  the specific cause, which the browser shows beside it.
+
+Checked on this machine: `faster-whisper 1.2.1` + `PyAV 18.1.0` decode a
+MediaRecorder-shaped WebM/Opus clip with **no** system ffmpeg, and the bundled
+Silero VAD model means `vad_filter=True` also works offline. What did *not* work
+here is the model download — `huggingface.co` is unreachable from the build sandbox
+and no cache exists, which is exactly the failure now reported as
+`model_cached=False` at boot and `voice_transcription_unavailable` in `audit.log`.
+
 The **Quick / Deep** selector sits beside **Chat / Agent** and applies to the next
 streamed UI reply. Quick calls the configured primary Gemini model with a 512-token
 output cap. Deep uses a 4096-token cap and prefers `GEMINI_FALLBACK_MODEL`; if that

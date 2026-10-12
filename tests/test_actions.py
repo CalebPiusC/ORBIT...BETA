@@ -8,6 +8,7 @@ at a temp directory; nothing touches notes.txt, runtime/, or audit.log.
 from __future__ import annotations
 
 import json
+import logging
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -436,6 +437,22 @@ class BootWiringTests(Paths):
         from unittest import mock
 
         from app.server import run_app
+
+        # run_app configures a console handler on the "orbit" logger; hand the
+        # logger back untouched so later tests keep logging as they did before.
+        orbit_logger = logging.getLogger("orbit")
+        handlers, level, propagate = (
+            list(orbit_logger.handlers),
+            orbit_logger.level,
+            orbit_logger.propagate,
+        )
+
+        def restore() -> None:
+            orbit_logger.handlers[:] = handlers
+            orbit_logger.setLevel(level)
+            orbit_logger.propagate = propagate
+
+        self.addCleanup(restore)
 
         app = create_app(provider=ScriptedProvider([]), store=Store(), heartbeat=self.heartbeat())
         self.assertIsNone(app.config["ACTIONS"])

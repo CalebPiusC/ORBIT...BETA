@@ -568,6 +568,10 @@ class ChatBubbleLayoutTests(unittest.TestCase):
         self.assertIn("body.appendChild(audio)", script)  # timestamp stays beneath text and player
         self.assertIn('window.MediaSource.isTypeSupported("audio/mpeg")', script)
         self.assertIn("response.blob()", script)  # playback fallback when MSE is absent
+        # A voice failure shows the server's specific reason beside the stable line,
+        # not only the generic sentence.
+        self.assertIn("function voiceFailureText(payload, fallback)", script)
+        self.assertEqual(script.count('voiceFailureText(payload, "'), 2)  # transcribe + speech
 
 
 class ServerMessageTimeTests(unittest.TestCase):

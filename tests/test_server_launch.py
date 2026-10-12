@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 import unittest
 from unittest.mock import patch
 
 from app.server import run_app
+from app.voice import VoiceDependencyReport
 
 
 class FakeHeartbeat:
@@ -32,6 +34,19 @@ class ServerLaunchTests(unittest.TestCase):
         patcher = patch("heartbeat.start_scheduler")
         self.scheduler = patcher.start()
         self.addCleanup(patcher.stop)
+        self._preserve_orbit_logger()
+
+    def _preserve_orbit_logger(self) -> None:
+        """Hand the "orbit" logger back after each test: run_app configures it once."""
+        orbit = logging.getLogger("orbit")
+        handlers, level, propagate = list(orbit.handlers), orbit.level, orbit.propagate
+
+        def restore() -> None:
+            orbit.handlers[:] = handlers
+            orbit.setLevel(level)
+            orbit.propagate = propagate
+
+        self.addCleanup(restore)
 
     def test_run_app_starts_scheduler_for_the_attached_heartbeat(self) -> None:
         app = RecordingFlaskApp()
@@ -85,6 +100,48 @@ class ServerLaunchTests(unittest.TestCase):
                 run_app(app)  # type: ignore[arg-type]
 
         self.assertIsNone(app.run_options)
+
+    def test_run_app_reports_what_the_voice_dependencies_are_at_boot(self) -> None:
+        class FakeVoiceService:
+            def dependencies(self):
+                return VoiceDependencyReport(
+                    model="base",
+                    device="cpu",
+                    compute_type="int8",
+                    pyav="18.1.0",
+                    ffmpeg_libraries={"libavcodec": "62.28.102"},
+                    ffmpeg_program=None,
+                    model_cached=False,
+                    cache_dir="/tmp/hf-cache",
+                )
+
+        app = RecordingFlaskApp()
+        app.config["VOICE_SERVICE"] = FakeVoiceService()
+        with patch.dict(os.environ, {"ORBIT_HOST": "", "PORT": ""}):
+            with self.assertLogs("orbit.server", level="INFO") as captured:
+                run_app(app)  # type: ignore[arg-type]
+
+        [record] = [r for r in captured.records if "voice dependencies" in r.getMessage()]
+        logged = record.getMessage()
+        self.assertIn("pyav=18.1.0", logged)
+        self.assertIn("ffmpeg_program=not installed", logged)
+        self.assertIn("ffmpeg_program_required=False", logged)
+        self.assertIn("model_cached=False", logged)
+
+    def test_run_app_survives_a_voice_service_that_cannot_report(self) -> None:
+        class OpaqueVoiceService:
+            def dependencies(self):
+                raise RuntimeError("no diagnostics here")
+
+        app = RecordingFlaskApp()
+        app.config["VOICE_SERVICE"] = OpaqueVoiceService()
+        with patch.dict(os.environ, {"ORBIT_HOST": "", "PORT": ""}):
+            with self.assertLogs("orbit.server", level="ERROR") as captured:
+                run_app(app)  # type: ignore[arg-type]
+
+        self.assertTrue(
+            any("voice dependency diagnostics" in r.getMessage() for r in captured.records)
+        )
 
     def test_demo_launcher_uses_shared_safe_runner(self) -> None:
         import run_demo
