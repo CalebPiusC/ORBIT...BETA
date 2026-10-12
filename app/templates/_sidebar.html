@@ -1,0 +1,52 @@
+{# The sidebar, shared by every screen so it collapses identically on all of them.
+
+   Collapsed state is icons-only: each control keeps its tooltip and accessible
+   name, and the conversation list becomes a scrollable column of compact icon
+   buttons. app.js writes the choice to localStorage; the inline script in
+   layout.html's <head> applies it before first paint. #}
+<div class="sidebar" id="sidebar">
+  <div class="sidebar-head">
+    <div class="sidebar-brand"><img class="brand-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" /><span class="brand-word">ORBIT</span></div>
+    <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-pressed="false"
+            aria-label="Collapse sidebar" title="Collapse sidebar"><span aria-hidden="true">«</span></button>
+  </div>
+  <button type="button" class="new-convo" id="newConvo" title="New conversation"><span class="new-convo-plus" aria-hidden="true">+</span><span class="sidebar-label">New conversation</span></button>
+  <label class="sidebar-search" for="conversationSearch" title="Search chats"><span aria-hidden="true">⌕</span><input type="search" id="conversationSearch" placeholder="Search chats" autocomplete="off" aria-label="Search chats" /></label>
+
+  <div class="sidebar-scroll">
+    {% for group, items in conversations.items() %}
+    <div class="history-group">
+      <h4>{{ group }}</h4>
+      {% for conv in items %}
+      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}" data-conv-id="{{ conv.id }}" title="{{ conv.title }}"><span class="history-icon" aria-hidden="true">{{ conv.title[:1]|upper }}</span><span class="sidebar-label">{{ conv.title }}</span></div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="sidebar-nav">
+    <a class="sidebar-nav-item{% if analytics_active %} active{% endif %}" id="analyticsLink" href="/analytics" title="Analytics"><span class="sidebar-nav-icon" aria-hidden="true">◔</span><span class="sidebar-label">Analytics</span></a>
+  </div>
+
+  <div class="sidebar-foot">
+    {% if heartbeat %}
+    <div class="reminders-row">
+      <div class="names sidebar-label">
+        <div class="name">Reminders</div>
+        <div class="sub" id="remindersState" title="Quiet hours 22:00–08:00 (Lagos). Plan check at {{ '%02d' | format(heartbeat.plan_hour) }}:00.">{% if heartbeat.paused %}Paused{% else %}On · quiet 22:00–08:00{% endif %}</div>
+      </div>
+      <button type="button" class="reminders-toggle" id="remindersToggle" role="switch"
+              aria-label="Reminders" title="Reminders" aria-checked="{{ 'false' if heartbeat.paused else 'true' }}"><span class="knob"></span></button>
+    </div>
+    {% endif %}
+    <div class="connected-apps-row" title="Connected apps · {{ connected_count }} active"><span class="dot"></span><span class="label-text">Connected apps · {{ connected_count }} active</span></div>
+    <div class="user-row">
+      <div class="user-avatar">{{ user.name[:2]|upper }}</div>
+      <div class="names">
+        <div class="name">{{ user.name }}</div>
+        <div class="sub">{{ user.workspace }}</div>
+      </div>
+      <button type="button" class="utility-settings" data-open-settings aria-label="Account and settings" title="Account and settings">⚙</button>
+    </div>
+  </div>
+</div>

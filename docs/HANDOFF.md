@@ -185,6 +185,14 @@ a live key in this checkout. Say so in any status report instead of implying oth
   preview host is blocked — so a "web box does nothing" report should be triaged by
   checking whether the `POST /api/chat` line ever appears in the server log. No log line
   means browser or proxy; a log line with no visible reply means streaming/buffering.
+- **Reply actions (copy/regenerate/ratings), the collapsed sidebar, and Analytics are
+  offline-verified.** `tests/test_message_actions.py` drives the real `app.js` in jsdom
+  (toggle persists, ratings POST once, a mid-conversation regenerate re-sends the same
+  turn with the id) and the Flask routes with a scripted provider. What is *not* proven:
+  that a live model returns a genuinely different answer to the regenerate prompt (the
+  instruction is sent, the difference is the model's to make), and that a long-lived
+  `audit.log` stays parseable — the reader is tested against synthetic logs, including
+  torn and unparseable lines, not against months of real ones.
 - **Voice is offline-tested with fakes, not live end-to-end.** The browser microphone,
   real Whisper model download/transcription, Edge TTS network stream, and audio playback
   have not been exercised in a real browser. Tests cover the service adapters and Flask
@@ -207,6 +215,11 @@ a live key in this checkout. Say so in any status report instead of implying oth
   and swap what is behind them. The task's *steps, files and activity* are no longer
   seeded at all — they come from `Task.run`, which is `None` until the task runs
   (§5.4.4). Do not add seed data back to make the panel look busier.
+- **Ratings are a private local signal, not a feedback system.** `message_rated` goes to
+  `audit.log` and nowhere else — no form, no category, no aggregation across people, and
+  nothing that reads it except `/analytics`. Do not grow it into a feedback board; if a
+  future build wants reasons or comments, that is a different feature with its own
+  consent story, not this one.
 - **`user_id` is seeded, not threaded.** `DEFAULT_USER_ID` comes from the environment and
   every record carries it, so the column exists before the second user does. Do not build
   auth, login, or multi-tenancy now — just keep writing queries through the
@@ -471,3 +484,69 @@ and three invented activity lines. All of it is gone, and `Store.Task` no longer
   raises without an explicit approval and `POST /api/task/<id>/apply` answers 403, both
   pinned by `ApprovalGateTests`. **If a future build proposes real changes, the control
   and the panel section must arrive together, through `PendingActions`.**
+
+### 5.5 Reply actions, a collapsed sidebar, and Analytics read from audit.log
+
+**Rule for this phase:** a control that cannot act honestly does not ship, and a view may
+only show what something already recorded. Nothing here added new tracking — Analytics
+reads the existing `audit.log`, and the one new record (`message_rated`) is the ratings
+themselves.
+
+**Files:** `app/analytics.py` (new); `app/store.py`, `app/server.py`,
+`app/static/app.js`, `app/templates/{layout,home,task}.html`,
+`app/templates/{_sidebar,analytics}.html` (new); tests in `tests/test_message_actions.py`.
+
+#### 5.5.1 Message ids, and reply actions on every Orbit reply
+
+- `ChatMessage.id` (`m-<10 hex>`) is assigned once, on append (`Store.append_message`,
+  `Store.add_chat`). `Store.find_message(id)` locates a message across every conversation
+  and task chat; `Store.replace_message(owner_id, id, body)` rewrites the body in place,
+  keeping position and id. The id reaches the client as the `message` SSE event
+  immediately before `done`, and the template also renders it, so a rating survives a
+  reload.
+- The four controls (copy · regenerate · thumbs up · thumbs down) sit under **every** Orbit
+  reply and never under a user message. `.message-actions` is always visible at
+  `opacity: 0.55` (full on hover/focus), which replaces the old hover-only rule: a phone
+  cannot hover, so hover-only meant "unavailable on mobile".
+- **Regenerate is per message, not per conversation.** `POST /api/chat` accepts an optional
+  `message_id` naming any Orbit reply; that reply is rewritten in place, the turns after it
+  are left alone, and the model is told (`REGENERATE_INSTRUCTION`) to answer the same
+  question genuinely differently. Without `message_id` the old newest-reply behaviour
+  remains. `POST /api/task/<id>/stream` has the same `message_id` branch, and both answer
+  409 when the named message is not an Orbit reply or has no user turn behind it.
+- **A rating is one line, not a form.** `POST /api/messages/<id>/rating` with
+  `{"rating": "up"|"down"}` writes `message_rated` (message id, rating, surface, owner id,
+  reply length — never the text) and answers 400 for anything else, 404 for an id that is
+  not a stored message. The client logs a fresh press only: un-pressing the active rating is
+  a local change of mind, and switching logs the new rating.
+
+#### 5.5.2 The sidebar collapses
+
+- `«`/`»` in the sidebar head toggles `.sidebar--collapsed`: a 58px rail that keeps the
+  brand mark, new conversation, search, history (icon rows, scrollable), Analytics,
+  reminders, connected apps and settings clickable, each with a `title` naming it. The
+  toggle carries `aria-pressed` and swaps its own label between "Collapse sidebar" and
+  "Expand sidebar".
+- The choice lives in `localStorage` under `orbit.sidebar.collapsed` and is applied **before
+  the first paint** (a small inline script in `layout.html` marks the root, `app.js` swaps
+  it for the real class), so a collapsed sidebar never flashes open. A blocked
+  `localStorage` (private mode) leaves the sidebar expanded and the toggle working.
+- The three screens share one sidebar include (`app/templates/_sidebar.html`). Its route
+  (`/analytics`) has no heartbeat view, so the reminders row renders empty there rather than
+  showing an invented state.
+
+#### 5.5.3 Analytics
+
+- `app/analytics.build_analytics(path, *, now=None, window_days=7)` returns a report from
+  the JSON lines in `audit.log`: `messages_per_day` (today first, `bar_percent` relative to
+  the busiest day), `models` (model id + persona name + count), `heartbeat_fired`,
+  `heartbeat_dismissed`, `checkins`, `ratings_up`, `ratings_down`, a one-line `summary`, and
+  `notes`. Torn and unparseable lines are skipped; naive timestamps are read as UTC.
+- Counted events: `chat_message_received` (now written by both chat paths, home and task),
+  `model_answered`, `message_rated`, `heartbeat_notice_fired`,
+  `heartbeat_notice_dismissed`, `heartbeat_checkin_recorded`. Persona names come from
+  `providers.personas.model_persona_map()`, which reads the configured model ids at call
+  time; an unconfigured model keeps its own id as the label.
+- The view (`GET /analytics`) is neutral by construction: counts, days and shares, with no
+  streak, comparison, target or "you should" wording. A missing log is reported as having
+  nothing to count, not as a failure.

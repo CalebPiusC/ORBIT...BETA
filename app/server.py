@@ -4,6 +4,7 @@ Two screens from the mockup become real routes:
 
   * ``/``                       — the chat-first home
   * ``/task/<task_id>``         — the coding-agent task view
+  * ``/analytics``              — counts read back out of audit.log
 
 The mockup's two screens were switched by a dev-only toggle; that toggle is
 removed here. Navigation between the two is driven by real state (the Chat/Agent
@@ -33,6 +34,7 @@ from providers.base import ChatMessage as ProvChatMessage, StreamChunk, ToolProp
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from app.actions import PendingActions, ProposalRejected
+from app.analytics import RATING_LABELS, build_analytics
 from app.followups import followups_for
 from app.starters import WELCOME_STARTERS
 from app.store import PLACEHOLDER_TITLE, ActionCard, Activity, Store, now_label
@@ -52,7 +54,7 @@ from app.voice import VoiceService, VoiceServiceUnavailable
 from app.titles import request_title
 from memory.facts import FactStore
 from memory.time_context import with_current_time
-from tools.registry import AuditLog
+from tools.registry import DEFAULT_AUDIT_LOG_PATH, AuditLog
 
 log = logging.getLogger("orbit.server")
 
@@ -76,6 +78,16 @@ _AUDIO_SUFFIX_BY_MIME = {
 HOME_SYSTEM_PROMPT = (
     "You are ORBIT, a helpful assistant. Reply clearly and concisely. "
     "Keep answers focused and useful."
+)
+
+# Added to the system prompt for one turn when someone regenerates a reply. The
+# model already samples non-deterministically, but a second identical answer is
+# what regeneration looks like when it has failed, so the request is explicit:
+# answer the same turn differently rather than restating the same sentence.
+REGENERATE_INSTRUCTION = (
+    "The person asked for a fresh answer to the same message. Answer it again, "
+    "genuinely differently: a different opening, structure or angle. Do not "
+    "repeat your previous reply's wording."
 )
 
 # Added to the home prompt only when tools are on (Chat mode with a registry).
@@ -305,6 +317,22 @@ def create_app(
         except Exception:
             # Diagnostics must not turn a provider failure into a broken SSE stream.
             log.exception("could not write model diagnostics to audit.log")
+
+    def _record_event(event_name: str, **fields: Any) -> None:
+        """Append one non-model event to audit.log: a message, a rating, a check-in.
+
+        The Analytics view reads back exactly these lines, so a rating or a sent
+        message is recorded here rather than in a second store. Fields are ids,
+        counts and labels -- never message text.
+        """
+        audit: AuditLog | None = app.config["MODEL_AUDIT"]
+        if audit is None:
+            return
+        try:
+            audit.record_event(event_name, **fields)
+        except Exception:
+            # Diagnostics must never break the request that produced them.
+            log.exception("could not write %s to audit.log", event_name)
 
     def _record_voice_failure(event_name: str, error: BaseException, **fields: Any) -> None:
         """Write the real cause of a voice failure to audit.log.
@@ -553,26 +581,60 @@ def create_app(
 
         created = None
         sent_at = now_label()
+        # Which stored reply this turn rewrites, when regenerating. The by-id
+        # path rewrites the message in place; the legacy newest-reply path pops
+        # it and lets the new answer take its place.
+        in_place_message: Any | None = None
         if regenerate:
             conv_id = st.active_conversation_id
             thread = st.threads.get(conv_id or "", [])
-            if conv_id is None or not thread or not thread[-1].is_orbit or thread[-1].action is not None:
-                return Response(
-                    json.dumps({"error": "there is no completed response to regenerate"}),
-                    status=409,
-                    mimetype="application/json",
+            requested_id = payload.get("message_id")
+            requested_id = requested_id.strip() if isinstance(requested_id, str) else ""
+            if requested_id:
+                # Per-message regenerate: the row asked for it by id, so it can be
+                # any Orbit reply in the conversation, not only the newest one.
+                index = next(
+                    (i for i, item in enumerate(thread) if item.id == requested_id), None
                 )
-            previous_user = next((item for item in reversed(thread[:-1]) if not item.is_orbit), None)
-            if previous_user is None:
-                return Response(
-                    json.dumps({"error": "the last response has no user message to retry"}),
-                    status=409,
-                    mimetype="application/json",
+                if index is None or not thread[index].is_orbit or thread[index].action is not None:
+                    return Response(
+                        json.dumps({"error": "no reply with that id to regenerate"}),
+                        status=409,
+                        mimetype="application/json",
+                    )
+                previous_user = next(
+                    (item for item in reversed(thread[:index]) if not item.is_orbit), None
                 )
-            # Replace only the latest Orbit reply. The original user message
-            # remains in history and no duplicate turn/check-in is created.
-            thread.pop()
-            message = previous_user.body
+                if previous_user is None:
+                    return Response(
+                        json.dumps({"error": "that reply has no user message to retry"}),
+                        status=409,
+                        mimetype="application/json",
+                    )
+                # The reply stays where it is and is rewritten in place. Later
+                # turns are left alone: replacing one answer is not licence to
+                # delete the conversation that followed it.
+                in_place_message = thread[index]
+                message = previous_user.body
+            else:
+                if conv_id is None or not thread or not thread[-1].is_orbit or thread[-1].action is not None:
+                    return Response(
+                        json.dumps({"error": "there is no completed response to regenerate"}),
+                        status=409,
+                        mimetype="application/json",
+                    )
+                previous_user = next((item for item in reversed(thread[:-1]) if not item.is_orbit), None)
+                if previous_user is None:
+                    return Response(
+                        json.dumps({"error": "the last response has no user message to retry"}),
+                        status=409,
+                        mimetype="application/json",
+                    )
+                # Replace only the latest Orbit reply. The original user message
+                # remains in history and no duplicate turn/check-in is created.
+                # It is removed here and the new one takes its place.
+                thread.pop()
+                message = previous_user.body
         else:
             if not message:
                 return Response(json.dumps({"error": "message is required"}), status=400, mimetype="application/json")
@@ -590,6 +652,15 @@ def create_app(
 
         assert conv_id is not None
         if not regenerate:
+            # One audit line per accepted message. The Analytics view counts
+            # these for "messages per day"; the text itself is never recorded.
+            _record_event(
+                "chat_message_received",
+                conversation_id=conv_id,
+                surface="home",
+                message_id=st.threads[conv_id][-1].id if st.threads.get(conv_id) else None,
+                chars=len(message),
+            )
             # Heartbeat's check-in: a user message counts, a retry does not.
             hb = _heartbeat_or_none()
             if hb is not None:
@@ -597,7 +668,17 @@ def create_app(
                     hb.record_checkin()
                 except RuntimeError:
                     log.exception("could not record check-in; the chat message was still saved")
-        history = _history_from_thread(st.threads[conv_id])
+        # Regenerating a reply the person is looking at, rather than the newest
+        # one, rebuilds the same history that produced it: the turns up to and
+        # including that reply's user message. Later turns are not sent, so the
+        # new answer is not influenced by what followed it on screen.
+        if in_place_message is not None:
+            regenerated_index = next(
+                i for i, item in enumerate(st.threads[conv_id]) if item is in_place_message
+            )
+            history = _history_from_thread(st.threads[conv_id][:regenerated_index])
+        else:
+            history = _history_from_thread(st.threads[conv_id])
 
         # Tools are offered in Chat mode only, and only when a queue is attached.
         queue: PendingActions | None = app.config["ACTIONS"]
@@ -605,6 +686,8 @@ def create_app(
         thinking_level = st.thinking_level
         home_prompt = HOME_SYSTEM_PROMPT + (f" {TOOL_GUIDANCE}" if use_tools else "")
         # Read the facts now, once per turn, so an edit lands on the next reply.
+        if regenerate:
+            home_prompt = f"{home_prompt} {REGENERATE_INSTRUCTION}"
         system_prompt = with_current_time(app.config["FACTS"].system_prompt(home_prompt))
         cards: list[ActionCard] = []
 
@@ -636,17 +719,28 @@ def create_app(
             cards.append(card)
             return "action", json.dumps({"id": card.id, "summary": card.summary, "state": card.state})
 
-        def on_done(answer: str) -> None:
+        def on_done(answer: str) -> str | None:
+            """Store the reply (in place when regenerating) and return its id."""
+            stored_id: str | None = None
             if answer.strip():
-                st.append_message(
-                    conv_id, StoreChatMessage(who="Orbit", time=sent_at, body=answer, is_orbit=True)
-                )
+                if in_place_message is not None:
+                    # Rewritten where it stands, so the screen and the store agree
+                    # and the reply keeps its position in the conversation.
+                    st.replace_message(conv_id, in_place_message.id, answer)
+                    stored_id = in_place_message.id
+                else:
+                    stored = StoreChatMessage(
+                        who="Orbit", time=sent_at, body=answer, is_orbit=True
+                    )
+                    st.append_message(conv_id, stored)
+                    stored_id = stored.id
             # Cards follow the answer they came with, in the order they were proposed.
             for card in cards:
                 st.append_message(
                     conv_id,
                     StoreChatMessage(who="Orbit", time=sent_at, body=card.summary, is_orbit=True, action=card),
                 )
+            return stored_id
 
         def after_done(answer: str) -> list[tuple[str, str]] | None:
             """Name the conversation, then offer follow-ups this reply supports.
@@ -738,6 +832,58 @@ def create_app(
         st.resolve_action(action_id, state, text)
         return _json({"state": state, "result": text})
 
+    @app.post("/api/messages/<message_id>/rating")
+    def api_message_rating(message_id: str) -> Response:
+        """Record one thumbs up/down against one message. No form, no follow-up.
+
+        One binary line in audit.log per accepted click: message id, rating and
+        the log's own timestamp. The client does not re-send the rating that is
+        already showing, so switching from up to down leaves one line for each.
+        """
+        st: Store = app.config["STORE"]
+        payload = request.get_json(silent=True) or {}
+        rating = payload.get("rating")
+        if rating not in RATING_LABELS:
+            return _json({"error": "rating must be 'up' or 'down'"}, 400)
+        found = st.find_message(message_id)
+        if found is None:
+            return _json({"error": "no message with that id"}, 404)
+        owner_id, message = found
+        _record_event(
+            "message_rated",
+            message_id=message_id,
+            rating=rating,
+            # Which surface and which conversation/task it belongs to, so a rating
+            # can be traced back to the exchange it is about.
+            surface="task" if st.get_task(owner_id) is not None else "home",
+            owner_id=owner_id,
+            reply_chars=len(message.body or ""),
+        )
+        return _json({"message_id": message_id, "rating": rating})
+
+    @app.get("/analytics")
+    def analytics() -> str:
+        """The Analytics view: audit.log read back, nothing tracked separately."""
+        st: Store = app.config["STORE"]
+        audit: AuditLog | None = app.config["MODEL_AUDIT"]
+        # The same file the rest of the app logs to, so the view cannot drift
+        # onto a different path from the records it counts.
+        log_path = audit.path if audit is not None else DEFAULT_AUDIT_LOG_PATH
+        report = build_analytics(log_path)
+        return render_template(
+            "analytics.html",
+            report=report,
+            user=st.user,
+            mode=st.mode,
+            thinking_level=st.thinking_level,
+            conversations=st.conversations_grouped(),
+            active_conversation_id=st.active_conversation_id,
+            active_conversation_title=PLACEHOLDER_TITLE,
+            connections=st.connections,
+            connected_count=st.connected_count(),
+            heartbeat=_heartbeat_view(),
+        )
+
     @app.post("/api/task/<task_id>/stream")
     def api_task_stream(task_id: str) -> Response:
         st: Store = app.config["STORE"]
@@ -755,28 +901,59 @@ def create_app(
 
         extra_user: str | None = None
         sent_at = now_label()  # message start time, shown under both bubbles
+        in_place_message: Any | None = None
+        # Where the retry's history stops, when the reply is not the newest one.
+        history_end: int | None = None
         if regenerate:
-            if initial or not task_obj.chat or not task_obj.chat[-1].is_orbit:
-                return Response(
-                    json.dumps({"error": "there is no completed task response to regenerate"}),
-                    status=409,
-                    mimetype="application/json",
+            requested_id = payload.get("message_id")
+            requested_id = requested_id.strip() if isinstance(requested_id, str) else ""
+            if requested_id:
+                # Per-message regenerate in the task chat: the reply named by the
+                # row is rewritten where it stands, and the turns before it are
+                # the history this retry is built from.
+                index = next(
+                    (i for i, item in enumerate(task_obj.chat) if item.id == requested_id), None
                 )
-            if task_obj.last_turn_initial:
-                extra_user = task_obj.last_turn_prompt
-                if not extra_user:
+                if index is None or not task_obj.chat[index].is_orbit:
                     return Response(
-                        json.dumps({"error": "the opening prompt is unavailable"}),
+                        json.dumps({"error": "no task reply with that id to regenerate"}),
                         status=409,
                         mimetype="application/json",
                     )
-            elif len(task_obj.chat) < 2 or task_obj.chat[-2].is_orbit:
-                return Response(
-                    json.dumps({"error": "the last task response has no user message to retry"}),
-                    status=409,
-                    mimetype="application/json",
-                )
-            task_obj.chat.pop()
+                in_place_message = task_obj.chat[index]
+                history_end = index
+                if index == 0 and task_obj.last_turn_initial:
+                    # The opening turn was sent as a prompt, never stored as a
+                    # message, so it has to come back as an extra user turn.
+                    extra_user = task_obj.last_turn_prompt
+                if not extra_user and (index == 0 or task_obj.chat[index - 1].is_orbit):
+                    return Response(
+                        json.dumps({"error": "that task reply has no user message to retry"}),
+                        status=409,
+                        mimetype="application/json",
+                    )
+            else:
+                if initial or not task_obj.chat or not task_obj.chat[-1].is_orbit:
+                    return Response(
+                        json.dumps({"error": "there is no completed task response to regenerate"}),
+                        status=409,
+                        mimetype="application/json",
+                    )
+                if task_obj.last_turn_initial:
+                    extra_user = task_obj.last_turn_prompt
+                    if not extra_user:
+                        return Response(
+                            json.dumps({"error": "the opening prompt is unavailable"}),
+                            status=409,
+                            mimetype="application/json",
+                        )
+                elif len(task_obj.chat) < 2 or task_obj.chat[-2].is_orbit:
+                    return Response(
+                        json.dumps({"error": "the last task response has no user message to retry"}),
+                        status=409,
+                        mimetype="application/json",
+                    )
+                task_obj.chat.pop()
         elif initial:
             extra_user = (
                 f"Start the task: {task_obj.title}. {task_obj.description} "
@@ -789,14 +966,25 @@ def create_app(
                 return Response(json.dumps({"error": "message is required"}), status=400, mimetype="application/json")
             task_obj.last_turn_prompt = message
             task_obj.last_turn_initial = False
-            st.add_chat(
-                task_id,
-                StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False),
+            stored_user = StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False)
+            st.add_chat(task_id, stored_user)
+            _record_event(
+                "chat_message_received",
+                conversation_id=task_id,
+                surface="task",
+                message_id=stored_user.id,
+                chars=len(message),
             )
 
-        history = _history_from_thread(task_obj.chat, extra_user=extra_user)
+        history = _history_from_thread(
+            task_obj.chat if history_end is None else task_obj.chat[:history_end],
+            extra_user=extra_user,
+        )
 
-        system_prompt = with_current_time(app.config["FACTS"].system_prompt(TASK_SYSTEM_PROMPT))
+        task_prompt = TASK_SYSTEM_PROMPT
+        if regenerate:
+            task_prompt = f"{task_prompt} {REGENERATE_INSTRUCTION}"
+        system_prompt = with_current_time(app.config["FACTS"].system_prompt(task_prompt))
         # Agent mode names the model being asked ("Asking Titan…"); Chat mode stays unlabeled.
         label_models = st.mode == "agent"
         thinking_level = st.thinking_level
@@ -818,12 +1006,16 @@ def create_app(
                 thinking_level=thinking_level,
             )
 
-        def on_done(answer: str) -> None:
-            if answer.strip():
-                st.add_chat(
-                    task_id,
-                    StoreChatMessage(who="Orbit", time=sent_at, body=answer, is_orbit=True),
-                )
+        def on_done(answer: str) -> str | None:
+            """Store the reply (in place when regenerating) and return its id."""
+            if not answer.strip():
+                return None
+            if in_place_message is not None:
+                st.replace_message(task_id, in_place_message.id, answer)
+                return in_place_message.id
+            stored = StoreChatMessage(who="Orbit", time=sent_at, body=answer, is_orbit=True)
+            st.add_chat(task_id, stored)
+            return stored.id
 
         def on_chunk(chunk: StreamChunk) -> list[tuple[str, str]]:
             """Fold one streamed chunk into the panel, and say so only on change.
@@ -909,7 +1101,7 @@ def create_app(
 
     def _sse_response(
         chunk_source: Callable[[], Iterator[StreamChunk | ToolProposal]],
-        on_done: Callable[[str], None],
+        on_done: Callable[[str], str | None],
         *,
         start_event: tuple[str, str] | None = None,
         after_done: Callable[[str], list[tuple[str, str]] | None] | None = None,
@@ -989,7 +1181,12 @@ def create_app(
                     yield _sse(event_name, payload)
             # Store the answer and any cards before "done", so a client that has
             # seen "done" can always find its cards in the store (approve works).
-            on_done(answer)
+            stored_id = on_done(answer)
+            if stored_id:
+                # The stored reply's id, so the row the client built can carry the
+                # id its actions are recorded against -- including after a
+                # regeneration, which rewrites that same message.
+                yield _sse("message", json.dumps({"id": stored_id}))
             yield _sse("done", "")
             if after_done is not None:
                 # Sent after "done", so the reply is never held up by naming.

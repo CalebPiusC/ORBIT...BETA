@@ -81,6 +81,11 @@ class ChatMessage:
     body: str
     is_orbit: bool
     action: ActionCard | None = None
+    # Stable id assigned by the store when the message is appended. It is what
+    # the row's actions carry: a rating is logged against it, and regenerating a
+    # reply names the message to replace. Seeded history has none, so the id is
+    # empty until the store assigns one.
+    id: str = ""
 
 
 @dataclass
@@ -234,6 +239,38 @@ class Store:
 
     def append_message(self, conv_id: str, message: ChatMessage) -> None:
         self.threads.setdefault(conv_id, []).append(message)
+        self._assign_id(message)
+
+    @staticmethod
+    def _assign_id(message: ChatMessage) -> ChatMessage:
+        """Give a message the id its row actions use, once."""
+        if not message.id:
+            message.id = f"m-{uuid.uuid4().hex[:10]}"
+        return message
+
+    def find_message(self, message_id: str) -> tuple[str, ChatMessage] | None:
+        """Locate a message by id across every conversation and task chat."""
+        if not message_id:
+            return None
+        for threads in (self.threads, {t.id: t.chat for t in self.tasks.values()}):
+            for owner_id, messages in threads.items():
+                for message in messages:
+                    if message.id == message_id:
+                        return owner_id, message
+        return None
+
+    def replace_message(self, owner_id: str, message_id: str, body: str) -> bool:
+        """Rewrite one stored message's text in place, keeping its position and id.
+
+        Used when a reply is regenerated: the store must show what the screen
+        shows, without reordering the conversation around it.
+        """
+        for messages in (self.threads.get(owner_id), getattr(self.tasks.get(owner_id), "chat", None)):
+            for message in messages or []:
+                if message.id == message_id:
+                    message.body = body
+                    return True
+        return False
 
     def resolve_action(self, action_id: str, state: str, result: str) -> bool:
         """Record the final state of a proposed action on its card. Only a pending card changes."""
@@ -308,6 +345,7 @@ class Store:
         task = self.tasks.get(task_id)
         if task is not None:
             task.chat.append(message)
+            self._assign_id(message)
 
     def approve_task(self, task_id: str) -> bool:
         """Explicitly approve a task's proposed changes.

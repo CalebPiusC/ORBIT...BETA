@@ -295,11 +295,54 @@ presence without text, and safety-block metadata. No prompt, reply, or function-
 arguments are written. The user-visible `model_returned_nothing` fallback and provider
 stream failures are also audited for future diagnosis.
 
-Orbit replies have compact copy, regenerate, and feedback controls. Regenerate applies to
-the latest completed response; Send becomes Stop while a stream is active. The composer
-includes an attachment picker and GitHub shortcut. File selections are shown locally but
-are not uploaded to the model yet; the GitHub shortcut opens GitHub rather than selecting a
-repository. The settings/account controls open a summary of the current local workspace.
+Orbit replies have compact copy, regenerate, and rating controls. Send becomes Stop while a
+stream is active. The composer includes an attachment picker and GitHub shortcut. File
+selections are shown locally but are not uploaded to the model yet; the GitHub shortcut
+opens GitHub rather than selecting a repository. The settings/account controls open a
+summary of the current local workspace.
+
+### Reply actions
+
+Every Orbit reply carries four small controls, always visible (not hover-only, so they work
+on a phone): **copy**, **regenerate**, **thumb up**, **thumb down**. User messages never
+have them.
+
+- **Copy** puts that reply's text on the clipboard.
+- **Regenerate** works on any Orbit reply, not only the newest one. It re-asks the same
+  preceding user turn, rewrites that reply **in place** — same position, same id, later
+  turns untouched, no duplicate message — and appends a line to the system prompt asking
+  for a genuinely different answer rather than a paraphrase of the last one.
+- **Thumbs up/down** are one binary line in `audit.log` per press (`message_rated`, with
+  message id, rating, surface and timestamp — never the reply text). Pressing the rating
+  already showing is a change of mind and is not logged; switching logs the new one.
+  There is no form, no reason picker and no board: it is a private signal.
+
+Stored messages carry the id these actions name (`m-…`), assigned on append and sent to the
+client over the stream as the `message` event just before `done`; the row keeps it, so a
+rating survives a reload. A reply that somehow has no id says so instead of showing a
+button that does nothing.
+
+### Sidebar and Analytics
+
+The sidebar collapses to an icons-only rail (`«` / `»` beside the brand mark): the brand
+mark, new conversation, search, a scrollable history of icon rows, Analytics, reminders,
+connected apps and settings all stay clickable, each with a tooltip naming it. The choice
+is remembered in `localStorage` (`orbit.sidebar.collapsed`) and applied before the first
+paint, so a collapsed sidebar never flashes open on load.
+
+**Analytics** (`GET /analytics`, the `◔` sidebar entry) is read from `audit.log` and
+nothing else — no new tracking was added for it (`app/analytics.py`):
+
+- messages sent per day over the last seven days, today first, with bars relative to the
+  busiest day in the window;
+- which model answered, in persona names (Titan, Europa, Io) resolved from configuration,
+  falling back to the raw model id for anything unconfigured;
+- heartbeat notices fired and dismissed, and check-ins logged;
+- thumbs up / thumbs down counts.
+
+The framing is descriptive only — "12 messages today; 48 in the last 7 days, mostly
+Titan." No streaks, no comparisons, no targets, and no per-day judgement. A missing
+`audit.log` reads as "No messages in the last seven days." rather than an error.
 
 ## Home screen: welcome, live status, follow-ups
 

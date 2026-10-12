@@ -494,9 +494,11 @@ class ChatBubbleLayoutTests(unittest.TestCase):
     def test_each_message_is_its_own_row_with_a_time_line(self) -> None:
         body = self.client.get("/task/T1").get_data(as_text=True)
         # One row per message; the time sits under the bubble, not beside a label.
+        # Stored messages also carry the id their row actions act on.
         self.assertRegex(
             body,
-            r'(?s)<div class="chat-row orbit">\s*<div class="chat-bubble orbit">.*?</div>\s*'
+            r'(?s)<div class="chat-row orbit"(?: data-message-id="[^"]*")?>\s*'
+            r'<div class="chat-bubble orbit">.*?</div>\s*'
             r'<div class="chat-meta">09:42</div>\s*</div>',
         )
 

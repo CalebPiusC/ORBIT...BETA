@@ -244,18 +244,45 @@
     temp.remove();
   }
 
+  // Regenerate stays available on every reply, so an older answer can be redone
+  // too. It is disabled only while a reply is streaming (two turns at once would
+  // interleave) or when the row has nothing to regenerate yet.
   function refreshRegenerateActions(root) {
     if (!root) return;
-    var rows = root.querySelectorAll(".chat-row");
-    var latest = rows.length ? rows[rows.length - 1] : null;
-    var latestReply = latest && latest.querySelector(".reply");
-    var canRegenerate = !!(
-      latest && latest.classList.contains("orbit") && !latest.classList.contains("was-stopped") &&
-      latest.querySelector(".message-actions") && latestReply && latestReply.textContent.trim() &&
-      !latest.querySelector(".notice.error")
-    );
     Array.prototype.forEach.call(root.querySelectorAll('[data-message-action="regenerate"]'), function (button) {
-      button.disabled = !canRegenerate || button.closest(".chat-row") !== latest;
+      var row = button.closest(".chat-row");
+      var reply = row && row.querySelector(".reply");
+      var busy = !!row && (row.classList.contains("is-generating") || row.classList.contains("is-streaming"));
+      button.disabled = !row || busy || !reply || !reply.textContent.trim();
+    });
+  }
+
+  function messageId(row) {
+    return row ? (row.getAttribute("data-message-id") || "") : "";
+  }
+
+  function setMessageId(row, id) {
+    if (row && id) row.setAttribute("data-message-id", id);
+  }
+
+  // One binary rating per click, recorded server-side against the message id.
+  // Clicking the rating that is already showing does not re-send it; clicking
+  // the other one switches, and the log then holds one line for each.
+  function sendRating(button, row, rating) {
+    var id = messageId(row);
+    if (!id) return;
+    var payload = JSON.stringify({ rating: rating });
+    var request = window.fetch
+      ? window.fetch("/api/messages/" + encodeURIComponent(id) + "/rating", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+        })
+      : null;
+    if (!request || !request.catch) return;
+    request.catch(function () {
+      // A rating that could not be recorded is not worth interrupting the reply
+      // for; the button state is the person's own view either way.
     });
   }
 
@@ -273,12 +300,69 @@
         if (typeof onRegenerate === "function") onRegenerate(row);
       } else if (action === "feedback-up" || action === "feedback-down") {
         var actions = button.closest(".message-actions");
+        var pressed = button.getAttribute("aria-pressed") === "true";
+        if (pressed) {
+          // Un-pressing is a local change of mind; it is not a rating, so it is
+          // not logged.
+          button.setAttribute("aria-pressed", "false");
+          return;
+        }
         Array.prototype.forEach.call(actions.querySelectorAll('[data-message-action^="feedback-"]'), function (choice) {
-          choice.setAttribute("aria-pressed", choice === button && choice.getAttribute("aria-pressed") !== "true" ? "true" : "false");
+          choice.setAttribute("aria-pressed", choice === button ? "true" : "false");
         });
+        sendRating(button, row, action === "feedback-up" ? "up" : "down");
       }
     });
     refreshRegenerateActions(root);
+  }
+
+  // --- SIDEBAR COLLAPSE ----------------------------------------------------
+  // Icons-only rail. The choice is remembered in localStorage and applied to
+  // every screen; each control keeps its tooltip and accessible name.
+  var SIDEBAR_STORAGE_KEY = "orbit.sidebar.collapsed";
+
+  function sidebarCollapsed() {
+    try {
+      return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "1";
+    } catch (_error) {
+      return false;  // private mode or a blocked store: expanded is the default
+    }
+  }
+
+  function rememberSidebarCollapsed(collapsed) {
+    try {
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, collapsed ? "1" : "0");
+    } catch (_error) {
+      // Not being able to remember the choice must not break the toggle.
+    }
+  }
+
+  function applySidebarCollapsed(sidebar, collapsed) {
+    sidebar.classList.toggle("sidebar--collapsed", collapsed);
+    // The pre-paint root class (layout.html) has done its job once the sidebar
+    // itself carries the state.
+    if (document.documentElement) {
+      document.documentElement.classList.remove("sidebar-collapsed-pending");
+    }
+    var toggle = sidebar.querySelector("#sidebarToggle");
+    if (!toggle) return;
+    toggle.setAttribute("aria-pressed", collapsed ? "true" : "false");
+    toggle.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+    toggle.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+    toggle.firstElementChild.textContent = collapsed ? "»" : "«";
+  }
+
+  function wireSidebarCollapse() {
+    var sidebar = document.getElementById("sidebar");
+    if (!sidebar) return;
+    applySidebarCollapsed(sidebar, sidebarCollapsed());
+    var toggle = sidebar.querySelector("#sidebarToggle");
+    if (!toggle) return;
+    toggle.addEventListener("click", function () {
+      var collapsed = !sidebar.classList.contains("sidebar--collapsed");
+      applySidebarCollapsed(sidebar, collapsed);
+      rememberSidebarCollapsed(collapsed);
+    });
   }
 
   function setSendButton(button, generating) {
@@ -1059,6 +1143,7 @@
 
   // --- HOME --------------------------------------------------------------
   function bootstrapHome() {
+    wireSidebarCollapse();
     wireModeToggles();
     wireThinkingToggles();
     wireNewConversation();
@@ -1173,6 +1258,14 @@
             renderFollowups(followupsBox, JSON.parse(data));
           } else if (event === "notice") {
             showLine(body, data, "warn");
+          } else if (event === "message") {
+            // The stored reply's id: this row's Copy/Regenerate/rating buttons
+            // act on it from here on.
+            try {
+              setMessageId(row, JSON.parse(data).id);
+            } catch (_error) {
+              // A malformed id line must not break the reply that just arrived.
+            }
           } else if (event === "done") {
             body.classList.remove("streaming");
             turnStatus.clear();
@@ -1209,16 +1302,25 @@
       );
     }
 
+    // Regenerating rewrites one reply where it stands, so any Orbit reply can be
+    // redone, not only the newest. The row's id names the message to replace.
     function regenerateHome(row) {
-      if (inflight || !row || row !== thread.querySelector(".chat-row:last-child")) return;
+      if (inflight || !row || !row.classList.contains("orbit")) return;
       var body = row.querySelector(".body");
       var reply = row.querySelector(".reply");
       if (!body || !reply || !reply.textContent.trim()) return;
+      var id = messageId(row);
+      if (!id) {
+        // No id means there is nothing stored to rewrite. Say so rather than
+        // leaving a button that looks live and does nothing.
+        showLine(body, "This reply was not stored with an id, so it cannot be regenerated.", "warn");
+        return;
+      }
       Array.prototype.forEach.call(body.querySelectorAll(".notice"), function (notice) { notice.remove(); });
       reply.textContent = "";
       row.classList.remove("has-error");
       renderFollowups(followupsBox, []);
-      startStream(row, body, reply, { regenerate: true }, false);
+      startStream(row, body, reply, { regenerate: true, message_id: id }, false);
     }
 
     // A starter button or a follow-up chip: put the prompt in the composer and
@@ -1394,6 +1496,7 @@
     // server decides (see app.server.task) so a refresh is not a model call.
     var wantInitialTurn = opts.initialTurn !== false;
     wireModeToggles();
+    wireSidebarCollapse();
     wireThinkingToggles();
     wireNewConversation();
     wireSettingsControls();
@@ -1529,7 +1632,12 @@
 
       postSSE(
         "/api/task/" + encodeURIComponent(taskId) + "/stream",
-        { message: opts.message || "", initial: !!opts.initial, regenerate: !!opts.regenerate },
+        {
+          message: opts.message || "",
+          initial: !!opts.initial,
+          regenerate: !!opts.regenerate,
+          message_id: opts.messageId || "",
+        },
         function (event, data) {
           if (event === "task_state") {
             // Steps, files, the current operation, approvals and the activity
@@ -1555,6 +1663,13 @@
             orbit.reply.textContent += data;
             fullReply += data;
             log.scrollTop = log.scrollHeight;
+          } else if (event === "message") {
+            // The stored reply's id, so this row's actions name a real message.
+            try {
+              setMessageId(orbit.row, JSON.parse(data).id);
+            } catch (_error) {
+              // A malformed id line must not break the reply that just arrived.
+            }
           } else if (event === "done") {
             if (targetBlock) targetBlock.classList.add("done");
             orbit.body.classList.remove("streaming");
@@ -1590,11 +1705,27 @@
       );
     }
 
+    // Any task reply can be redone; the row's id names the message to replace.
     function regenerateTask(row) {
-      if (inflight || !row || row !== log.querySelector(".chat-row:last-child")) return;
+      if (inflight || !row || !row.classList.contains("orbit")) return;
       var reply = row.querySelector(".reply");
       if (!reply || !reply.textContent.trim()) return;
-      streamTurn({ regenerate: true, replaceRow: row, useTopThinking: false });
+      var id = messageId(row);
+      if (!id) {
+        // Same honesty as the home screen: a control that cannot act says so.
+        showLine(
+          row.querySelector(".body") || row,
+          "This reply was not stored with an id, so it cannot be regenerated.",
+          "warn"
+        );
+        return;
+      }
+      streamTurn({
+        regenerate: true,
+        replaceRow: row,
+        useTopThinking: false,
+        messageId: id,
+      });
     }
 
     if (input && send) {
@@ -1648,5 +1779,7 @@
   window.Orbit = {
     bootstrapHome: bootstrapHome,
     bootstrapTask: bootstrapTask,
+    // The Analytics view has no chat to wire; it only needs the sidebar.
+    bootstrapSidebar: wireSidebarCollapse,
   };
 })();
