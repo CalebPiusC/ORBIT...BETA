@@ -178,7 +178,7 @@ def build_analytics(
     events, lines_read, present = _read_events(path, since)
 
     messages_by_day: Counter[str] = Counter()
-    models: Counter[str] = Counter()
+    models: Counter[tuple[str, str | None]] = Counter()
     ratings: Counter[str] = Counter()
     fired = dismissed = checkins = 0
 
@@ -191,8 +191,10 @@ def build_analytics(
                 messages_by_day[day_key] += 1
         elif name == "model_answered":
             model = event.get("model")
+            persona = event.get("persona")
             if isinstance(model, str) and model:
-                models[model] += 1
+                explicit_persona = persona if isinstance(persona, str) and persona else None
+                models[(model, explicit_persona)] += 1
         elif name == "message_rated":
             rating = event.get("rating")
             if rating in RATING_LABELS:
@@ -220,8 +222,14 @@ def build_analytics(
         )
 
     names = model_persona_map()
-    ordered_models = sorted(models.items(), key=lambda item: (-item[1], item[0]))
-    model_rows = [(model, persona_for_model(model, names), count) for model, count in ordered_models]
+    ordered_models = sorted(
+        models.items(),
+        key=lambda item: (-item[1], item[0][0], item[0][1] or ""),
+    )
+    model_rows = [
+        (model, persona or persona_for_model(model, names), count)
+        for (model, persona), count in ordered_models
+    ]
 
     messages_total = sum(messages_by_day.values())
     messages_today = messages_by_day.get(moment.date().isoformat(), 0)

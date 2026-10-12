@@ -1,6 +1,6 @@
 # ORBIT...BETA
 
-ORBIT's brain and the two screens it lives in. The provider seam accepts conversation history and a system prompt and returns plain text or a stream. Gemini is the only provider implemented; there is exactly one tool, `write_note(content: str)`, and a reusable confirmation gate plus registration-time audit wrapper exist from tool #1 — nothing runs silently. Heartbeat reminders (a missing daily plan, a check-in gap, and phone push through ntfy.sh), Agent mode, Quick/Deep response depth, and browser voice are built. Sub-agents remain out of scope; see `docs/HANDOFF.md` for current state and load-bearing rules.
+ORBIT's brain and the two screens it lives in. The provider seam accepts conversation history and a system prompt and returns plain text or a stream. Gemini handles Quick mode and the final Deep-mode fallback; Deep can use a configured OpenRouter free-model chain first. There is exactly one tool, `write_note(content: str)`, and a reusable confirmation gate plus registration-time audit wrapper exist from tool #1 — nothing runs silently. Heartbeat reminders (a missing daily plan, a check-in gap, and phone push through ntfy.sh), Agent mode, Quick/Deep response depth, and browser voice are built. Sub-agents remain out of scope; see `docs/HANDOFF.md` for current state and load-bearing rules.
 
 **Read `docs/HANDOFF.md` before changing anything.** It states which rules are load-bearing, which files from the previous build already exist here, and what the next two phases are.
 
@@ -26,7 +26,9 @@ Set `GEMINI_API_KEY` in `.env` to your own key. `GEMINI_MODEL` defaults to `gemi
 
 `GEMINI_FALLBACK_MODEL` defaults to `gemini-3.8-flash` (`config.DEFAULT_GEMINI_FALLBACK_MODEL`). It is tried **once**, and only when the primary fails with 503/504 or a network error, and only before any tool has run. Leave it blank in `.env` to disable it. Every model that answers, and every failed attempt, is written to `audit.log` as a `model_answered` or `model_attempt_failed` line.
 
-**Model names in Agent mode.** The primary model is called **Titan** and the fallback **Europa**. Names are handed out in slot order (`providers/personas.py`). Io, Ganymede, Callisto, Triton and Luna are reserved for future model slots, in that order. In Agent mode the Live activity list shows lines such as `Asking Titan…`, and `Titan didn't answer (Google returned 503). Asking Europa…` on a fallback. Chat mode never shows names or these lines.
+**Optional OpenRouter Deep chain.** Add `OPENROUTER_API_KEY` to `.env` to enable Deep-mode routing. `OPENROUTER_MODEL_1`, `OPENROUTER_MODEL_2`, and `OPENROUTER_MODEL_3` hold the pinned model ids in order; `OPENROUTER_FALLBACK_MODEL` is the final OpenRouter safety net. The example template contains three free-model choices and `openrouter/free`; pinned ids remain environment config so you can replace them as free endpoints change. If OpenRouter is not configured or all its attempts fail before output starts, Deep uses the configured Gemini primary (Europa). Fresh installs copy the updated template; existing `.env` files should add these entries without overwriting existing keys.
+
+**Model names in Agent mode.** Gemini's Quick primary is **Titan**; its regular Gemini fallback is **Europa**. Deep tries the three pinned OpenRouter models as **Io**, **Ganymede**, and **Callisto**, in that order, then the configured OpenRouter auto-router and finally Gemini's primary as **Europa**. Names follow slot order in `providers/personas.py`; Triton and Luna remain reserved. Agent activity names each attempt (for example, `Asking Io…` then `Io didn't answer … Asking Ganymede…`). Chat mode never shows attempt names or status lines.
 
 `ORBIT_HTTP_TIMEOUT` (default `60`, seconds) is the deadline for **every** request to the model. Leave it set. Without a deadline the SDK asks httpx to wait forever, so a firewalled or black-holed connection hangs with no reply and no error — "it is thinking" and "it is stuck" become the same thing. Raise it on a slow link; never remove it.
 
@@ -182,7 +184,9 @@ the same home-chat or task-chat endpoint as a typed message. Voice-originated tu
 also request a spoken reply; typed turns do not. The server streams Edge TTS MP3
 audio using `en-US-GuyNeural` at `-15Hz`, and the browser plays it as the chunks
 arrive where Media Source Extensions support MP3 (otherwise it buffers the audio
-before playback).
+before playback). On the home composer, a small chevron opens a focused voice view
+with a larger Orbit mark; it reuses the same mic control and pipeline, shows idle,
+listening, thinking, and speaking states, and has a clear Back to text chat control.
 
 The default Whisper model is `base`, running on CPU with `int8`. The first voice
 transcription downloads the model into the normal Hugging Face cache; uploaded
@@ -235,12 +239,14 @@ and no cache exists, which is exactly the failure now reported as
 
 The **Quick / Deep** selector sits beside **Chat / Agent** and applies to the next
 streamed UI reply. Quick calls the configured primary Gemini model with a 512-token
-output cap. Deep uses a 4096-token cap and prefers `GEMINI_FALLBACK_MODEL`; if that
-model fails before any reply chunk is sent, it falls back to the primary model.
-With no fallback configured, Deep keeps the larger budget on the primary. Agent
-activity names the model actually being called (Titan for primary, Europa for
-fallback), including Deep-first and failover turns. The depth selection is shared
-between home and task screens for the life of the app process.
+output cap. Deep uses a 4096-token cap and tries `OPENROUTER_MODEL_1`, `_2`, and `_3`
+in order, then `OPENROUTER_FALLBACK_MODEL`; if OpenRouter is unavailable before any
+reply text starts, it falls back to the configured Gemini primary. The selected
+model remains in use after the first output chunk to avoid repeating visible text.
+Agent activity names the pinned models Io, Ganymede, and Callisto; the final Gemini
+fallback is Europa. If OpenRouter is not configured, Deep goes straight to Gemini
+as Europa. The depth selection is shared between home and task screens for the life
+of the app process.
 
 ## Browser tools (Chat mode)
 
@@ -335,8 +341,8 @@ nothing else — no new tracking was added for it (`app/analytics.py`):
 
 - messages sent per day over the last seven days, today first, with bars relative to the
   busiest day in the window;
-- which model answered, in persona names (Titan, Europa, Io) resolved from configuration,
-  falling back to the raw model id for anything unconfigured;
+- which model answered, with its assigned persona (Titan, Europa, Io, Ganymede, Callisto);
+  older events fall back to configuration lookup and then the raw model id;
 - heartbeat notices fired and dismissed, and check-ins logged;
 - thumbs up / thumbs down counts.
 

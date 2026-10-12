@@ -879,7 +879,7 @@
 
   // Press and hold to record; releasing stops the recorder, transcribes the
   // clip, and hands plain text back to the same send handler used by typing.
-  function wirePushToTalk(button, statusNode, onTranscript, isBusy) {
+  function wirePushToTalk(button, statusNode, onTranscript, isBusy, onState) {
     if (!button) return;
     var supported = !!(
       navigator.mediaDevices && navigator.mediaDevices.getUserMedia &&
@@ -892,6 +892,11 @@
     var keyboardHeld = false;
     var processing = false;
     var maxDurationTimer = null;
+
+    function reportState(state, message, isError) {
+      setVoiceStatus(statusNode, message, isError);
+      if (typeof onState === "function") onState(state, message || "", !!isError);
+    }
 
     function setActive(active) {
       button.classList.toggle("recording", active);
@@ -912,8 +917,8 @@
 
     if (!supported) {
       button.disabled = true;
-      setVoiceStatus(statusNode, "Voice recording needs a browser with microphone support over HTTPS or localhost.", true);
-      return;
+      reportState("idle", "Voice recording needs a browser with microphone support over HTTPS or localhost.", true);
+      return function () {};
     }
 
     async function begin(event, fromKeyboard) {
@@ -921,7 +926,7 @@
       if (pressed || processing || (isBusy && isBusy())) return;
       pressed = true;
       keyboardHeld = !!fromKeyboard;
-      setVoiceStatus(statusNode, "Requesting microphone access…");
+      reportState("thinking", "Requesting microphone access…");
       try {
         var mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         if (!pressed) {
@@ -951,13 +956,13 @@
           stream = null;
           recorder = null;
           if (!blob.size) {
-            setVoiceStatus(statusNode, "The recording was empty. Hold the mic button and try again.", true);
+            reportState("idle", "The recording was empty. Hold the mic button and try again.", true);
             updateDisabled();
             return;
           }
           processing = true;
           updateDisabled();
-          setVoiceStatus(statusNode, "Transcribing…");
+          reportState("thinking", "Transcribing your message…");
           var form = new FormData();
           form.append("audio", blob, "recording." + recordingExtension(blob.type));
           fetch("/api/voice/transcribe", { method: "POST", body: form })
@@ -970,11 +975,11 @@
             .then(function (payload) {
               var transcript = String(payload.transcript || "").trim();
               if (!transcript) throw new Error("No speech was detected. Try again.");
-              setVoiceStatus(statusNode, "Sending transcript…");
+              reportState("thinking", "Sending transcript…");
               if (onTranscript) onTranscript(transcript);
             })
             .catch(function (error) {
-              setVoiceStatus(statusNode, error.message || "Could not transcribe that recording.", true);
+              reportState("idle", error.message || "Could not transcribe that recording.", true);
             })
             .finally(function () {
               processing = false;
@@ -982,14 +987,14 @@
             });
         });
         activeRecorder.addEventListener("error", function () {
-          setVoiceStatus(statusNode, "The microphone recording failed. Please try again.", true);
+          reportState("idle", "The microphone recording failed. Please try again.", true);
         });
         activeRecorder.start();
         setActive(true);
-        setVoiceStatus(statusNode, "Listening… release to send.");
+        reportState("listening", "Listening… release to send.");
         maxDurationTimer = window.setTimeout(function () {
           if (pressed) {
-            setVoiceStatus(statusNode, "Recording limit reached; transcribing the clip.");
+            reportState("thinking", "Recording limit reached; transcribing the clip.");
             release();
           }
         }, 120000);
@@ -1000,7 +1005,7 @@
         stream = null;
         recorder = null;
         setActive(false);
-        setVoiceStatus(statusNode, error.message || "Microphone permission was denied.", true);
+        reportState("idle", error.message || "Microphone permission was denied.", true);
         updateDisabled();
       }
     }
@@ -1013,12 +1018,12 @@
       maxDurationTimer = null;
       setActive(false);
       if (recorder && recorder.state === "recording") {
-        setVoiceStatus(statusNode, "Transcribing…");
+        reportState("thinking", "Transcribing your message…");
         recorder.stop();
       } else {
         stopTracks(stream);
         stream = null;
-        setVoiceStatus(statusNode, "");
+        reportState("idle", "");
       }
     }
 
@@ -1040,14 +1045,42 @@
     });
     button.addEventListener("contextmenu", function (event) { event.preventDefault(); });
     updateDisabled();
+    return release;
   }
 
-  function showAudioError(body, error) {
+  function showAudioError(body, error, onPlaybackState) {
     var detail = error && error.message ? error.message : "could not synthesize speech";
     showLine(body, "Spoken reply unavailable: " + detail, "warn");
+    if (typeof onPlaybackState === "function") {
+      onPlaybackState("idle", "Spoken reply unavailable: " + detail, true);
+    }
   }
 
-  function playReplyAudio(text, body) {
+  function playReplyAudio(text, body, onPlaybackState) {
+    function reportPlayback(state, message, isError) {
+      if (typeof onPlaybackState === "function") onPlaybackState(state, message || "", !!isError);
+    }
+
+    function failAudio(error) {
+      showAudioError(body, error, reportPlayback);
+    }
+
+    function startPlayback(audio) {
+      var playback;
+      try {
+        playback = audio.play();
+      } catch (_error) {
+        reportPlayback("idle", "Reply ready. Return to text chat to play it.", false);
+        return;
+      }
+      if (playback && playback.catch) {
+        playback.catch(function () {
+          reportPlayback("idle", "Reply ready. Return to text chat to play it.", false);
+        });
+      }
+    }
+
+    reportPlayback("thinking", "Preparing spoken reply…", false);
     fetch("/api/voice/speech", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1067,8 +1100,17 @@
         audio.autoplay = true;
         audio.preload = "auto";
         audio.setAttribute("aria-label", "Play Orbit's spoken reply");
+        audio.addEventListener("playing", function () {
+          reportPlayback("speaking", "Speaking…", false);
+        });
+        audio.addEventListener("pause", function () {
+          if (!audio.ended) reportPlayback("idle", "Reply paused.", false);
+        });
+        audio.addEventListener("ended", function () {
+          reportPlayback("idle", "Ready when you are", false);
+        });
         audio.addEventListener("error", function () {
-          showAudioError(body, new Error("the audio stream could not be played"));
+          failAudio(new Error("the audio stream could not be played"));
         });
         body.appendChild(audio);
 
@@ -1079,8 +1121,7 @@
         if (!canStream) {
           return response.blob().then(function (blob) {
             audio.src = URL.createObjectURL(blob);
-            var playback = audio.play();
-            if (playback && playback.catch) playback.catch(function () {});
+            startPlayback(audio);
           });
         }
 
@@ -1091,7 +1132,7 @@
           try {
             sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
           } catch (error) {
-            showAudioError(body, error);
+            failAudio(error);
             return;
           }
           var reader = response.body.getReader();
@@ -1104,7 +1145,7 @@
               try {
                 sourceBuffer.appendBuffer(queued.shift());
               } catch (error) {
-                showAudioError(body, error);
+                failAudio(error);
               }
               return;
             }
@@ -1126,19 +1167,18 @@
               appendNext();
             }).catch(function (error) {
               reading = false;
-              showAudioError(body, error);
+              failAudio(error);
               if (mediaSource.readyState === "open") mediaSource.endOfStream("decode");
             });
           }
           sourceBuffer.addEventListener("updateend", function () {
-            var playback = audio.play();
-            if (playback && playback.catch) playback.catch(function () {});
+            startPlayback(audio);
             appendNext();
           });
           appendNext();
         }, { once: true });
       })
-      .catch(function (error) { showAudioError(body, error); });
+      .catch(function (error) { failAudio(error); });
   }
 
   // --- HOME --------------------------------------------------------------
@@ -1165,6 +1205,17 @@
     var send = document.getElementById("homeSend");
     var voiceButton = document.getElementById("homeVoice");
     var voiceStatus = document.getElementById("homeVoiceStatus");
+    var voiceExpand = document.getElementById("homeVoiceExpand");
+    var voiceChatView = document.getElementById("voiceChatView");
+    var voiceChatBack = document.getElementById("voiceChatBack");
+    var voiceViewMic = document.getElementById("voiceViewMic");
+    var voiceViewRings = document.getElementById("voiceViewRings");
+    var voiceViewState = document.getElementById("voiceViewState");
+    var voiceViewTranscript = document.getElementById("voiceViewTranscript");
+    var voiceViewReply = document.getElementById("voiceViewReply");
+    var voiceHomeParent = voiceButton ? voiceButton.parentNode : null;
+    var voiceHomeNextSibling = voiceButton ? voiceButton.nextSibling : null;
+    var releaseVoiceChat = null;
     var thread = document.getElementById("homeThread");
     var followupsBox = document.getElementById("followupChips");
     var turnStatus = turnStatusFor("turnStatusBar", "turnStatusText");
@@ -1211,6 +1262,64 @@
     // active stream is being read; a typed Enter still never discards input.
     var inflight = false;
     var activeRequest = null;
+
+    function setVoiceViewState(state, message, isError) {
+      if (voiceViewRings) voiceViewRings.setAttribute("data-state", state || "idle");
+      if (voiceViewState) {
+        voiceViewState.textContent = message || (state === "idle" ? "Ready when you are" : "");
+        voiceViewState.classList.toggle("error", !!isError);
+      }
+    }
+
+    function openVoiceChat() {
+      if (!voiceChatView) return;
+      voiceChatView.hidden = false;
+      if (voiceExpand) voiceExpand.setAttribute("aria-expanded", "true");
+      if (voiceButton && voiceViewMic && voiceButton.parentNode !== voiceViewMic) {
+        voiceViewMic.appendChild(voiceButton);
+      }
+      if (voiceChatBack) voiceChatBack.focus();
+    }
+
+    function closeVoiceChat() {
+      if (!voiceChatView) return;
+      if (releaseVoiceChat) releaseVoiceChat();
+      if (voiceButton && voiceHomeParent) {
+        if (voiceHomeNextSibling && voiceHomeNextSibling.parentNode === voiceHomeParent) {
+          voiceHomeParent.insertBefore(voiceButton, voiceHomeNextSibling);
+        } else {
+          voiceHomeParent.appendChild(voiceButton);
+        }
+      }
+      voiceChatView.hidden = true;
+      if (voiceExpand) voiceExpand.setAttribute("aria-expanded", "false");
+      if (voiceExpand && !voiceExpand.disabled) voiceExpand.focus();
+      else if (input) input.focus();
+    }
+
+    setVoiceViewState("idle", "Ready when you are", false);
+    if (voiceExpand) voiceExpand.addEventListener("click", openVoiceChat);
+    if (voiceChatBack) voiceChatBack.addEventListener("click", closeVoiceChat);
+    if (voiceChatView) {
+      voiceChatView.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+          closeVoiceChat();
+          return;
+        }
+        if (event.key !== "Tab") return;
+        var focusable = voiceChatView.querySelectorAll("button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex='-1'])");
+        if (!focusable.length) return;
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      });
+    }
     wireMessageActions(thread, regenerateHome);
 
     function startStream(row, body, reply, payload, voiceReply) {
@@ -1219,7 +1328,9 @@
       var requestController = activeRequest;
       setSendButton(send, true);
       if (voiceButton) voiceButton.disabled = true;
+      if (voiceExpand) voiceExpand.disabled = true;
       setVoiceStatus(voiceStatus, "");
+      if (voiceReply) setVoiceViewState("thinking", "Thinking…", false);
       row.classList.add("is-generating");
       body.classList.add("streaming");
       refreshRegenerateActions(thread);
@@ -1244,6 +1355,10 @@
             row.classList.add("is-streaming");
             reply.textContent += data;
             fullReply += data;
+            if (voiceReply && voiceViewReply) {
+              voiceViewReply.hidden = false;
+              voiceViewReply.textContent += data;
+            }
             thread.scrollTop = thread.scrollHeight;
           } else if (event === "conversation") {
             var created = JSON.parse(data);
@@ -1282,6 +1397,7 @@
           activeRequest = null;
           setSendButton(send, false);
           if (voiceButton) voiceButton.disabled = false;
+          if (voiceExpand) voiceExpand.disabled = false;
           turnStatus.clear();
           row.classList.remove("is-generating", "is-streaming");
           row.classList.toggle("was-stopped", stopped);
@@ -1294,7 +1410,15 @@
             // Answered or stopped: the conversation has started, so the welcome
             // screen has done its job and steps out.
             welcomeDone();
-            if (voiceReply && fullReply.trim()) playReplyAudio(fullReply, body);
+          }
+          if (voiceReply) {
+            if (err) {
+              setVoiceViewState("idle", err, true);
+            } else if (!stopped && fullReply.trim()) {
+              playReplyAudio(fullReply, body, setVoiceViewState);
+            } else {
+              setVoiceViewState("idle", stopped ? "Reply stopped." : "No spoken reply was produced.", !stopped);
+            }
           }
           refreshRegenerateActions(thread);
         },
@@ -1377,10 +1501,21 @@
         else sendMessage();
       });
     }
-    wirePushToTalk(voiceButton, voiceStatus, function (transcript) {
+    releaseVoiceChat = wirePushToTalk(voiceButton, voiceStatus, function (transcript) {
+      if (voiceViewTranscript) {
+        voiceViewTranscript.textContent = "You: " + transcript;
+        voiceViewTranscript.hidden = false;
+      }
+      if (voiceViewReply) {
+        voiceViewReply.textContent = "";
+        voiceViewReply.hidden = true;
+      }
+      setVoiceViewState("thinking", "Thinking…", false);
       input.value = transcript;
       sendMessage({ voiceReply: true });
-    }, function () { return inflight; });
+    }, function () { return inflight; }, function (state, message, isError) {
+      setVoiceViewState(state, message, isError);
+    });
   }
 
   // --- TASK PANEL ---------------------------------------------------------

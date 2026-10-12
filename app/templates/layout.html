@@ -216,12 +216,71 @@
     border: 1px solid var(--border); background: var(--bg-sunken);
     color: var(--text-dim); display: flex; align-items: center; justify-content: center; cursor: pointer;
   }
+  .voice-control-group { display: flex; align-items: center; gap: 2px; }
   .voice-btn { flex-shrink: 0; font: inherit; padding: 0; touch-action: none; user-select: none; }
   .voice-btn.recording { border-color: var(--red); background: var(--red-wash); color: var(--red); }
   .voice-btn:disabled { opacity: 0.5; cursor: default; }
+  .voice-expand-btn {
+    width: 22px; height: 28px; padding: 0; border: 0; border-radius: 6px;
+    background: transparent; color: var(--text-faint); font: inherit; font-size: 17px;
+    line-height: 1; cursor: pointer; transition: color 140ms ease, background 140ms ease;
+  }
+  .voice-expand-btn:hover, .voice-expand-btn:focus-visible { color: var(--text); background: var(--bg-sunken); }
+  .voice-expand-btn:disabled { opacity: 0.45; cursor: default; }
   .voice-feedback { color: var(--text-faint); font-size: 11px; line-height: 1.4; margin-top: 7px; }
   .voice-feedback.error { color: var(--red); }
   .voice-feedback[hidden] { display: none; }
+  .voice-chat-view {
+    position: fixed; inset: 0; z-index: 900; display: flex; flex-direction: column;
+    background: var(--bg); color: var(--text);
+  }
+  .voice-chat-view[hidden] { display: none !important; }
+  .voice-view-topbar {
+    flex: 0 0 auto; min-height: 58px; display: grid; grid-template-columns: 1fr auto 1fr;
+    align-items: center; gap: 12px; padding: 0 22px; border-bottom: 1px solid var(--border-soft);
+  }
+  .voice-view-back {
+    justify-self: start; display: inline-flex; align-items: center; gap: 8px; padding: 7px 10px;
+    border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-dim);
+    font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .voice-view-back:hover { border-color: var(--border); color: var(--text); background: var(--bg-card); }
+  .voice-view-back span { font-size: 17px; line-height: 1; }
+  .voice-view-title { color: var(--text-dim); font-size: 12px; letter-spacing: 0.03em; }
+  .voice-view-topbar-spacer { justify-self: end; width: 1px; }
+  .voice-view-main {
+    flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 28px 20px 36px; text-align: center;
+  }
+  .voice-view-rings { width: clamp(132px, 22vh, 184px); height: clamp(132px, 22vh, 184px); margin-bottom: 24px; opacity: 0.96; }
+  .voice-view-rings img { display: block; width: 100%; height: 100%; }
+  .voice-view-rings[data-state="idle"] img { animation: orbit-ring-turn 20s linear infinite; }
+  .voice-view-rings[data-state="listening"] img {
+    animation: orbit-ring-turn 1.6s linear infinite;
+    filter: drop-shadow(0 0 7px rgba(107,152,222,0.25));
+  }
+  .voice-view-rings[data-state="thinking"] img {
+    animation: orbit-ring-turn 8s linear infinite;
+    filter: drop-shadow(0 0 3px rgba(107,152,222,0.18));
+  }
+  .voice-view-rings[data-state="speaking"] img {
+    animation: none; filter: drop-shadow(0 0 5px rgba(107,152,222,0.3));
+  }
+  .voice-view-state { min-height: 22px; margin: 0; color: var(--text); font-size: 16px; font-weight: 500; }
+  .voice-view-state.error { color: #f1a0a0; }
+  .voice-view-conversation { width: min(560px, 100%); margin-top: 20px; }
+  .voice-view-transcript, .voice-view-reply { margin: 0 0 10px; line-height: 1.6; overflow-wrap: anywhere; }
+  .voice-view-transcript { color: var(--text-faint); font-size: 13px; }
+  .voice-view-reply { color: var(--text-dim); font-size: 14px; }
+  .voice-view-reply::before {
+    content: "ORBIT"; display: block; margin-bottom: 4px; color: var(--accent-bright);
+    font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+  }
+  .voice-view-transcript[hidden], .voice-view-reply[hidden] { display: none; }
+  .voice-view-mic { margin-top: 18px; }
+  .voice-view-mic .voice-btn { width: 62px; height: 62px; font-size: 23px; }
+  .voice-view-mic .voice-btn.recording { box-shadow: 0 0 0 8px var(--red-wash); }
+  .voice-view-hint { margin: 13px 0 0; color: var(--text-faint); font-size: 11px; }
   .reply-audio { display: block; width: min(320px, 100%); height: 34px; margin-top: 6px; }
   .send-btn-round {
     width: 32px; height: 32px; border-radius: 50%;

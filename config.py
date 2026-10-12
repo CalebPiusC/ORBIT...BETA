@@ -20,8 +20,21 @@ from dotenv import load_dotenv
 DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
 DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-3.8-flash"
 FALLBACK_ENV_VAR = "GEMINI_FALLBACK_MODEL"
+OPENROUTER_API_KEY_ENV_VAR = "OPENROUTER_API_KEY"
+OPENROUTER_MODEL_ENV_VARS = (
+    "OPENROUTER_MODEL_1",
+    "OPENROUTER_MODEL_2",
+    "OPENROUTER_MODEL_3",
+)
+OPENROUTER_FALLBACK_MODEL_ENV_VAR = "OPENROUTER_FALLBACK_MODEL"
 ENV_FILE = Path(__file__).resolve().parent / ".env"
-_PLACEHOLDER_KEYS = {"your-key-here", "your_api_key_here", "replace-me", "changeme"}
+_PLACEHOLDER_KEYS = {
+    "your-key-here",
+    "your_api_key_here",
+    "your_openrouter_api_key_here",
+    "replace-me",
+    "changeme",
+}
 
 # Every request to the model gets a deadline. Without one the SDK forwards
 # ``timeout=None`` to httpx, and an explicit None does not fall back to the
@@ -61,16 +74,59 @@ def read_timeout_seconds(raw: str | None) -> float:
 
 
 @dataclass(frozen=True, slots=True)
+class OpenRouterSettings:
+    """Optional OpenRouter configuration used only by Deep mode."""
+
+    api_key: str = field(default="", repr=False)
+    models: tuple[str, ...] = ()
+    fallback_model: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     gemini_api_key: str = field(repr=False)
     gemini_model: str = DEFAULT_GEMINI_MODEL
     # "" means the fallback is disabled (blank in .env, or equal to the primary).
     gemini_fallback_model: str = DEFAULT_GEMINI_FALLBACK_MODEL
     request_timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS
+    openrouter_api_key: str = field(default="", repr=False)
+    openrouter_models: tuple[str, ...] = ()
+    openrouter_fallback_model: str = ""
+
+
+def _read_openrouter_settings() -> OpenRouterSettings:
+    """Read optional OpenRouter credentials and ordered model ids."""
+    api_key = os.getenv(OPENROUTER_API_KEY_ENV_VAR, "").strip()
+    if (
+        api_key.casefold() in _PLACEHOLDER_KEYS
+        or api_key.casefold().startswith("your_")
+    ):
+        api_key = ""
+
+    # Keep empty entries so model position stays tied to persona slot (for
+    # example, OPENROUTER_MODEL_2 remains Ganymede if slot 1 is left blank).
+    models = tuple(os.getenv(name, "").strip() for name in OPENROUTER_MODEL_ENV_VARS)
+    configured_models = {model for model in models if model}
+
+    fallback = os.getenv(OPENROUTER_FALLBACK_MODEL_ENV_VAR, "").strip()
+    if fallback in configured_models:
+        fallback = ""
+
+    return OpenRouterSettings(
+        api_key=api_key,
+        models=models,
+        fallback_model=fallback,
+    )
+
+
+def load_openrouter_settings() -> OpenRouterSettings:
+    """Load optional OpenRouter configuration without requiring a Gemini key."""
+    load_dotenv(dotenv_path=ENV_FILE, override=False)
+    return _read_openrouter_settings()
 
 
 def load_settings() -> Settings:
-    """Load the Gemini key/model from the project .env or process environment."""
+    """Load model keys and configuration from the project .env or environment."""
     load_dotenv(dotenv_path=ENV_FILE, override=False)
 
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -97,12 +153,16 @@ def load_settings() -> Settings:
         fallback = ""
 
     timeout = read_timeout_seconds(os.getenv(TIMEOUT_ENV_VAR))
+    openrouter = _read_openrouter_settings()
 
     return Settings(
         gemini_api_key=api_key,
         gemini_model=model,
         gemini_fallback_model=fallback,
         request_timeout_seconds=timeout,
+        openrouter_api_key=openrouter.api_key,
+        openrouter_models=openrouter.models,
+        openrouter_fallback_model=openrouter.fallback_model,
     )
 
 
