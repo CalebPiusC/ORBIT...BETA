@@ -143,6 +143,53 @@ class ToolConfirmationTests(unittest.TestCase):
             self.assertIs(event["confirmed"], False)
             self.assertEqual(event["execution"], "not_run")
 
+    def test_send_suggestion_asks_before_writing_and_audits_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            suggestions_path = root / "suggestions.txt"
+            audit_path = root / "audit.log"
+            text = "Support dark-mode contrast toggle"
+
+            def check_before_write(action: ProposedAction) -> None:
+                self.assertEqual(action.tool_name, "send_suggestion")
+                self.assertEqual(dict(action.arguments), {"content": text})
+                self.assertFalse(suggestions_path.exists(), "suggestion was written before confirmation")
+
+            gate = RecordingGate(True, before_confirm=check_before_write)
+            registry = build_tool_registry(
+                confirmation_gate=gate,
+                audit_log_path=audit_path,
+                suggestions_path=suggestions_path,
+            )
+            outcome = registry.dispatch("send_suggestion", {"content": text})
+
+            self.assertEqual(outcome.confirmation, "confirmed")
+            self.assertEqual(outcome.execution, "succeeded")
+            line = suggestions_path.read_text(encoding="utf-8")
+            self.assertRegex(
+                line,
+                r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\tSupport dark-mode contrast toggle\n$",
+            )
+            event = json.loads(audit_path.read_text(encoding="utf-8"))
+            self.assertEqual(event["tool_name"], "send_suggestion")
+            self.assertEqual(event["confirmation"], "confirmed")
+            self.assertEqual(event["execution"], "succeeded")
+
+    def test_send_suggestion_decline_does_not_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            suggestions_path = root / "suggestions.txt"
+            audit_path = root / "audit.log"
+            registry = build_tool_registry(
+                confirmation_gate=RecordingGate(False),
+                audit_log_path=audit_path,
+                suggestions_path=suggestions_path,
+            )
+            outcome = registry.dispatch("send_suggestion", {"content": "Skip this"})
+            self.assertEqual(outcome.confirmation, "declined")
+            self.assertEqual(outcome.execution, "not_run")
+            self.assertFalse(suggestions_path.exists())
+
     def test_missing_confirmation_input_fails_closed(self) -> None:
         gate = ConsoleConfirmationGate(
             input_fn=lambda _prompt: (_ for _ in ()).throw(EOFError()),
@@ -230,6 +277,7 @@ class GeminiToolRoundTripTests(unittest.TestCase):
                     "save_plan",
                     "pause_heartbeat",
                     "resume_heartbeat",
+                    "send_suggestion",
                 ],
             )
             self.assertTrue(first_config.automatic_function_calling.disable)

@@ -367,6 +367,64 @@ def finish_run(steps: list[PlanStep]) -> None:
             step.status = DONE
 
 
+_FILE_ACTION_WORDS = frozenset(("read", "reading", "file", "files"))
+_TOOL_ACTION_WORDS = frozenset(
+    (
+        "tool", "tools", "calling", "invoke", "invoking",
+        "write_note", "remember_fact", "forget_fact", "save_plan",
+        "pause_heartbeat", "resume_heartbeat", "send_suggestion",
+    )
+)
+_REPRODUCE_ACTION_WORDS = frozenset(
+    ("reproduce", "reproducing", "reproduction", "crash", "crashes", "traceback", "exception", "failing", "bug")
+)
+_TEST_ACTION_WORDS = frozenset(
+    ("test", "tests", "testing", "tested", "pytest", "unittest", "verify", "verifying", "verification")
+)
+_PLAN_ACTION_WORDS = frozenset(
+    ("plan", "planning", "approach", "design", "outline", "trade-off", "tradeoff")
+)
+_CHANGE_ACTION_WORDS = frozenset(
+    (
+        "implement", "implementing", "patch", "patching", "edit", "editing",
+        "update", "updating", "fix", "fixing", "refactor", "refactoring",
+    )
+)
+_REVIEW_ACTION_WORDS = frozenset(("review", "reviewing", "diff", "audit", "auditing"))
+_REPO_ACTION_WORDS = frozenset(
+    ("repository", "repo", "codebase", "context", "structure", "directory", "locate", "locating", "search", "searching")
+)
+
+
+def describe_thinking_step(narration: str, steps: list[PlanStep] | None = None) -> str:
+    """Return a truthful pre-reply status label from what the narration actually says."""
+    text = (narration or "").strip()
+    words = set(re.findall(r"[a-z_][a-z0-9_-]*", text.lower()))
+    named_files = files_in(text)
+    if named_files or (words & _FILE_ACTION_WORDS):
+        return "Reading the file…"
+    if words & _TOOL_ACTION_WORDS:
+        return "Calling a tool…"
+    if words & _REPRODUCE_ACTION_WORDS:
+        return "Reproducing the failure…"
+    if words & _TEST_ACTION_WORDS:
+        return "Checking the tests…"
+    if words & _PLAN_ACTION_WORDS:
+        return "Planning the change…"
+    if words & _CHANGE_ACTION_WORDS:
+        return "Drafting the change…"
+    if words & _REVIEW_ACTION_WORDS:
+        return "Reviewing the code…"
+    if words & _REPO_ACTION_WORDS:
+        return "Checking the repository…"
+    if steps:
+        active = next((step for step in steps if step.status == ACTIVE), None)
+        if active is not None and active.title:
+            title = active.title.rstrip(".… ")
+            return f"{title}…"
+    return "Working through it…"
+
+
 def add_files(run: TaskRun, names: list[str], source: str) -> bool:
     """Record newly named files. Returns True when the list changed."""
     changed = False

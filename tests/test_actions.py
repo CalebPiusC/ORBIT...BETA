@@ -34,7 +34,15 @@ from tools.confirmation import DeferredConfirmationGate, ProposedAction
 from tools.registry import AuditLog
 
 LAGOS = ZoneInfo("Africa/Lagos")
-TOOL_NAMES = {"write_note", "remember_fact", "forget_fact", "save_plan", "pause_heartbeat", "resume_heartbeat"}
+TOOL_NAMES = {
+    "write_note",
+    "remember_fact",
+    "forget_fact",
+    "save_plan",
+    "pause_heartbeat",
+    "resume_heartbeat",
+    "send_suggestion",
+}
 
 
 def audit_rows(path: Path) -> list[dict[str, Any]]:
@@ -49,6 +57,7 @@ class Paths(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
         self.notes = self.root / "notes.txt"
+        self.suggestions = self.root / "suggestions.txt"
         self.facts = self.root / "facts.txt"
         self.plans = self.root / "plans.json"
         self.heartbeat_state = self.root / "heartbeat.json"
@@ -60,6 +69,7 @@ class Paths(unittest.TestCase):
             confirmation_gate=gate,
             audit_log_path=self.audit,
             notes_path=self.notes,
+            suggestions_path=self.suggestions,
             facts_path=self.facts,
             plans_path=self.plans,
             heartbeat_path=self.heartbeat_state,
@@ -430,6 +440,45 @@ class ChatRouteToolTests(Paths):
     def test_unknown_decision_word_is_a_404(self) -> None:
         client, _app = self.client(ScriptedProvider([]))
         self.assertEqual(client.post("/api/actions/act-x/maybe", json={}).status_code, 404)
+
+    def test_suggestion_entry_proposes_and_waits_for_confirmation_before_appending(self) -> None:
+        client, _app = self.client(ScriptedProvider([]))
+        proposed = client.post("/api/suggestions", json={"content": "Add keyboard shortcut for search"})
+        self.assertEqual(proposed.status_code, 200)
+        card = proposed.get_json()
+        self.assertEqual(card["state"], "pending")
+        self.assertIn("Add keyboard shortcut for search", card["summary"])
+        self.assertFalse(self.suggestions.exists())
+
+        approved = client.post(f"/api/actions/{card['id']}/approve", json={})
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.get_json()["state"], "approved")
+        self.assertTrue(self.suggestions.exists())
+        saved = self.suggestions.read_text(encoding="utf-8")
+        self.assertIn("\tAdd keyboard shortcut for search\n", saved)
+        rows = [r for r in audit_rows(self.audit) if r.get("tool_name") == "send_suggestion"]
+        self.assertEqual(
+            [(r.get("event"), r.get("confirmation"), r.get("execution")) for r in rows],
+            [("tool_proposed", None, None), (None, "confirmed", "succeeded")],
+        )
+
+    def test_declined_suggestion_writes_nothing_and_is_audited(self) -> None:
+        client, _app = self.client(ScriptedProvider([]))
+        card = client.post("/api/suggestions", json={"content": "Discard this idea"}).get_json()
+        declined = client.post(f"/api/actions/{card['id']}/decline", json={}).get_json()
+        self.assertEqual(declined["state"], "declined")
+        self.assertFalse(self.suggestions.exists())
+        last = audit_rows(self.audit)[-1]
+        self.assertEqual(
+            (last.get("tool_name"), last.get("confirmation"), last.get("execution")),
+            ("send_suggestion", "declined", "not_run"),
+        )
+
+    def test_empty_or_multiline_suggestion_is_rejected(self) -> None:
+        client, _app = self.client(ScriptedProvider([]))
+        self.assertEqual(client.post("/api/suggestions", json={"content": "   "}).status_code, 400)
+        self.assertEqual(client.post("/api/suggestions", json={"content": "two\nlines"}).status_code, 400)
+        self.assertFalse(self.suggestions.exists())
 
 
 class BootWiringTests(Paths):

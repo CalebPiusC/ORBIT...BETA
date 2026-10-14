@@ -1,5 +1,5 @@
 {% extends "layout.html" %}
-{% block title %}ORBIT — Home{% endblock %}
+{% block title %}orbit — Home{% endblock %}
 {% block body %}
 <div class="screen screen--active" id="screen-home">
 {% include "_sidebar.html" %}
@@ -62,16 +62,6 @@
       </div>
       {% endif %}
 
-      {# While a turn is generating: what is actually happening, in words. The
-         label is never a guess — waiting on the model says so, waiting a long
-         time says so, and text on the way says so. #}
-      <div class="turn-status-bar" id="turnStatusBar" role="status" aria-live="polite" hidden>
-        <div class="turn-rings rings-fast" aria-hidden="true">
-          <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" />
-        </div>
-        <span class="turn-status-text" id="turnStatusText"></span>
-      </div>
-
       <div class="home-thread{% if thread %} visible{% endif %}" id="homeThread" aria-live="polite" aria-atomic="false">
         {% for msg in thread %}
         {# Same markup as app.js builds live: every Orbit message carries the orbital mark. #}
@@ -106,6 +96,14 @@
           <div class="chat-meta">{{ msg.time }}</div>
         </div>
         {% endfor %}
+        {# While a turn is generating: anchored inside the message list right after
+           the user message it belongs to, never above the thread. #}
+        <div class="turn-status-bar" id="turnStatusBar" role="status" aria-live="polite" hidden>
+          <div class="turn-rings rings-fast" aria-hidden="true">
+            <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" />
+          </div>
+          <span class="turn-status-text" id="turnStatusText"></span>
+        </div>
       </div>
 
       {# Follow-up chips sit above the composer and only when the last reply
@@ -129,7 +127,7 @@
             </div>
             <div class="spacer"></div>
             <div class="voice-control-group">
-              <button type="button" class="icon-btn-round voice-btn" id="homeVoice" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
+              <button type="button" class="icon-btn-round voice-btn" id="homeVoice" aria-label="Tap to talk" aria-pressed="false" title="Tap to talk">🎙</button>
               <button type="button" class="voice-expand-btn" id="homeVoiceExpand" aria-label="Open voice chat view" aria-controls="voiceChatView" aria-expanded="false" title="Open voice chat view">⌃</button>
             </div>
             <button type="button" class="send-btn-round" id="homeSend" aria-label="Send message" title="Send message">➤</button>
@@ -172,7 +170,7 @@
         <p class="voice-view-reply" id="voiceViewReply" hidden></p>
       </div>
       <div class="voice-view-mic" id="voiceViewMic"></div>
-      <p class="voice-view-hint">Hold to talk, then release to send</p>
+      <p class="voice-view-hint">Tap to start recording, then tap again to send</p>
     </div>
   </section>
 </div>

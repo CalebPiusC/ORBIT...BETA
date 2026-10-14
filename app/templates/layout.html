@@ -3,8 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>{% block title %}ORBIT{% endblock %}</title>
+<title>{% block title %}orbit{% endblock %}</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='orbit-mark.svg') }}" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" />
 <style>
   /* ===========================================================
      ORBIT — home screen + coding-agent task view, in dark blue.
@@ -37,10 +40,13 @@
     --red-wash: rgba(225, 125, 125, 0.12);
     --radius: 10px;
     --radius-sm: 7px;
-    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    --font-display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: var(--font-body);
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; font-size: 14px; }
+  body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; font-size: 14px; font-family: var(--font-body); }
+  input, textarea, button, select { font-family: var(--font-body); }
   .screen { display: none; height: 100vh; }
   .screen--active { display: flex; }
 
@@ -50,7 +56,11 @@
     background: var(--bg-raised); border-right: 1px solid var(--border-soft);
     display: flex; flex-direction: column; padding: 14px 10px;
   }
-  .sidebar-brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 16px; font-weight: 700; letter-spacing: 0.05em; }
+  .sidebar-brand {
+    display: flex; align-items: center; gap: 8px; padding: 4px 6px 16px;
+    font-family: var(--font-display); font-weight: 700; letter-spacing: 0.05em; text-transform: lowercase;
+  }
+  .brand-word { font-family: var(--font-display); text-transform: lowercase; }
   /* The wordmark and favicon share the same orbital SVG mark. */
   .brand-mark { display: block; width: 18px; height: 18px; flex-shrink: 0; }
 
@@ -122,6 +132,7 @@
   .thinking-toggle button { padding: 6px 10px; font-size: 11px; }
   .plus-badge {
     position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
+    font-family: var(--font-display); text-transform: lowercase;
     font-size: 11px; color: var(--accent-bright); border: 1px solid var(--accent-dim);
     border-radius: 999px; padding: 3px 10px;
   }
@@ -167,9 +178,10 @@
     color: var(--text); border-color: rgba(107,152,222,0.45); background: rgba(107,152,222,0.06);
   }
 
-  /* The live status line: what the turn is actually doing, in words. */
+  /* The live status line: what the turn is actually doing, in words.
+     Anchored inside the message list right after the user message. */
   .turn-status-bar, .followup-chips { width: 680px; max-width: 100%; }
-  .turn-status-bar { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+  .turn-status-bar { display: flex; align-items: center; gap: 9px; margin: 0; align-self: flex-start; }
   .turn-status-bar[hidden] { display: none; }
   /* On the welcome screen the mark above carries the motion, so the bar's own
      pair steps out rather than showing two. */
@@ -273,7 +285,8 @@
   .voice-view-transcript { color: var(--text-faint); font-size: 13px; }
   .voice-view-reply { color: var(--text-dim); font-size: 14px; }
   .voice-view-reply::before {
-    content: "ORBIT"; display: block; margin-bottom: 4px; color: var(--accent-bright);
+    content: "orbit"; display: block; margin-bottom: 4px; color: var(--accent-bright);
+    font-family: var(--font-display); text-transform: lowercase;
     font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
   }
   .voice-view-transcript[hidden], .voice-view-reply[hidden] { display: none; }
@@ -430,7 +443,27 @@
     padding: 4px 10px; border-radius: 999px;
     border: 1px solid var(--border); background: var(--bg-sunken); color: var(--text);
   }
-  .file-chip em { font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; font-style: normal; font-size: 10px; color: var(--text-faint); }
+  .file-chip em { font-family: var(--font-body); font-style: normal; font-size: 10px; color: var(--text-faint); }
+
+  /* Display typography (Space Grotesk via --font-display): wordmark, section headers, and card titles. */
+  h1, h2, h3, h4,
+  .welcome h1,
+  .topbar-name,
+  .task-title-row,
+  .task-work h2,
+  .panel-section h3,
+  .history-group h4,
+  .activity-section h4,
+  .task-chat-head,
+  .analytics-summary,
+  .analytics-card h3,
+  .settings-dialog-head h2,
+  .voice-view-title,
+  .check-title,
+  .action-label,
+  .heartbeat-card .heartbeat-title {
+    font-family: var(--font-display);
+  }
 
   .operation { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text); line-height: 1.45; }
   .operation .dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--accent); }
@@ -485,7 +518,11 @@
   .chat-bubble.orbit .body { white-space: pre-wrap; overflow-wrap: anywhere; }
   .chat-bubble.user .body { color: var(--text); }
   .chat-meta { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; padding: 0 2px; }
-  .task-turn-status { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; background: var(--bg-card); }
+  .chat-row.orbit.is-generating:not(.has-thinking):not(.has-error) { display: none; }
+  .chat-row.orbit.is-generating .chat-bubble > .body,
+  .chat-row.orbit.is-generating .message-actions,
+  .chat-row.orbit.is-generating .chat-meta { display: none; }
+  .task-turn-status { display: flex; align-items: center; gap: 8px; padding: 0; margin: 0; align-self: flex-start; background: transparent; }
   .task-turn-status[hidden] { display: none; }
   .task-turn-status .turn-rings { width: 18px; height: 18px; flex: 0 0 18px; }
   .task-chat-input { border-top: 1px solid var(--border-soft); padding: 10px 12px; display: flex; gap: 8px; align-items: center; background: var(--bg-card); }
@@ -513,16 +550,94 @@
     white-space: nowrap; margin-right: 8px;
   }
   .thinking-label[hidden] { display: none; }
-  .thinking-block .thinking-text::after {
-    content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
+  .thinking-block .thinking-text { display: inline; }
+  .thinking-block:not(.done) .thinking-text:not(:empty)::after {
+    content: "▍"; display: inline; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
   }
   .thinking-block.done .thinking-text::after { content: ""; }
   @keyframes caret-blink { 50% { opacity: 0; } }
 
   .chat-bubble.orbit .body .orbit-icon { margin-right: 6px; }
-  .chat-bubble .body.streaming::after {
-    content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
+  .chat-bubble .reply { display: inline; }
+  .chat-bubble .reply.streaming::after {
+    content: "▍"; display: inline; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
   }
+  .chat-bubble .reply.streaming.in-code-block::after { content: none; }
+  .chat-bubble .reply.streaming.in-code-block .code-block.is-open .code-content::after {
+    content: "▍"; display: inline; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
+  }
+
+  /* ===================== code blocks & syntax highlighting ===================== */
+  .inline-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.92em; padding: 1px 5px; border-radius: 5px;
+    background: var(--bg-card); border: 1px solid var(--border-soft); color: var(--text);
+  }
+  .code-block {
+    position: relative; margin: 8px 0; border-radius: var(--radius-sm);
+    background: var(--bg-sunken); border: 1px solid var(--border);
+    overflow: hidden; white-space: normal;
+  }
+  .code-block-header {
+    display: flex; align-items: center; justify-content: space-between;
+    min-height: 28px; padding: 4px 10px;
+    background: var(--bg-card); border-bottom: 1px solid var(--border-soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 10.5px; color: var(--text-faint);
+  }
+  .code-lang { text-transform: lowercase; letter-spacing: 0.03em; }
+  .code-copy-btn {
+    margin-left: auto; padding: 2px 8px; border-radius: 5px;
+    border: 1px solid var(--border); background: var(--bg-sunken);
+    color: var(--text-dim); font: inherit; font-size: 10.5px;
+    cursor: pointer; opacity: 0; transition: opacity 140ms ease, color 120ms ease, border-color 120ms ease;
+  }
+  .code-block:hover .code-copy-btn,
+  .code-block:focus-within .code-copy-btn,
+  .code-copy-btn:focus-visible,
+  .code-copy-btn[data-copied="true"] { opacity: 1; }
+  .code-copy-btn:hover, .code-copy-btn:focus-visible { color: var(--text); border-color: var(--accent-dim); }
+  .code-copy-btn[data-copied="true"] { color: var(--green); border-color: rgba(120, 184, 138, 0.4); }
+  .code-pre {
+    margin: 0; padding: 10px 12px; overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px; line-height: 1.55; color: var(--text); white-space: pre;
+  }
+  .code-content {
+    font-family: inherit; font-size: inherit; color: inherit;
+  }
+  .tok-keyword { color: var(--accent-bright); }
+  .tok-string { color: var(--green); }
+  .tok-comment { color: var(--text-faint); font-style: italic; }
+  .tok-number { color: var(--amber); }
+  .tok-func { color: #9ec3ff; }
+  .tok-diff-add { color: var(--green); background: rgba(120, 184, 138, 0.1); display: inline-block; width: 100%; }
+  .tok-diff-del { color: var(--red); background: rgba(225, 125, 125, 0.1); display: inline-block; width: 100%; }
+  .tok-diff-hunk { color: var(--accent-bright); }
+
+  /* ===================== inline retry & jump to latest ===================== */
+  .inline-retry-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin-left: 8px; padding: 2px 9px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--bg-card);
+    color: var(--text-dim); font: inherit; font-size: 11px; font-style: normal;
+    cursor: pointer; vertical-align: baseline;
+    transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+  }
+  .inline-retry-btn:hover, .inline-retry-btn:focus-visible {
+    color: var(--text); border-color: var(--accent-bright); background: var(--accent-wash);
+  }
+  .inline-retry-btn:disabled { opacity: 0.45; cursor: default; }
+  .chat-row.user .inline-retry-btn { margin: 4px 0 0; align-self: flex-end; }
+  .jump-to-latest {
+    position: sticky; bottom: 6px; align-self: center; z-index: 4;
+    padding: 4px 11px; border-radius: 999px;
+    border: 1px solid var(--accent-dim); background: var(--bg-card);
+    color: var(--accent-bright); font: inherit; font-size: 11px;
+    cursor: pointer; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  }
+  .jump-to-latest[hidden] { display: none; }
+  .jump-to-latest:hover, .jump-to-latest:focus-visible { color: var(--text); border-color: var(--accent-bright); }
 
   /* home chat thread (revealed after the first message) */
   .home-thread {
@@ -580,6 +695,46 @@
   .reminders-toggle[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
   .reminders-toggle[aria-checked="true"] .knob { left: 16px; background: var(--text); }
   .reminders-toggle:disabled { opacity: 0.5; cursor: default; }
+
+  /* ===================== send a suggestion ===================== */
+  .suggestion-box {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 6px 8px 10px;
+  }
+  .suggestion-heading {
+    font-size: 11px; color: var(--text-dim); font-weight: 500;
+  }
+  .suggestion-controls {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .suggestion-input {
+    flex: 1; min-width: 0; padding: 5px 8px;
+    border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+    background: var(--bg-sunken); color: var(--text);
+    font: inherit; font-size: 11.5px; outline: none;
+  }
+  .suggestion-input:focus { border-color: var(--accent-dim); }
+  .suggestion-input::placeholder { color: var(--text-faint); }
+  .suggestion-submit {
+    padding: 5px 10px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--bg-card);
+    color: var(--text-dim); font: inherit; font-size: 11px; cursor: pointer;
+  }
+  .suggestion-submit:hover:not(:disabled) { color: var(--text); border-color: var(--accent-dim); }
+  .suggestion-submit:disabled { opacity: 0.5; cursor: default; }
+  .suggestion-feedback {
+    font-size: 11px; color: var(--text-faint); line-height: 1.4;
+  }
+  .suggestion-feedback.error { color: var(--red); }
+  .suggestion-feedback[hidden] { display: none; }
+  .suggestion-card-host {
+    padding: 8px 9px; border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm); background: var(--bg-sunken);
+    font-size: 11.5px;
+  }
+  .suggestion-card-host[hidden] { display: none; }
+  .suggestion-card-host .action-summary { font-size: 11.5px; overflow-wrap: anywhere; }
+  .suggestion-card-host .action-buttons button { padding: 4px 10px; font-size: 11px; }
 
   /* ===================== proposed tool actions (Chat mode) ===================== */
   /* A card sits in an Orbit bubble. Nothing runs until Approve; the card then
@@ -809,7 +964,7 @@
   @media (hover: none) {
     /* Touch: the row actions are always at full contrast, since there is no
        hover to reveal them with. */
-    .message-actions { opacity: 1; }
+    .message-actions, .code-copy-btn { opacity: 1; }
   }
   @media (max-width: 1100px) {
     .topbar-actions .topbar-account-name { display: none; }

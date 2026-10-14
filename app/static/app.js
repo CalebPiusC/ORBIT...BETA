@@ -2,10 +2,9 @@
  *
  * Replaces the mockup's timer-based "streaming" fake with real Server-Sent
  * Events from ChatProvider.reply_stream. Chunks arrive as they are generated
- * and are appended to the DOM immediately — the visual behavior the mockup
- * asked to keep (word/character reveal, blinking caret, caret disappears when
- * done) is preserved, but the content is genuinely streamed, not sliced on a
- * timer.
+ * and are appended to the DOM immediately — messages render in strict
+ * chronological order and the blinking caret is an inline ::after on the
+ * streamed reply text node itself.
  */
 (function () {
   "use strict";
@@ -51,9 +50,18 @@
     var finish = onFinish || function () {};
     var sawContent = false;
     var sawErrorEvent = false;
+    var sawDoneEvent = false;
     function event(name, data) {
-      if (name === "answer" || name === "thinking") sawContent = true;
+      if (
+        name === "answer" ||
+        name === "thinking" ||
+        name === "action" ||
+        name === "notice"
+      ) {
+        sawContent = true;
+      }
       if (name === "error") sawErrorEvent = true;
+      if (name === "done") sawDoneEvent = true;
       onEvent(name, data);
     }
     var request = {
@@ -123,11 +131,17 @@
           });
         }
         return pump().then(function () {
-          finish(
-            sawContent || sawErrorEvent
-              ? null
-              : "The model returned nothing for this turn. Check the key and model in .env, or run the real provider instead of the demo stub."
-          );
+          if (sawErrorEvent) {
+            finish(null);
+          } else if (!sawContent) {
+            finish(
+              "The model returned nothing for this turn. Check the key and model in .env, or run the real provider instead of the demo stub."
+            );
+          } else if (!sawDoneEvent) {
+            finish("Response was cut off before finishing.");
+          } else {
+            finish(null);
+          }
         });
       })
       .catch(function (err) {
@@ -139,6 +153,120 @@
       });
   }
 
+  // --- auto-scroll --------------------------------------------------------
+  // Scroll to the newest message on send and while a response streams in —
+  // but only if the user was already scrolled to the bottom. If they have
+  // scrolled up to reread something earlier, do not yank them back down until
+  // they return to the bottom themselves (or click "Jump to latest").
+  var AUTO_SCROLL_THRESHOLD_PX = 40;
+
+  function isScrolledNearBottom(container) {
+    if (!container) return true;
+    var scrollHeight = Number(container.scrollHeight) || 0;
+    var scrollTop = Number(container.scrollTop) || 0;
+    var clientHeight = Number(container.clientHeight) || 0;
+    if (scrollHeight <= 0) return true;
+    if (clientHeight > 0 && scrollHeight <= clientHeight) return true;
+    return scrollHeight - scrollTop - clientHeight <= AUTO_SCROLL_THRESHOLD_PX;
+  }
+
+  function createAutoScroller(container) {
+    if (!container) {
+      return {
+        captureBeforeChange: function () { return true; },
+        scrollToBottomIfPinned: function () {},
+        forceScrollToBottom: function () {},
+        isPinned: function () { return true; },
+      };
+    }
+    if (container._orbitAutoScroller) return container._orbitAutoScroller;
+
+    var pinned = true;
+    var programmaticScroll = false;
+    var lastProgrammaticTop = null;
+    var jumpButton = null;
+
+    function ensureJumpButton() {
+      if (jumpButton || !container.parentNode) return jumpButton;
+      jumpButton = el("button", "jump-to-latest", "↓ Jump to latest");
+      jumpButton.type = "button";
+      jumpButton.hidden = true;
+      jumpButton.setAttribute("aria-label", "Jump to latest message");
+      jumpButton.addEventListener("click", function () {
+        forceScrollToBottom();
+      });
+      if (container.nextSibling) {
+        container.parentNode.insertBefore(jumpButton, container.nextSibling);
+      } else {
+        container.parentNode.appendChild(jumpButton);
+      }
+      return jumpButton;
+    }
+
+    function updateJumpButton() {
+      var btn = ensureJumpButton();
+      if (btn) btn.hidden = pinned;
+    }
+
+    function captureBeforeChange() {
+      var clientHeight = Number(container.clientHeight) || 0;
+      if (clientHeight > 0 || lastProgrammaticTop !== null) {
+        pinned = isScrolledNearBottom(container);
+      }
+      updateJumpButton();
+      return pinned;
+    }
+
+    container.addEventListener("scroll", function () {
+      if (programmaticScroll) return;
+      pinned = isScrolledNearBottom(container);
+      if (pinned) lastProgrammaticTop = Number(container.scrollTop) || 0;
+      updateJumpButton();
+    });
+
+    function writeBottom() {
+      programmaticScroll = true;
+      container.scrollTop = Number(container.scrollHeight) || 0;
+      lastProgrammaticTop = Number(container.scrollTop) || 0;
+      programmaticScroll = false;
+    }
+
+    function scrollToBottomIfPinned() {
+      if (
+        lastProgrammaticTop !== null &&
+        Number(container.scrollTop) < lastProgrammaticTop - AUTO_SCROLL_THRESHOLD_PX &&
+        !isScrolledNearBottom(container)
+      ) {
+        pinned = false;
+        updateJumpButton();
+      }
+      if (!pinned) return false;
+      writeBottom();
+      updateJumpButton();
+      return true;
+    }
+
+    function forceScrollToBottom() {
+      pinned = true;
+      writeBottom();
+      updateJumpButton();
+    }
+
+    var api = {
+      captureBeforeChange: captureBeforeChange,
+      scrollToBottomIfPinned: scrollToBottomIfPinned,
+      forceScrollToBottom: forceScrollToBottom,
+      isPinned: function () { return pinned; },
+    };
+    container._orbitAutoScroller = api;
+    return api;
+  }
+
+  function maybeScrollToBottom(container) {
+    if (!container) return;
+    createAutoScroller(container).scrollToBottomIfPinned();
+  }
+
   // One visible line inside an Orbit bubble, used for errors and notices.
   function showLine(body, text, cls) {
     var line = body.querySelector(".notice");
@@ -146,10 +274,10 @@
       line = el("div", "notice");
       body.appendChild(line);
     }
+    line.className = "notice" + (cls ? " " + cls : "");
     line.textContent = text;
-    if (cls) line.classList.add(cls);
     var thread = body.closest("[id]");
-    if (thread) thread.scrollTop = thread.scrollHeight;
+    if (thread) maybeScrollToBottom(thread);
   }
 
   // --- chat bubble helpers ------------------------------------------------
@@ -174,9 +302,9 @@
 
   // User messages: right-aligned accent bubble. No name label.
   function makeUserBubble(log, text) {
-    var bubble = makeRow(log, "user").bubble;
-    bubble.appendChild(el("div", "body", escapeHtml(text)));
-    return bubble;
+    var created = makeRow(log, "user");
+    created.bubble.appendChild(el("div", "body", escapeHtml(text)));
+    return created.row;
   }
 
   // Orbit's answer body: the orbital mark sits in front of the text and is the
@@ -210,23 +338,19 @@
 
   function messageText(row) {
     var reply = row && row.querySelector(".reply");
-    return reply ? reply.textContent : "";
+    if (!reply) return "";
+    var raw = reply.getAttribute("data-raw-text");
+    return raw !== null ? raw : reply.textContent;
   }
 
-  function copyMessage(button, row) {
-    var text = messageText(row);
+  function writeTextToClipboard(text, onSuccess) {
     if (!text) return;
-    function copied() {
-      var previous = button.title;
-      button.title = "Copied";
-      button.setAttribute("aria-label", "Response copied");
-      window.setTimeout(function () {
-        button.title = previous || "Copy";
-        button.setAttribute("aria-label", "Copy response");
-      }, 1200);
+    if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(onSuccess).catch(function () {});
+      return;
     }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(copied).catch(function () {});
+    if (!document.body) {
+      onSuccess();
       return;
     }
     var temp = document.createElement("textarea");
@@ -235,13 +359,270 @@
     temp.style.position = "fixed";
     temp.style.opacity = "0";
     document.body.appendChild(temp);
-    temp.select();
+    if (temp.select) temp.select();
     try {
-      if (document.execCommand("copy")) copied();
+      if (!document.execCommand || document.execCommand("copy")) onSuccess();
     } catch (_error) {
       // Clipboard access can be denied by the browser; the response stays intact.
     }
     temp.remove();
+  }
+
+  function copyMessage(button, row) {
+    var text = messageText(row);
+    if (!text) return;
+    writeTextToClipboard(text, function () {
+      var previous = button.title;
+      button.title = "Copied";
+      button.setAttribute("aria-label", "Response copied");
+      window.setTimeout(function () {
+        button.title = previous || "Copy";
+        button.setAttribute("aria-label", "Copy response");
+      }, 1200);
+    });
+  }
+
+  function copyCodeBlock(button) {
+    var block = button && button.closest ? button.closest(".code-block") : null;
+    if (!block) return;
+    var code = block.getAttribute("data-code");
+    if (code === null) {
+      var codeNode = block.querySelector(".code-content");
+      code = codeNode ? codeNode.textContent : "";
+    }
+    if (!code) return;
+    writeTextToClipboard(code, function () {
+      button.setAttribute("data-copied", "true");
+      button.textContent = "Copied";
+      button.title = "Copied";
+      button.setAttribute("aria-label", "Code copied");
+      window.setTimeout(function () {
+        if (button.removeAttribute) button.removeAttribute("data-copied");
+        button.textContent = "Copy";
+        button.title = "Copy code";
+        button.setAttribute("aria-label", "Copy code");
+      }, 1200);
+    });
+  }
+
+  // --- code blocks & syntax highlighting ----------------------------------
+  var CODE_TOKEN_RE =
+    /(#[^\n]*|\/\/[^\n]*|\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->)|("""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|\b(def|class|return|import|from|if|elif|else|for|while|try|except|finally|raise|with|as|pass|break|continue|lambda|yield|async|await|in|is|not|and|or|function|const|let|var|export|default|new|typeof|instanceof|switch|case|throw|catch|interface|type|extends|implements|public|private|protected|readonly|struct|enum|fn|pub|mut|impl|match|use|mod|crate|where|go|defer|chan|package|func|select|SELECT|FROM|WHERE|INSERT|INTO|VALUES|UPDATE|SET|DELETE|JOIN|LEFT|RIGHT|INNER|ORDER|BY|GROUP|LIMIT)\b|\b(True|False|None|true|false|null|undefined|NaN|Infinity|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|0x[0-9a-fA-F]+)\b|\b([A-Za-z_]\w*)(?=\s*\()/g;
+
+  function highlightDiff(code) {
+    return String(code || "")
+      .split("\n")
+      .map(function (line) {
+        var escaped = escapeHtml(line);
+        if (/^(?:\+\+\+|---|\+|-)/.test(line)) {
+          if (line.indexOf("+") === 0 && line.indexOf("+++") !== 0) {
+            return '<span class="tok-diff-add">' + escaped + "</span>";
+          }
+          if (line.indexOf("-") === 0 && line.indexOf("---") !== 0) {
+            return '<span class="tok-diff-del">' + escaped + "</span>";
+          }
+          return '<span class="tok-diff-hunk">' + escaped + "</span>";
+        }
+        if (/^(?:@@|diff |index )/.test(line)) {
+          return '<span class="tok-diff-hunk">' + escaped + "</span>";
+        }
+        return escaped;
+      })
+      .join("\n");
+  }
+
+  function looksLikeDiff(code, lang) {
+    var cleanLang = String(lang || "").toLowerCase();
+    if (cleanLang === "diff" || cleanLang === "patch") return true;
+    return /^(?:diff --git|--- |\+\+\+ |@@ )/m.test(String(code || ""));
+  }
+
+  function highlightCode(code, lang) {
+    var source = String(code || "");
+    if (looksLikeDiff(source, lang)) {
+      return highlightDiff(source);
+    }
+    var out = "";
+    var lastIdx = 0;
+    CODE_TOKEN_RE.lastIndex = 0;
+    var match;
+    while ((match = CODE_TOKEN_RE.exec(source)) !== null) {
+      if (match.index > lastIdx) {
+        out += escapeHtml(source.slice(lastIdx, match.index));
+      }
+      var token = match[0];
+      var cls = "tok-keyword";
+      if (match[1] !== undefined) cls = "tok-comment";
+      else if (match[2] !== undefined) cls = "tok-string";
+      else if (match[3] !== undefined) cls = "tok-keyword";
+      else if (match[4] !== undefined) cls = "tok-number";
+      else if (match[5] !== undefined) cls = "tok-func";
+      out += '<span class="' + cls + '">' + escapeHtml(token) + "</span>";
+      lastIdx = CODE_TOKEN_RE.lastIndex;
+    }
+    if (lastIdx < source.length) {
+      out += escapeHtml(source.slice(lastIdx));
+    }
+    return out;
+  }
+
+  function appendInlineProse(host, text) {
+    if (!text) return;
+    var inlineRe = /`([^`\n]+)`/g;
+    var lastIdx = 0;
+    var match;
+    while ((match = inlineRe.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        host.appendChild(el("span", "reply-text", escapeHtml(text.slice(lastIdx, match.index))));
+      }
+      host.appendChild(el("code", "inline-code", escapeHtml(match[1])));
+      lastIdx = inlineRe.lastIndex;
+    }
+    if (lastIdx < text.length) {
+      host.appendChild(el("span", "reply-text", escapeHtml(text.slice(lastIdx))));
+    }
+  }
+
+  function buildCodeBlockElement(code, lang, isOpen) {
+    var wrapper = el("div", "code-block" + (isOpen ? " is-open" : ""));
+    wrapper.setAttribute("data-code", code);
+    wrapper.setAttribute("data-lang", lang || "");
+    var header = el("div", "code-block-header");
+    header.appendChild(el("span", "code-lang", escapeHtml(lang || (looksLikeDiff(code, lang) ? "diff" : "code"))));
+    var copyBtn = el("button", "code-copy-btn", "Copy");
+    copyBtn.type = "button";
+    copyBtn.setAttribute("data-code-copy", "true");
+    copyBtn.setAttribute("aria-label", "Copy code");
+    copyBtn.setAttribute("title", "Copy code");
+    header.appendChild(copyBtn);
+    wrapper.appendChild(header);
+    var pre = el("pre", "code-pre");
+    var codeEl = el("code", "code-content", highlightCode(code, lang));
+    pre.appendChild(codeEl);
+    wrapper.appendChild(pre);
+    return wrapper;
+  }
+
+  function renderReplyContent(reply, rawText) {
+    if (!reply) return;
+    var source = String(rawText == null ? "" : rawText);
+    reply.setAttribute("data-raw-text", source);
+    if (source.indexOf("`") === -1) {
+      reply.classList.remove("in-code-block");
+      reply.textContent = source;
+      return;
+    }
+    reply.textContent = "";
+    var fenceRe = /```([a-zA-Z0-9_+-]*)[ \t]*\r?\n?([\s\S]*?)(```|$)/g;
+    var lastIdx = 0;
+    var match;
+    var endsInOpenCodeBlock = false;
+    while ((match = fenceRe.exec(source)) !== null) {
+      if (match.index > lastIdx) {
+        appendInlineProse(reply, source.slice(lastIdx, match.index));
+      }
+      var lang = (match[1] || "").trim();
+      var code = match[2] || "";
+      var isOpen = match[3] !== "```";
+      if (!isOpen && code.slice(-1) === "\n") {
+        code = code.slice(0, -1);
+      }
+      reply.appendChild(buildCodeBlockElement(code, lang, isOpen));
+      lastIdx = fenceRe.lastIndex;
+      endsInOpenCodeBlock = isOpen && lastIdx >= source.length;
+      if (isOpen) break;
+    }
+    if (lastIdx < source.length) {
+      appendInlineProse(reply, source.slice(lastIdx));
+      endsInOpenCodeBlock = false;
+    }
+    reply.classList.toggle("in-code-block", endsInOpenCodeBlock);
+  }
+
+  function formatExistingReplies(root) {
+    if (!root) return;
+    Array.prototype.forEach.call(root.querySelectorAll(".chat-row.orbit .reply"), function (reply) {
+      var raw = reply.getAttribute("data-raw-text");
+      var text = raw !== null ? raw : reply.textContent;
+      if (text && text.indexOf("`") !== -1) {
+        renderReplyContent(reply, text);
+      } else if (raw === null) {
+        reply.setAttribute("data-raw-text", text || "");
+      }
+    });
+  }
+
+  // --- inline retry / regenerate on failure -------------------------------
+  function prevUserRow(row) {
+    if (!row) return null;
+    if (row._userRow) return row._userRow;
+    if (!row.parentNode || !row.parentNode.children) return null;
+    var siblings = row.parentNode.children;
+    var idx = Array.prototype.indexOf.call(siblings, row);
+    for (var i = idx - 1; i >= 0; i--) {
+      if (siblings[i].classList && siblings[i].classList.contains("chat-row")) {
+        return siblings[i].classList.contains("user") ? siblings[i] : null;
+      }
+    }
+    return null;
+  }
+
+  function prevUserRowText(row) {
+    var userRow = prevUserRow(row);
+    if (!userRow) return "";
+    var body = userRow.querySelector(".body");
+    return body ? body.textContent.trim() : "";
+  }
+
+  function makeRetryButton(label, ariaLabel) {
+    var btn = el("button", "inline-retry-btn", label || "↻ Retry");
+    btn.type = "button";
+    btn.setAttribute("data-message-action", "retry");
+    btn.setAttribute("aria-label", ariaLabel || "Retry in place");
+    btn.setAttribute("title", ariaLabel || "Retry in place");
+    return btn;
+  }
+
+  function clearRetryUI(row) {
+    if (!row) return;
+    if (row.removeAttribute) row.removeAttribute("data-can-retry");
+    else row.setAttribute("data-can-retry", "false");
+    row.classList.remove("has-error", "was-stopped");
+    Array.prototype.forEach.call(row.querySelectorAll(".inline-retry-btn"), function (btn) {
+      btn.remove();
+    });
+    var userRow = prevUserRow(row);
+    if (userRow) {
+      userRow.classList.remove("has-error");
+      Array.prototype.forEach.call(userRow.querySelectorAll(".inline-retry-btn"), function (btn) {
+        btn.remove();
+      });
+    }
+  }
+
+  function attachRetryAction(row, body, noAnswerYet) {
+    if (!row || !body) return;
+    row.setAttribute("data-can-retry", "true");
+    var notice = body.querySelector(".notice");
+    var host = notice || body;
+    if (!host.querySelector(".inline-retry-btn")) {
+      host.appendChild(
+        makeRetryButton(
+          noAnswerYet ? "↻ Retry" : "↻ Regenerate",
+          noAnswerYet ? "Retry message in place" : "Regenerate incomplete response in place"
+        )
+      );
+    }
+    if (noAnswerYet) {
+      var userRow = prevUserRow(row);
+      if (userRow) {
+        userRow._orbitRow = row;
+        userRow.classList.add("has-error");
+        if (!userRow.querySelector(".inline-retry-btn")) {
+          userRow.appendChild(makeRetryButton("↻ Retry", "Retry sending message"));
+        }
+      }
+    }
   }
 
   // Regenerate stays available on every reply, so an older answer can be redone
@@ -249,11 +630,20 @@
   // interleave) or when the row has nothing to regenerate yet.
   function refreshRegenerateActions(root) {
     if (!root) return;
+    var anyBusy = !!root.querySelector(".chat-row.is-generating, .chat-row.is-streaming");
     Array.prototype.forEach.call(root.querySelectorAll('[data-message-action="regenerate"]'), function (button) {
       var row = button.closest(".chat-row");
-      var reply = row && row.querySelector(".reply");
-      var busy = !!row && (row.classList.contains("is-generating") || row.classList.contains("is-streaming"));
-      button.disabled = !row || busy || !reply || !reply.textContent.trim();
+      var text = messageText(row);
+      var busy = anyBusy || (!!row && (row.classList.contains("is-generating") || row.classList.contains("is-streaming")));
+      var canRetry =
+        !!row &&
+        (row.getAttribute("data-can-retry") === "true" ||
+          row.classList.contains("has-error") ||
+          row.classList.contains("was-stopped"));
+      button.disabled = !row || busy || (!canRetry && !text.trim());
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-message-action="retry"]'), function (button) {
+      button.disabled = anyBusy;
     });
   }
 
@@ -289,15 +679,23 @@
   function wireMessageActions(root, onRegenerate) {
     if (!root) return;
     root.addEventListener("click", function (event) {
-      var button = event.target.closest ? event.target.closest(".message-action") : null;
-      if (!button || !root.contains(button) || button.disabled) return;
+      var target = event.target;
+      if (!target || !target.closest) return;
+      var codeBtn = target.closest("[data-code-copy]");
+      if (codeBtn && (!root.contains || root.contains(codeBtn))) {
+        copyCodeBlock(codeBtn);
+        return;
+      }
+      var button = target.closest("[data-message-action]");
+      if (!button || (root.contains && !root.contains(button)) || button.disabled) return;
       var row = button.closest(".chat-row");
       var action = button.getAttribute("data-message-action");
       if (!row) return;
       if (action === "copy") {
         copyMessage(button, row);
-      } else if (action === "regenerate") {
-        if (typeof onRegenerate === "function") onRegenerate(row);
+      } else if (action === "regenerate" || action === "retry") {
+        var targetRow = row.classList.contains("user") && row._orbitRow ? row._orbitRow : row;
+        if (typeof onRegenerate === "function") onRegenerate(targetRow);
       } else if (action === "feedback-up" || action === "feedback-down") {
         var actions = button.closest(".message-actions");
         var pressed = button.getAttribute("aria-pressed") === "true";
@@ -380,7 +778,13 @@
     if (existingRow) {
       var existingBubble = existingRow.querySelector(".chat-bubble.orbit");
       if (!existingBubble) return makeOrbitBubble(log);
-      existingRow.classList.remove("is-generating", "is-streaming", "has-error", "was-stopped");
+      existingRow.classList.remove(
+        "is-generating",
+        "is-streaming",
+        "has-thinking",
+        "has-error",
+        "was-stopped"
+      );
       existingBubble.innerHTML = "";
       message = { row: existingRow, bubble: existingBubble };
     } else {
@@ -395,7 +799,7 @@
     think.appendChild(thinkText);
     bubble.appendChild(think);
     var parts = makeOrbitBody(bubble);
-    log.scrollTop = log.scrollHeight;
+    maybeScrollToBottom(log);
     return {
       row: message.row,
       bubble: bubble,
@@ -476,6 +880,20 @@
     if (this.textNode) this.textNode.textContent = "";
   };
 
+  TurnStatus.prototype.placeBefore = function (node) {
+    if (!this.bar || !node || !node.parentNode) return;
+    node.parentNode.insertBefore(this.bar, node);
+  };
+
+  TurnStatus.prototype.placeAfter = function (node) {
+    if (!this.bar || !node || !node.parentNode) return;
+    if (node.nextSibling) {
+      node.parentNode.insertBefore(this.bar, node.nextSibling);
+    } else {
+      node.parentNode.appendChild(this.bar);
+    }
+  };
+
   TurnStatus.prototype._say = function (text) {
     if (!this.bar) return;
     this.bar.hidden = false;
@@ -493,6 +911,52 @@
     var bar = document.getElementById(barId);
     if (!bar) return new TurnStatus(null, null);
     return new TurnStatus(bar, document.getElementById(textId));
+  }
+
+  var STEP_FILE_NAME_RE =
+    /(?:^|[^\w./-])[A-Za-z0-9_][\w-]*(?:\/[\w.-]+)*\.(?:py|js|jsx|mjs|cjs|ts|tsx|json|md|markdown|yml|yaml|toml|html|css|scss|sh|bash|zsh|rb|go|rs|java|kt|swift|c|cc|cpp|h|hpp|cs|php|sql|ini|cfg|conf|lock|txt|csv|env)(?![\w])/i;
+  var STEP_FILE_WORD_RE = /\b(?:read|reading|file|files)\b/i;
+  var STEP_TOOL_WORD_RE =
+    /\b(?:tool|tools|calling|invoke|invoking|write_note|send_suggestion|remember_fact|forget_fact|save_plan|pause_heartbeat|resume_heartbeat)\b/i;
+  var STEP_REPRODUCE_WORD_RE =
+    /\b(?:reproduce|reproducing|reproduction|crash|crashes|traceback|exception|failing|bug)\b/i;
+  var STEP_TEST_WORD_RE =
+    /\b(?:test|tests|testing|tested|pytest|unittest|verify|verifying|verification)\b/i;
+  var STEP_PLAN_WORD_RE =
+    /\b(?:plan|planning|approach|design|outline|trade-off|tradeoff)\b/i;
+  var STEP_CHANGE_WORD_RE =
+    /\b(?:implement|implementing|patch|patching|edit|editing|update|updating|fix|fixing|refactor|refactoring)\b/i;
+  var STEP_REVIEW_WORD_RE = /\b(?:review|reviewing|diff|audit|auditing)\b/i;
+  var STEP_REPO_WORD_RE =
+    /\b(?:repository|repo|codebase|context|structure|directory|locate|locating|search|searching)\b/i;
+
+  function describeThinkingStep(text) {
+    var source = String(text || "");
+    if (STEP_FILE_NAME_RE.test(source) || STEP_FILE_WORD_RE.test(source)) {
+      return "Reading the file…";
+    }
+    if (STEP_TOOL_WORD_RE.test(source)) {
+      return "Calling a tool…";
+    }
+    if (STEP_REPRODUCE_WORD_RE.test(source)) {
+      return "Reproducing the failure…";
+    }
+    if (STEP_TEST_WORD_RE.test(source)) {
+      return "Checking the tests…";
+    }
+    if (STEP_PLAN_WORD_RE.test(source)) {
+      return "Planning the change…";
+    }
+    if (STEP_CHANGE_WORD_RE.test(source)) {
+      return "Drafting the change…";
+    }
+    if (STEP_REVIEW_WORD_RE.test(source)) {
+      return "Reviewing the code…";
+    }
+    if (STEP_REPO_WORD_RE.test(source)) {
+      return "Checking the repository…";
+    }
+    return "Working through it…";
   }
 
   // --- suggested next steps ------------------------------------------------
@@ -531,7 +995,7 @@
     container.setAttribute("data-action-id", card.id);
     bubble.appendChild(container);
     renderActionCard(container, card);
-    log.scrollTop = log.scrollHeight;
+    maybeScrollToBottom(log);
   }
 
   function renderActionCard(container, card) {
@@ -667,6 +1131,85 @@
     });
     dialog.addEventListener("click", function (event) {
       if (event.target === dialog && typeof dialog.close === "function") dialog.close();
+    });
+  }
+
+  // Send a suggestion: a single text box in the sidebar that proposes
+  // send_suggestion through the same confirmation gate and audit trail as
+  // write_note. Nothing is written to suggestions.txt until Approve is clicked.
+  function wireSuggestions() {
+    var box = document.getElementById("suggestionBox");
+    var input = document.getElementById("suggestionInput");
+    var submit = document.getElementById("suggestionSubmit");
+    var feedback = document.getElementById("suggestionFeedback");
+    var cardHost = document.getElementById("suggestionCardHost");
+    var toggle = document.getElementById("suggestionToggle");
+    var sidebar = document.getElementById("sidebar");
+    if (!input || !submit || input.dataset.orbitWired === "true") return;
+    input.dataset.orbitWired = "true";
+
+    function showFeedback(text, isError) {
+      if (!feedback) return;
+      feedback.textContent = text || "";
+      feedback.hidden = !text;
+      feedback.classList.toggle("error", !!isError);
+    }
+
+    if (toggle) {
+      toggle.addEventListener("click", function () {
+        if (sidebar && sidebar.classList.contains("sidebar--collapsed")) {
+          applySidebarCollapsed(sidebar, false);
+          rememberSidebarCollapsed(false);
+        }
+        if (box) box.hidden = false;
+        input.focus();
+      });
+    }
+
+    function submitSuggestion() {
+      var text = input.value.trim();
+      if (!text) {
+        showFeedback("Write a suggestion first.", true);
+        input.focus();
+        return;
+      }
+      submit.disabled = true;
+      showFeedback("", false);
+      fetch("/api/suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: text }),
+      })
+        .then(function (res) {
+          return res.json().catch(function () { return {}; }).then(function (data) {
+            if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+            return data;
+          });
+        })
+        .then(function (card) {
+          input.value = "";
+          if (!cardHost) return;
+          cardHost.textContent = "";
+          cardHost.hidden = false;
+          var container = el("div", "action-card");
+          container.setAttribute("data-action-id", card.id);
+          cardHost.appendChild(container);
+          renderActionCard(container, card);
+        })
+        .catch(function (err) {
+          showFeedback((err && err.message) || "Could not queue that suggestion.", true);
+        })
+        .finally(function () {
+          submit.disabled = false;
+        });
+    }
+
+    submit.addEventListener("click", submitSuggestion);
+    input.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submitSuggestion();
+      }
     });
   }
 
@@ -877,8 +1420,8 @@
     return "webm";
   }
 
-  // Press and hold to record; releasing stops the recorder, transcribes the
-  // clip, and hands plain text back to the same send handler used by typing.
+  // Tap once to start recording; tap a second time to stop, transcribe the
+  // clip, and hand plain text back to the same send handler used by typing.
   function wirePushToTalk(button, statusNode, onTranscript, isBusy, onState) {
     if (!button) return;
     var supported = !!(
@@ -888,8 +1431,8 @@
     var recorder = null;
     var stream = null;
     var chunks = [];
-    var pressed = false;
-    var keyboardHeld = false;
+    var starting = false;
+    var recording = false;
     var processing = false;
     var maxDurationTimer = null;
 
@@ -900,9 +1443,10 @@
 
     function setActive(active) {
       button.classList.toggle("recording", active);
+      button.textContent = active ? "■" : "🎙";
       button.setAttribute("aria-pressed", active ? "true" : "false");
-      button.setAttribute("aria-label", active ? "Recording; release to transcribe" : "Hold to talk");
-      button.title = active ? "Release to transcribe" : "Hold to talk";
+      button.setAttribute("aria-label", active ? "Stop recording and transcribe" : "Tap to talk");
+      button.title = active ? "Tap to stop" : "Tap to talk";
     }
 
     function stopTracks(mediaStream) {
@@ -912,7 +1456,7 @@
     }
 
     function updateDisabled() {
-      button.disabled = !supported || processing || !!(isBusy && isBusy());
+      button.disabled = !supported || processing || (!recording && !starting && !!(isBusy && isBusy()));
     }
 
     if (!supported) {
@@ -921,16 +1465,16 @@
       return function () {};
     }
 
-    async function begin(event, fromKeyboard) {
-      if (event && event.preventDefault) event.preventDefault();
-      if (pressed || processing || (isBusy && isBusy())) return;
-      pressed = true;
-      keyboardHeld = !!fromKeyboard;
+    async function startRecording() {
+      if (recording || starting || processing || (isBusy && isBusy())) return;
+      starting = true;
+      setActive(true);
       reportState("thinking", "Requesting microphone access…");
       try {
         var mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        if (!pressed) {
+        if (!starting) {
           stopTracks(mediaStream);
+          setActive(false);
           return;
         }
         stream = mediaStream;
@@ -956,7 +1500,7 @@
           stream = null;
           recorder = null;
           if (!blob.size) {
-            reportState("idle", "The recording was empty. Hold the mic button and try again.", true);
+            reportState("idle", "The recording was empty. Tap the mic button to start and tap again to send.", true);
             updateDisabled();
             return;
           }
@@ -990,17 +1534,19 @@
           reportState("idle", "The microphone recording failed. Please try again.", true);
         });
         activeRecorder.start();
+        starting = false;
+        recording = true;
         setActive(true);
-        reportState("listening", "Listening… release to send.");
+        reportState("listening", "Recording… tap to stop and send.");
         maxDurationTimer = window.setTimeout(function () {
-          if (pressed) {
+          if (recording) {
             reportState("thinking", "Recording limit reached; transcribing the clip.");
-            release();
+            stopRecording();
           }
         }, 120000);
       } catch (error) {
-        pressed = false;
-        keyboardHeld = false;
+        starting = false;
+        recording = false;
         stopTracks(stream);
         stream = null;
         recorder = null;
@@ -1010,10 +1556,10 @@
       }
     }
 
-    function release() {
-      if (!pressed) return;
-      pressed = false;
-      keyboardHeld = false;
+    function stopRecording() {
+      if (!recording && !starting) return;
+      starting = false;
+      recording = false;
       if (maxDurationTimer) window.clearTimeout(maxDurationTimer);
       maxDurationTimer = null;
       setActive(false);
@@ -1023,29 +1569,26 @@
       } else {
         stopTracks(stream);
         stream = null;
+        recorder = null;
         reportState("idle", "");
       }
     }
 
-    button.addEventListener("pointerdown", function (event) {
-      if (event.button !== 0) return;
-      begin(event, false);
-    });
-    window.addEventListener("pointerup", release);
-    window.addEventListener("pointercancel", release);
-    button.addEventListener("keydown", function (event) {
-      if (event.key === " " || event.key === "Enter") begin(event, true);
-    });
-    window.addEventListener("keyup", function (event) {
-      if (keyboardHeld && (event.key === " " || event.key === "Enter")) release();
-    });
-    window.addEventListener("blur", release);
+    function toggleRecording(event) {
+      if (event && event.preventDefault) event.preventDefault();
+      if (recording || starting) {
+        stopRecording();
+      } else {
+        startRecording();
+      }
+    }
+
+    button.addEventListener("click", toggleRecording);
     document.addEventListener("visibilitychange", function () {
-      if (document.hidden) release();
+      if (document.hidden && (recording || starting)) stopRecording();
     });
-    button.addEventListener("contextmenu", function (event) { event.preventDefault(); });
     updateDisabled();
-    return release;
+    return stopRecording;
   }
 
   function showAudioError(body, error, onPlaybackState) {
@@ -1189,6 +1732,7 @@
     wireNewConversation();
     wireSettingsControls();
     wireReminders();
+    wireSuggestions();
     wireConversationSearch();
     wireAttachments("homeAttach", "homeAttachmentInput", "homeAttachmentNote");
     // Cards still waiting on a decision (rendered by the server on reload).
@@ -1233,18 +1777,26 @@
     // slowly; the moment Orbit starts responding the same mark shrinks, speeds
     // up and sits beside the status line.
     function welcomeResponding() {
-      if (welcome) welcome.classList.add("is-responding");
+      if (!welcome || welcome.hidden) {
+        if (turnStatus.bar) turnStatus.bar.classList.remove("no-rings");
+        return;
+      }
+      welcome.classList.add("is-responding");
       if (turnStatus.bar) turnStatus.bar.classList.add("no-rings");
     }
 
     function welcomeDone() {
       if (welcome) welcome.hidden = true;
+      if (turnStatus.bar) turnStatus.bar.classList.remove("no-rings");
     }
 
     // The turn did not land, so the welcome screen goes back to idle with its
     // shortcuts available rather than staying half-collapsed.
     function welcomeIdle() {
-      if (welcome) welcome.classList.remove("is-responding");
+      if (welcome && !thread.querySelector(".chat-row")) {
+        welcome.hidden = false;
+        welcome.classList.remove("is-responding");
+      }
       if (turnStatus.bar) turnStatus.bar.classList.remove("no-rings");
     }
 
@@ -1321,6 +1873,8 @@
       });
     }
     wireMessageActions(thread, regenerateHome);
+    var homeScroller = createAutoScroller(thread);
+    formatExistingReplies(thread);
 
     function startStream(row, body, reply, payload, voiceReply) {
       inflight = true;
@@ -1331,35 +1885,53 @@
       if (voiceExpand) voiceExpand.disabled = true;
       setVoiceStatus(voiceStatus, "");
       if (voiceReply) setVoiceViewState("thinking", "Thinking…", false);
+      if (payload && payload.message) {
+        row.setAttribute("data-retry-message", payload.message);
+      }
+      clearRetryUI(row);
       row.classList.add("is-generating");
-      body.classList.add("streaming");
+      row.classList.remove("is-streaming");
+      body.classList.remove("streaming");
+      reply.classList.remove("streaming");
+      reply.classList.remove("in-code-block");
       refreshRegenerateActions(thread);
       var fullReply = "";
-      var sawText = false;
+      var sawAnswer = false;
+      var sawAction = false;
+      var sawError = false;
+      turnStatus.placeBefore(row);
       turnStatus.begin();
       welcomeResponding();
-      thread.scrollTop = thread.scrollHeight;
+      homeScroller.scrollToBottomIfPinned();
 
       postSSE(
         "/api/chat",
         payload,
         function (event, data) {
-          if (event === "answer") {
-            if (!sawText) {
-              sawText = true;
+          if (event === "status") {
+            if (!sawAnswer && data) turnStatus.arriving(data);
+          } else if (event === "thinking") {
+            if (!sawAnswer) turnStatus.arriving(describeThinkingStep(data));
+          } else if (event === "answer") {
+            if (!sawAnswer) {
+              sawAnswer = true;
               // The first chunk is on screen, so the label stops saying we are
-              // waiting and starts saying what is arriving.
+              // waiting and starts saying what is arriving; the reply row now
+              // replaces the thinking bar in place with its own inline cursor.
               turnStatus.arriving("Writing your answer…");
+              turnStatus.clear();
+              row.classList.remove("is-generating");
+              row.classList.add("is-streaming");
+              body.classList.add("streaming");
+              reply.classList.add("streaming");
             }
-            row.classList.remove("is-generating");
-            row.classList.add("is-streaming");
-            reply.textContent += data;
             fullReply += data;
+            renderReplyContent(reply, fullReply);
             if (voiceReply && voiceViewReply) {
               voiceViewReply.hidden = false;
               voiceViewReply.textContent += data;
             }
-            thread.scrollTop = thread.scrollHeight;
+            homeScroller.scrollToBottomIfPinned();
           } else if (event === "conversation") {
             var created = JSON.parse(data);
             addHistoryItem(created.id, created.title);
@@ -1367,11 +1939,14 @@
             var named = JSON.parse(data);
             setHistoryTitle(named.id, named.title);
           } else if (event === "action") {
+            sawAction = true;
+            if (!sawAnswer) turnStatus.arriving("Calling a tool…");
             appendActionCard(thread, JSON.parse(data));
             refreshRegenerateActions(thread);
           } else if (event === "followups") {
             renderFollowups(followupsBox, JSON.parse(data));
           } else if (event === "notice") {
+            row.classList.remove("is-generating");
             showLine(body, data, "warn");
           } else if (event === "message") {
             // The stored reply's id: this row's Copy/Regenerate/rating buttons
@@ -1382,13 +1957,21 @@
               // A malformed id line must not break the reply that just arrived.
             }
           } else if (event === "done") {
+            row.classList.remove("is-generating", "is-streaming");
+            reply.classList.remove("streaming");
+            reply.classList.remove("in-code-block");
             body.classList.remove("streaming");
             turnStatus.clear();
           } else if (event === "error") {
+            sawError = true;
+            row.classList.remove("is-generating", "is-streaming");
             row.classList.add("has-error");
+            reply.classList.remove("streaming");
+            reply.classList.remove("in-code-block");
             body.classList.remove("streaming");
             turnStatus.clear();
             showLine(body, data, "error");
+            attachRetryAction(row, body, !sawAnswer);
           }
         },
         function (err) {
@@ -1401,12 +1984,28 @@
           turnStatus.clear();
           row.classList.remove("is-generating", "is-streaming");
           row.classList.toggle("was-stopped", stopped);
+          reply.classList.remove("streaming");
+          reply.classList.remove("in-code-block");
           body.classList.remove("streaming");
           if (err) {
+            sawError = true;
             row.classList.add("has-error");
             showLine(body, err, "error");
+            attachRetryAction(row, body, !sawAnswer);
             welcomeIdle();
+          } else if (stopped) {
+            if (!body.querySelector(".notice")) {
+              showLine(body, "Response was stopped before finishing.", "warn");
+            }
+            attachRetryAction(row, body, !sawAnswer);
+            welcomeDone();
+          } else if (sawError) {
+            attachRetryAction(row, body, !sawAnswer);
+            welcomeDone();
           } else {
+            if (!fullReply.trim() && sawAction && !body.querySelector(".notice") && row.parentNode) {
+              row.parentNode.removeChild(row);
+            }
             // Answered or stopped: the conversation has started, so the welcome
             // screen has done its job and steps out.
             welcomeDone();
@@ -1427,24 +2026,35 @@
     }
 
     // Regenerating rewrites one reply where it stands, so any Orbit reply can be
-    // redone, not only the newest. The row's id names the message to replace.
+    // redone, not only the newest. The row's id names the message to replace; if
+    // the message failed or was cut off before receiving an id, it retries in place.
     function regenerateHome(row) {
       if (inflight || !row || !row.classList.contains("orbit")) return;
       var body = row.querySelector(".body");
       var reply = row.querySelector(".reply");
-      if (!body || !reply || !reply.textContent.trim()) return;
+      if (!body || !reply) return;
       var id = messageId(row);
-      if (!id) {
+      var retryText = row.getAttribute("data-retry-message") || prevUserRowText(row);
+      var canRetryFailed =
+        row.getAttribute("data-can-retry") === "true" ||
+        row.classList.contains("has-error") ||
+        row.classList.contains("was-stopped");
+      if (!canRetryFailed && !messageText(row).trim()) return;
+      if (!id && !canRetryFailed) {
         // No id means there is nothing stored to rewrite. Say so rather than
         // leaving a button that looks live and does nothing.
         showLine(body, "This reply was not stored with an id, so it cannot be regenerated.", "warn");
         return;
       }
+      homeScroller.captureBeforeChange();
       Array.prototype.forEach.call(body.querySelectorAll(".notice"), function (notice) { notice.remove(); });
-      reply.textContent = "";
-      row.classList.remove("has-error");
+      clearRetryUI(row);
+      renderReplyContent(reply, "");
       renderFollowups(followupsBox, []);
-      startStream(row, body, reply, { regenerate: true, message_id: id }, false);
+      var payload = id
+        ? { regenerate: true, message_id: id }
+        : { retry: true, message: retryText };
+      startStream(row, body, reply, payload, false);
     }
 
     // A starter button or a follow-up chip: put the prompt in the composer and
@@ -1475,10 +2085,16 @@
       // Suggestions belong to the reply that produced them, so they go the
       // moment a new turn starts and come back only if the next reply earns them.
       renderFollowups(followupsBox, []);
+      welcomeDone();
       dockComposer();
       thread.classList.add("visible");
-      makeUserBubble(thread, text);
+      homeScroller.captureBeforeChange();
+      var userRow = makeUserBubble(thread, text);
+      turnStatus.placeAfter(userRow);
       var orbitMessage = makeRow(thread, "orbit");
+      orbitMessage.row._userRow = userRow;
+      userRow._orbitRow = orbitMessage.row;
+      orbitMessage.row.setAttribute("data-retry-message", text);
       var parts = makeOrbitBody(orbitMessage.bubble);
       refreshRegenerateActions(thread);
       startStream(orbitMessage.row, parts.body, parts.reply, { message: text }, voiceReply);
@@ -1636,6 +2252,7 @@
     wireNewConversation();
     wireSettingsControls();
     wireReminders();
+    wireSuggestions();
     wireConversationSearch();
     wireAttachments("taskAttach", "taskAttachmentInput", "taskAttachmentNote");
     var log = document.getElementById("taskChatLog");
@@ -1649,7 +2266,9 @@
     var inflight = false;
     var activeRequest = null;
     var turnStatus = turnStatusFor("taskTurnStatus", "taskTurnStatusText");
+    var taskScroller = createAutoScroller(log);
     wireMessageActions(log, regenerateTask);
+    formatExistingReplies(log);
 
     // A task that has not run has no panel: the start box offers the request and
     // a way to begin (or to describe a new one).
@@ -1744,25 +2363,47 @@
       if (voiceButton) voiceButton.disabled = true;
       setVoiceStatus(voiceStatus, "");
       var useTop = !!opts.useTopThinking;
+      taskScroller.captureBeforeChange();
       var orbit = makeOrbitBubble(log, opts.replaceRow || null);
+      if (opts.userRow) {
+        orbit.row._userRow = opts.userRow;
+        opts.userRow._orbitRow = orbit.row;
+      }
+      if (opts.message) orbit.row.setAttribute("data-retry-message", opts.message);
+      if (opts.initial) orbit.row.setAttribute("data-retry-initial", "true");
+      clearRetryUI(orbit.row);
       var fullReply = "";
-      var sawText = false;
+      var sawAnswer = false;
+      var sawError = false;
+      var thinkingBuffer = "";
       var targetThink = useTop ? thinkText : orbit.thinkText;
       var targetBlock = useTop ? thinkBlock : orbit.think;
       var targetLabel = useTop ? thinkLabel : orbit.thinkLabel;
       if (!useTop && targetBlock) targetBlock.style.display = "none";
+      if (useTop && targetBlock) {
+        targetBlock.classList.remove("done");
+        if (targetThink && (opts.retry || opts.regenerate)) targetThink.textContent = "";
+      }
       orbit.row.classList.add("is-generating");
-      orbit.body.classList.add("streaming");
+      orbit.row.classList.remove("is-streaming", "has-thinking");
+      orbit.body.classList.remove("streaming");
+      orbit.reply.classList.remove("streaming");
+      orbit.reply.classList.remove("in-code-block");
       // The panel has state to show as soon as the run exists.
       hasRun = true;
       if (startBox) startBox.hidden = true;
       var panelNode = document.getElementById("taskPanel");
       if (panelNode) panelNode.hidden = false;
+      turnStatus.placeBefore(orbit.row);
       turnStatus.begin();
       refreshRegenerateActions(log);
+      taskScroller.scrollToBottomIfPinned();
 
       function revealThinking() {
-        if (!useTop && targetBlock) targetBlock.style.display = "";
+        if (!useTop && targetBlock) {
+          orbit.row.classList.add("has-thinking");
+          targetBlock.style.display = "";
+        }
       }
 
       postSSE(
@@ -1771,33 +2412,46 @@
           message: opts.message || "",
           initial: !!opts.initial,
           regenerate: !!opts.regenerate,
+          retry: !!opts.retry,
           message_id: opts.messageId || "",
         },
         function (event, data) {
           if (event === "task_state") {
             // Steps, files, the current operation, approvals and the activity
             // log — all of it derived from this run, never from seeded numbers.
-            renderTaskPanel(JSON.parse(data));
+            var state = JSON.parse(data);
+            renderTaskPanel(state);
+            if (!sawAnswer && state && state.running && state.operation && state.operation !== "Thinking…") {
+              turnStatus.arriving(state.operation);
+            }
           } else if (event === "status") {
             showModelLabel(targetLabel, data);
+            if (!sawAnswer && data) turnStatus.arriving(data);
           } else if (event === "thinking") {
-            if (!sawText) {
-              sawText = true;
-              turnStatus.arriving("Working through it…");
+            thinkingBuffer += data;
+            if (!sawAnswer) {
+              turnStatus.arriving(describeThinkingStep(data || thinkingBuffer));
             }
             if (!targetThink) return;
             revealThinking();
             targetThink.textContent += data;
-            log.scrollTop = log.scrollHeight;
+            taskScroller.scrollToBottomIfPinned();
+          } else if (event === "action") {
+            if (!sawAnswer) turnStatus.arriving("Calling a tool…");
           } else if (event === "answer") {
-            if (!sawText) turnStatus.arriving("Writing your answer…");
-            sawText = true;
+            if (!sawAnswer) {
+              sawAnswer = true;
+              turnStatus.arriving("Writing your answer…");
+              turnStatus.clear();
+              orbit.row.classList.remove("is-generating");
+              orbit.row.classList.add("is-streaming");
+              orbit.body.classList.add("streaming");
+              orbit.reply.classList.add("streaming");
+            }
             if (targetBlock && !targetBlock.classList.contains("done")) targetBlock.classList.add("done");
-            orbit.row.classList.remove("is-generating");
-            orbit.row.classList.add("is-streaming");
-            orbit.reply.textContent += data;
             fullReply += data;
-            log.scrollTop = log.scrollHeight;
+            renderReplyContent(orbit.reply, fullReply);
+            taskScroller.scrollToBottomIfPinned();
           } else if (event === "message") {
             // The stored reply's id, so this row's actions name a real message.
             try {
@@ -1807,14 +2461,22 @@
             }
           } else if (event === "done") {
             if (targetBlock) targetBlock.classList.add("done");
+            orbit.row.classList.remove("is-generating", "is-streaming");
+            orbit.reply.classList.remove("streaming");
+            orbit.reply.classList.remove("in-code-block");
             orbit.body.classList.remove("streaming");
             turnStatus.clear();
           } else if (event === "error") {
+            sawError = true;
             if (targetBlock) targetBlock.classList.add("done");
+            orbit.row.classList.remove("is-generating", "is-streaming");
             orbit.row.classList.add("has-error");
+            orbit.reply.classList.remove("streaming");
+            orbit.reply.classList.remove("in-code-block");
             orbit.body.classList.remove("streaming");
             turnStatus.clear();
             showLine(orbit.body, data, "error");
+            attachRetryAction(orbit.row, orbit.body, !sawAnswer);
           }
         },
         function (err) {
@@ -1827,10 +2489,20 @@
           turnStatus.clear();
           orbit.row.classList.remove("is-generating", "is-streaming");
           orbit.row.classList.toggle("was-stopped", stopped);
+          orbit.reply.classList.remove("streaming");
+          orbit.reply.classList.remove("in-code-block");
           orbit.body.classList.remove("streaming");
           if (err) {
             orbit.row.classList.add("has-error");
             showLine(orbit.body, err, "error");
+            attachRetryAction(orbit.row, orbit.body, !sawAnswer);
+          } else if (stopped) {
+            if (!orbit.body.querySelector(".notice")) {
+              showLine(orbit.body, "Response was stopped before finishing.", "warn");
+            }
+            attachRetryAction(orbit.row, orbit.body, !sawAnswer);
+          } else if (sawError) {
+            attachRetryAction(orbit.row, orbit.body, !sawAnswer);
           } else if (opts.voiceReply && fullReply.trim()) {
             playReplyAudio(fullReply, orbit.body);
           }
@@ -1840,13 +2512,21 @@
       );
     }
 
-    // Any task reply can be redone; the row's id names the message to replace.
+    // Any task reply can be redone; the row's id names the message to replace,
+    // or if the turn failed/stopped before receiving an id it retries in place.
     function regenerateTask(row) {
       if (inflight || !row || !row.classList.contains("orbit")) return;
       var reply = row.querySelector(".reply");
-      if (!reply || !reply.textContent.trim()) return;
+      if (!reply) return;
       var id = messageId(row);
-      if (!id) {
+      var retryText = row.getAttribute("data-retry-message") || prevUserRowText(row);
+      var retryInitial = row.getAttribute("data-retry-initial") === "true";
+      var canRetryFailed =
+        row.getAttribute("data-can-retry") === "true" ||
+        row.classList.contains("has-error") ||
+        row.classList.contains("was-stopped");
+      if (!canRetryFailed && !messageText(row).trim()) return;
+      if (!id && !canRetryFailed) {
         // Same honesty as the home screen: a control that cannot act says so.
         showLine(
           row.querySelector(".body") || row,
@@ -1855,12 +2535,22 @@
         );
         return;
       }
-      streamTurn({
-        regenerate: true,
-        replaceRow: row,
-        useTopThinking: false,
-        messageId: id,
-      });
+      if (id) {
+        streamTurn({
+          regenerate: true,
+          replaceRow: row,
+          useTopThinking: false,
+          messageId: id,
+        });
+      } else {
+        streamTurn({
+          retry: true,
+          initial: retryInitial,
+          message: retryText,
+          replaceRow: row,
+          useTopThinking: retryInitial,
+        });
+      }
     }
 
     if (input && send) {
@@ -1873,9 +2563,12 @@
         var text = input.value.trim();
         if (!text) return;
         input.value = "";
-        makeUserBubble(log, text);
+        taskScroller.captureBeforeChange();
+        var userRow = makeUserBubble(log, text);
+        turnStatus.placeAfter(userRow);
         streamTurn({
           message: text,
+          userRow: userRow,
           useTopThinking: false,
           voiceReply: !!steerOptions.voiceReply,
         });
@@ -1899,8 +2592,8 @@
     if (wantInitialTurn) {
       streamTurn({ initial: true, useTopThinking: true });
     } else if (thinkBlock) {
-      // Nothing is streaming into the top block, so stop its "thinking" caret
-      // rather than leaving a blinking empty box under the header.
+      // Nothing is streaming into the top block, so mark it done rather than
+      // leaving the orbital mark spinning under the header.
       thinkBlock.classList.add("done");
     }
 
@@ -1911,10 +2604,18 @@
     // gate is worse than the honest line the panel shows instead.
   }
 
+  function bootstrapSidebar() {
+    wireSidebarCollapse();
+    wireSettingsControls();
+    wireReminders();
+    wireSuggestions();
+    wireConversationSearch();
+  }
+
   window.Orbit = {
     bootstrapHome: bootstrapHome,
     bootstrapTask: bootstrapTask,
-    // The Analytics view has no chat to wire; it only needs the sidebar.
-    bootstrapSidebar: wireSidebarCollapse,
+    // The Analytics view has no chat to wire; it wires the sidebar and suggestion box.
+    bootstrapSidebar: bootstrapSidebar,
   };
 })();

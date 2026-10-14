@@ -1,5 +1,5 @@
 {% extends "layout.html" %}
-{% block title %}ORBIT — {{ task.title }}{% endblock %}
+{% block title %}orbit — {{ task.title }}{% endblock %}
 {% block body %}
 <div class="screen screen--active" id="screen-task">
 {% include "_sidebar.html" %}
@@ -138,13 +138,14 @@
             <div class="chat-meta">{{ msg.time }}</div>
           </div>
           {% endfor %}
-        </div>
-        {# While a turn is generating: what is actually happening, in words. #}
-        <div class="task-turn-status" id="taskTurnStatus" role="status" aria-live="polite" hidden>
-          <div class="turn-rings rings-fast" aria-hidden="true">
-            <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" />
+          {# While a turn is generating: anchored inside the message list right after
+             the user message it belongs to. #}
+          <div class="task-turn-status" id="taskTurnStatus" role="status" aria-live="polite" hidden>
+            <div class="turn-rings rings-fast" aria-hidden="true">
+              <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" />
+            </div>
+            <span class="turn-status-text" id="taskTurnStatusText"></span>
           </div>
-          <span class="turn-status-text" id="taskTurnStatusText"></span>
         </div>
         <div class="voice-feedback" id="taskVoiceStatus" role="status" aria-live="polite" hidden></div>
         <div class="task-chat-input">
@@ -152,7 +153,7 @@
           <input type="file" id="taskAttachmentInput" class="visually-hidden" multiple />
           <a class="task-github-shortcut" href="https://github.com" target="_blank" rel="noopener noreferrer" aria-label="Open GitHub" title="GitHub">●</a>
           <input type="text" id="taskInput" placeholder="Add a thought or steer Orbit…" autocomplete="off" />
-          <button type="button" class="icon-btn-round voice-btn" id="taskVoice" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
+          <button type="button" class="icon-btn-round voice-btn" id="taskVoice" aria-label="Tap to talk" aria-pressed="false" title="Tap to talk">🎙</button>
           <button type="button" class="send-btn-round" id="taskSend" aria-label="Send message" title="Send message">➤</button>
         </div>
         <div class="attachment-note task-attachment-note" id="taskAttachmentNote" aria-live="polite" hidden></div>
