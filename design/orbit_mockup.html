@@ -3,8 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ORBIT</title>
+<title>orbit</title>
 <link rel="icon" type="image/svg+xml" href="../app/static/orbit-mark.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" />
 <style>
   /* ===========================================================
      ORBIT — home screen + coding-agent task view, in dark blue.
@@ -61,10 +64,13 @@
     --red-wash: rgba(225, 125, 125, 0.12);
     --radius: 10px;
     --radius-sm: 7px;
-    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    --font-display: 'Space Grotesk', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: var(--font-body);
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; font-size: 14px; }
+  body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; font-size: 14px; font-family: var(--font-body); }
+  input, textarea, button, select { font-family: var(--font-body); }
   .screen { display: none; height: 100vh; }
   .screen--active { display: flex; }
 
@@ -74,7 +80,11 @@
     background: var(--bg-raised); border-right: 1px solid var(--border-soft);
     display: flex; flex-direction: column; padding: 14px 10px;
   }
-  .sidebar-brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 16px; font-weight: 700; letter-spacing: 0.05em; }
+  .sidebar-brand {
+    display: flex; align-items: center; gap: 8px; padding: 4px 6px 16px;
+    font-family: var(--font-display); font-weight: 700; letter-spacing: 0.05em; text-transform: lowercase;
+  }
+  .brand-word { font-family: var(--font-display); text-transform: lowercase; }
   /* The wordmark and favicon share the same orbital SVG mark. */
   .brand-mark { display: block; width: 18px; height: 18px; flex-shrink: 0; }
 
@@ -146,6 +156,7 @@
   .thinking-toggle button { padding: 6px 10px; font-size: 11px; }
   .plus-badge {
     position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
+    font-family: var(--font-display); text-transform: lowercase;
     font-size: 11px; color: var(--accent-bright); border: 1px solid var(--accent-dim);
     border-radius: 999px; padding: 3px 10px;
   }
@@ -377,16 +388,24 @@
     white-space: nowrap; margin-right: 8px;
   }
   .thinking-label[hidden] { display: none; }
-  .thinking-block .thinking-text::after {
-    content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
+  .thinking-block .thinking-text { display: inline; }
+  .thinking-block:not(.done) .thinking-text:not(:empty)::after {
+    content: "▍"; display: inline; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
   }
   .thinking-block.done .thinking-text::after { content: ""; }
   @keyframes caret-blink { 50% { opacity: 0; } }
 
   .chat-bubble.orbit .body .orbit-icon { margin-right: 6px; }
-  .chat-bubble .body.streaming::after {
-    content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
+  .chat-bubble .reply { display: inline; }
+  .chat-bubble .reply.streaming::after {
+    content: "▍"; display: inline; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
   }
+  .code-block {
+    position: relative; margin: 8px 0; border-radius: var(--radius-sm);
+    background: var(--bg-sunken); border: 1px solid var(--border); overflow: hidden;
+  }
+  .code-copy-btn { opacity: 0; transition: opacity 140ms ease; }
+  .code-block:hover .code-copy-btn, .code-block:focus-within .code-copy-btn { opacity: 1; }
 
   /* home chat thread (revealed after the first message) */
   .home-thread {
@@ -420,10 +439,6 @@
     padding: 5px 12px; border-radius: 999px; font-size: 11px; cursor: pointer;
   }
   .dev-switcher button.active { background: var(--accent-wash); color: var(--accent-bright); }
-  /* demo-only: the streaming demo writes into the reply span, so its caret lives here. */
-  .chat-bubble .reply.streaming::after {
-    content: "▍"; color: var(--accent); animation: caret-blink 0.9s step-end infinite;
-  }
 
   /* ===================== reminders (heartbeat) ===================== */
   /* Notice cards sit above the thread. Each one is dismissed by hand, and
@@ -463,6 +478,21 @@
   .reminders-toggle[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
   .reminders-toggle[aria-checked="true"] .knob { left: 16px; background: var(--text); }
   .reminders-toggle:disabled { opacity: 0.5; cursor: default; }
+
+  /* Display typography (Space Grotesk via --font-display): wordmark, section headers, and card titles. */
+  h1, h2, h3, h4,
+  .home-greeting h1,
+  .topbar-name,
+  .task-title-row,
+  .task-work h2,
+  .panel-section h3,
+  .history-group h4,
+  .activity-section h4,
+  .task-chat-head,
+  .changes-card-head .title,
+  .step .step-title {
+    font-family: var(--font-display);
+  }
 </style>
 </head>
 <body>
@@ -476,7 +506,7 @@
 <!-- ===================== SCREEN 1: HOME ===================== -->
 <div class="screen screen--active" id="screen-home">
   <div class="sidebar">
-    <div class="sidebar-brand"><img class="brand-mark" src="../app/static/orbit-mark.svg" alt="" aria-hidden="true" />ORBIT</div>
+    <div class="sidebar-brand" title="orbit"><img class="brand-mark" src="../app/static/orbit-mark.svg" alt="" aria-hidden="true" />orbit</div>
     <div class="new-convo">+ New conversation</div>
     <div class="sidebar-search">⌕ Search chats</div>
 
@@ -528,7 +558,7 @@
           <button data-thinking-level="deep" aria-pressed="false">Deep</button>
         </div>
       </div>
-      <div class="plus-badge">ORBIT</div>
+      <div class="plus-badge">orbit</div>
     </div>
 
     <div class="home-center">
@@ -543,7 +573,7 @@
           <div class="composer-controls">
             <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
             <div class="spacer"></div>
-            <button type="button" class="icon-btn-round voice-btn" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
+            <button type="button" class="icon-btn-round voice-btn" aria-label="Tap to talk" aria-pressed="false" title="Tap to talk">🎙</button>
             <div class="send-btn-round">➤</div>
           </div>
         </div>
@@ -572,7 +602,7 @@
 
 <div class="screen" id="screen-home-docked">
   <div class="sidebar">
-    <div class="sidebar-brand"><img class="brand-mark" src="../app/static/orbit-mark.svg" alt="" aria-hidden="true" />ORBIT</div>
+    <div class="sidebar-brand" title="orbit"><img class="brand-mark" src="../app/static/orbit-mark.svg" alt="" aria-hidden="true" />orbit</div>
     <div class="new-convo">+ New conversation</div>
     <div class="sidebar-search">⌕ Search chats</div>
 
@@ -625,7 +655,7 @@
           <button data-thinking-level="deep" aria-pressed="false">Deep</button>
         </div>
       </div>
-      <div class="plus-badge">ORBIT</div>
+      <div class="plus-badge">orbit</div>
     </div>
 
     <div class="home-center">
@@ -660,7 +690,7 @@
           <div class="composer-controls">
             <div class="model-select"><span class="dot"></span>Orbit · Balanced ▾</div>
             <div class="spacer"></div>
-            <button type="button" class="icon-btn-round voice-btn" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
+            <button type="button" class="icon-btn-round voice-btn" aria-label="Tap to talk" aria-pressed="false" title="Tap to talk">🎙</button>
             <div class="send-btn-round">➤</div>
           </div>
         </div>
@@ -691,7 +721,7 @@
 <!-- ===================== SCREEN 2: CODING AGENT TASK ===================== -->
 <div class="screen" id="screen-task">
   <div class="sidebar">
-    <div class="sidebar-brand"><img class="brand-mark" src="../app/static/orbit-mark.svg" alt="" aria-hidden="true" />ORBIT</div>
+    <div class="sidebar-brand" title="orbit"><img class="brand-mark" src="../app/static/orbit-mark.svg" alt="" aria-hidden="true" />orbit</div>
     <div class="new-convo">+ New conversation</div>
     <div class="sidebar-search">⌕ Search chats</div>
     <div class="history-group">
@@ -812,7 +842,7 @@
         </div>
         <div class="task-chat-input">
           <input type="text" placeholder="Add a thought or steer Orbit…" />
-          <button type="button" class="icon-btn-round voice-btn" style="width:26px;height:26px;" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
+          <button type="button" class="icon-btn-round voice-btn" style="width:26px;height:26px;" aria-label="Tap to talk" aria-pressed="false" title="Tap to talk">🎙</button>
           <div class="send-btn-round" style="width:26px;height:26px;">➤</div>
         </div>
       </div>
@@ -829,8 +859,8 @@
   }
 
   /* The live chat is streamed from the server by reply_stream(); this mockup
-     shows the finished state. Replies arrive word by word; the .streaming class
-     (blinking caret) is applied to the reply while chunks are still arriving. */
+     shows the finished state. Replies arrive word by word while chunks are
+     still arriving. */
 </script>
 
 </body>

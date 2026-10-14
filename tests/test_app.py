@@ -133,6 +133,30 @@ class AppRoutesTests(unittest.TestCase):
         self.assertIn('viewBox="0 0 64 64"', svg)
         self.assertIn('rotate(25 32 32)', svg)
         self.assertIn('rotate(-30 32 32)', svg)
+        self.assertIn("<title>orbit</title>", svg)
+
+    def test_ui_loads_space_grotesk_and_inter_as_css_custom_properties(self):
+        body = self.client.get("/").get_data(as_text=True)
+        self.assertIn("fonts.googleapis.com/css2?family=Inter:wght@400;500;600", body)
+        self.assertIn("family=Space+Grotesk:wght@500;600;700", body)
+        self.assertIn("--font-display: 'Space Grotesk'", body)
+        self.assertIn("--font-body: 'Inter'", body)
+        self.assertIn("font-family: var(--font-body)", body)
+        self.assertIn(".brand-word { font-family: var(--font-display)", body)
+        self.assertIn("h1, h2, h3, h4,", body)
+        self.assertRegex(body, r"\.sidebar-brand \{[^}]*font-family: var\(--font-display\)")
+
+    def test_visual_wordmark_is_always_lowercase_orbit(self):
+        home = self.client.get("/").get_data(as_text=True)
+        self.assertIn("<title>orbit — Home</title>", home)
+        self.assertIn('<span class="brand-word">orbit</span>', home)
+        self.assertNotIn('<span class="brand-word">ORBIT</span>', home)
+        self.assertNotIn('<span class="brand-word">Orbit</span>', home)
+        self.assertIn('content: "orbit"', home)
+        analytics = self.client.get("/analytics").get_data(as_text=True)
+        self.assertIn("<title>orbit — Analytics</title>", analytics)
+        missing = self.client.get("/task/NOPE").get_data(as_text=True)
+        self.assertIn("<title>orbit — Task not found</title>", missing)
 
     def test_only_github_shown_as_connected(self):
         resp = self.client.get("/")
@@ -962,8 +986,435 @@ class TurnStatusLabelTests(unittest.TestCase):
         script = _script()
         self.assertIn('"Thinking…"', script)
         self.assertIn('"Still thinking…"', script)  # a long wait says so, it does not pretend
+        self.assertIn('"Reading the file…"', script)
+        self.assertIn('"Calling a tool…"', script)
         self.assertIn('"Writing your answer…"', script)
         self.assertIn('"Working through it…"', script)
+        self.assertIn("function describeThinkingStep(text)", script)
+
+    def test_task_stream_varies_operation_by_what_narration_is_doing(self) -> None:
+        class StepNarratingProvider:
+            def reply_stream(
+                self,
+                history,
+                system_prompt: str,
+                *,
+                think: bool = False,
+                report_attempts: bool = False,
+                thinking_level: str = "quick",
+            ):
+                yield StreamChunk(kind="thinking", text="I am reading orders.py to locate the status field.")
+                yield StreamChunk(kind="thinking", text="Calling a tool to inspect the state.")
+                yield StreamChunk(kind="answer", text="Done.")
+
+        client = create_app(provider=StepNarratingProvider(), store=Store()).test_client()
+        events = parse_sse(
+            client.post("/api/task/T1/stream", json={"initial": True}).get_data(as_text=True)
+        )
+        operations = [
+            json.loads(data)["operation"]
+            for event_name, data in events
+            if event_name == "task_state"
+        ]
+        self.assertIn("Thinking…", operations)
+        self.assertIn("Reading the file…", operations)
+        self.assertIn("Calling a tool…", operations)
+        self.assertIn("Writing your answer…", operations)
+
+    def test_streaming_cursor_is_inline_after_on_reply_text_node_and_removed_when_done(self) -> None:
+        root = Path(__file__).resolve().parent.parent
+        layout = (root / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
+        mockup = (root / "design" / "orbit_mockup.html").read_text(encoding="utf-8")
+        script = _script()
+        self.assertRegex(
+            layout,
+            r"\.chat-bubble \.reply\.streaming::after\s*\{\s*content:\s*\"▍\";\s*display:\s*inline;",
+        )
+        self.assertRegex(
+            mockup,
+            r"\.chat-bubble \.reply\.streaming::after\s*\{\s*content:\s*\"▍\";\s*display:\s*inline;",
+        )
+        self.assertIn('reply.classList.add("streaming")', script)
+        self.assertIn('reply.classList.remove("streaming")', script)
+        self.assertIn('orbit.reply.classList.add("streaming")', script)
+        self.assertIn('orbit.reply.classList.remove("streaming")', script)
+
+    def test_turn_status_indicator_is_anchored_inside_message_list_never_above_it(self) -> None:
+        home = create_app(provider=FakeStreamingProvider(), store=Store()).test_client().get("/").get_data(as_text=True)
+        task = create_app(provider=FakeStreamingProvider(), store=Store()).test_client().get("/task/T1").get_data(as_text=True)
+        script = _script()
+        self.assertLess(home.index('id="homeThread"'), home.index('id="turnStatusBar"'))
+        self.assertLess(task.index('id="taskChatLog"'), task.index('id="taskTurnStatus"'))
+        self.assertIn("turnStatus.placeAfter(userRow)", script)
+        self.assertIn("turnStatus.placeBefore(row)", script)
+        self.assertIn("turnStatus.placeBefore(orbit.row)", script)
+
+    def test_sending_three_messages_in_a_row_maintains_strict_chronological_order(self) -> None:
+        import subprocess
+
+        class ThreeTurnProvider(FakeStreamingProvider):
+            def __init__(self) -> None:
+                super().__init__()
+                self.turn = 0
+
+            def reply_stream(self, history, system_prompt: str, **kwargs) -> Iterator[StreamChunk]:
+                self.turn += 1
+                t = self.turn
+                yield StreamChunk(kind="thinking", text=f"Reading app/server.py for turn {t}.")
+                yield StreamChunk(kind="answer", text=f"Reply {t} part A, ")
+                yield StreamChunk(kind="answer", text=f"part B.")
+
+        client = create_app(provider=ThreeTurnProvider(), store=Store()).test_client()
+        sse_turns = [
+            client.post("/api/chat", json={"message": f"Message {i}"}).get_data(as_text=True)
+            for i in range(1, 4)
+        ]
+
+        node_driver = r"""
+const fs = require("fs");
+const vm = require("vm");
+const { TextEncoder, TextDecoder } = require("util");
+
+const sseTurns = JSON.parse(process.argv[1]);
+const appJs = fs.readFileSync("app/static/app.js", "utf8");
+
+class ClassList {
+  constructor(el) { this.el = el; this.set = new Set(); }
+  _sync() { this.el._className = Array.from(this.set).join(" "); }
+  add(...names) { names.forEach(n => n && this.set.add(n)); this._sync(); }
+  remove(...names) { names.forEach(n => this.set.delete(n)); this._sync(); }
+  toggle(name, force) {
+    const shouldAdd = force !== undefined ? !!force : !this.set.has(name);
+    if (shouldAdd) this.set.add(name); else this.set.delete(name);
+    this._sync();
+    return shouldAdd;
+  }
+  contains(name) { return this.set.has(name); }
+}
+
+class Element {
+  constructor(tag, id = "", classes = "") {
+    this.tagName = tag.toUpperCase();
+    this.id = id;
+    this.children = [];
+    this.parentNode = null;
+    this.attributes = {};
+    this.dataset = {};
+    this.listeners = {};
+    this.style = {};
+    this.hidden = false;
+    this.disabled = false;
+    this.value = "";
+    this._textContent = "";
+    this.scrollTop = 0;
+    this.scrollHeight = 100;
+    this.classList = new ClassList(this);
+    if (classes) classes.split(/\s+/).forEach(c => c && this.classList.add(c));
+  }
+  set className(v) {
+    this._className = v || "";
+    this.classList.set = new Set((v || "").split(/\s+/).filter(Boolean));
+  }
+  get className() { return Array.from(this.classList.set).join(" "); }
+  set textContent(v) {
+    this._textContent = String(v ?? "");
+    this.children = [];
+  }
+  get textContent() {
+    if (this.children.length === 0) return this._textContent;
+    return this._textContent + this.children.map(c => c.textContent).join("");
+  }
+  set innerHTML(v) {
+    this._textContent = String(v ?? "");
+    this.children = [];
+  }
+  get innerHTML() { return this.textContent; }
+  get nextSibling() {
+    if (!this.parentNode) return null;
+    const idx = this.parentNode.children.indexOf(this);
+    return idx >= 0 && idx + 1 < this.parentNode.children.length ? this.parentNode.children[idx + 1] : null;
+  }
+  appendChild(child) {
+    if (child.parentNode) child.parentNode.removeChild(child);
+    child.parentNode = this;
+    this.children.push(child);
+    return child;
+  }
+  removeChild(child) {
+    const idx = this.children.indexOf(child);
+    if (idx >= 0) {
+      this.children.splice(idx, 1);
+      child.parentNode = null;
+    }
+    return child;
+  }
+  insertBefore(newNode, refNode) {
+    if (!refNode) return this.appendChild(newNode);
+    if (newNode.parentNode) newNode.parentNode.removeChild(newNode);
+    const idx = this.children.indexOf(refNode);
+    if (idx < 0) return this.appendChild(newNode);
+    newNode.parentNode = this;
+    this.children.splice(idx, 0, newNode);
+    return newNode;
+  }
+  remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+  setAttribute(k, v) {
+    this.attributes[k] = String(v);
+    if (k.startsWith("data-")) {
+      const camel = k.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      this.dataset[camel] = String(v);
+    }
+  }
+  getAttribute(k) { return this.attributes[k] ?? null; }
+  addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
+  dispatchEvent(evt) { (this.listeners[evt.type] || []).forEach(fn => fn.call(this, evt)); }
+  focus() {}
+  matches(sel) {
+    if (sel.startsWith("#")) return this.id === sel.slice(1);
+    if (sel.startsWith(".")) return sel.slice(1).split(".").every(c => this.classList.contains(c));
+    return this.tagName.toLowerCase() === sel.toLowerCase();
+  }
+  closest(sel) {
+    let cur = this;
+    while (cur) {
+      if (cur.matches && cur.matches(sel)) return cur;
+      cur = cur.parentNode;
+    }
+    return null;
+  }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+  querySelectorAll(sel) {
+    const out = [];
+    const visit = (node) => {
+      for (const child of node.children) {
+        if (matchComplex(child, sel)) out.push(child);
+        visit(child);
+      }
+    };
+    visit(this);
+    return out;
+  }
+}
+
+function matchComplex(node, sel) {
+  if (sel === ".chat-row") return node.classList.contains("chat-row");
+  if (sel === ".chat-row.orbit") return node.classList.contains("chat-row") && node.classList.contains("orbit");
+  if (sel === ".chat-row.orbit:last-child .body") return node.classList.contains("body");
+  if (sel === ".body") return node.classList.contains("body");
+  if (sel === ".reply") return node.classList.contains("reply");
+  if (sel === ".notice") return node.classList.contains("notice");
+  if (sel === "[data-message-action='regenerate']") return node.getAttribute("data-message-action") === "regenerate";
+  return node.matches(sel);
+}
+
+const byId = {};
+function reg(el) { if (el.id) byId[el.id] = el; return el; }
+
+reg(new Element("main", "homeMain", "home-main"));
+reg(new Element("div", "welcome", "welcome"));
+const thread = reg(new Element("div", "homeThread", "home-thread"));
+const turnStatusBar = reg(new Element("div", "turnStatusBar", "turn-status-bar"));
+turnStatusBar.hidden = true;
+const turnStatusText = reg(new Element("span", "turnStatusText", "turn-status-text"));
+turnStatusBar.appendChild(turnStatusText);
+thread.appendChild(turnStatusBar);
+const input = reg(new Element("input", "homeInput"));
+const send = reg(new Element("button", "homeSend", "send-btn-round"));
+reg(new Element("div", "homeFollowups", "followup-chips"));
+
+let pendingFetchResolve = null;
+const document = {
+  documentElement: new Element("html"),
+  activeElement: null,
+  getElementById(id) { return byId[id] || null; },
+  createElement(tag) { return new Element(tag); },
+  querySelector() { return null; },
+  querySelectorAll() { return []; },
+  addEventListener() {},
+};
+const fetchFn = () => new Promise((resolve) => { pendingFetchResolve = resolve; });
+const window = {
+  document,
+  TextDecoder,
+  fetch: fetchFn,
+  setTimeout: () => 1,
+  clearTimeout: () => {},
+  localStorage: { getItem: () => null, setItem: () => {} },
+};
+
+vm.runInNewContext(appJs, { window, document, fetch: fetchFn, TextDecoder, console, Math, JSON, Date, Promise, Array, Object, String, RegExp, encodeURIComponent });
+window.Orbit.bootstrapHome();
+
+function snap() {
+  return thread.children.map((c) => {
+    if (c.id === "turnStatusBar") {
+      return { kind: "thinking", hidden: c.hidden, text: turnStatusText.textContent };
+    }
+    if (c.classList.contains("user")) {
+      return { kind: "user", text: c.querySelector(".body").textContent };
+    }
+    const reply = c.querySelector(".reply");
+    return {
+      kind: "orbit",
+      generating: c.classList.contains("is-generating"),
+      streaming: c.classList.contains("is-streaming"),
+      replyStreaming: reply.classList.contains("streaming"),
+      text: reply.textContent,
+    };
+  });
+}
+
+(async () => {
+  const report = [];
+  for (let turn = 0; turn < 3; turn++) {
+    input.value = `Message ${turn + 1}`;
+    send.dispatchEvent({ type: "click" });
+    const afterSend = snap();
+
+    const blocks = sseTurns[turn].split("\n\n").filter(Boolean);
+    const encoder = new TextEncoder();
+    const pendingReads = [];
+    pendingFetchResolve({
+      ok: true,
+      status: 200,
+      headers: { get: () => "text/event-stream; charset=utf-8" },
+      body: { getReader: () => ({ read: () => new Promise(r => pendingReads.push(r)) }) },
+    });
+    await new Promise(r => setImmediate(r));
+
+    let duringThinking = null;
+    let duringAnswer = null;
+    let afterDone = null;
+    for (const block of blocks) {
+      pendingReads.shift()({ value: encoder.encode(block + "\n\n"), done: false });
+      await new Promise(r => setImmediate(r));
+      const head = block.trim().split("\n")[0];
+      if (head === "event: thinking") duringThinking = snap();
+      if (head === "event: answer" && !duringAnswer) duringAnswer = snap();
+      if (head === "event: done") afterDone = snap();
+    }
+    pendingReads.shift()({ value: undefined, done: true });
+    await new Promise(r => setImmediate(r));
+    report.push({ afterSend, duringThinking, duringAnswer, afterDone, finished: snap() });
+  }
+  console.log(JSON.stringify(report));
+})();
+"""
+        proc = subprocess.run(
+            ["node", "-e", node_driver, json.dumps(sse_turns)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        report = json.loads(proc.stdout.strip())
+        self.assertEqual(len(report), 3)
+
+        for idx, turn_report in enumerate(report, start=1):
+            expected_prefix = []
+            for prev in range(1, idx):
+                expected_prefix.append({"kind": "user", "text": f"Message {prev}"})
+                expected_prefix.append(
+                    {
+                        "kind": "orbit",
+                        "generating": False,
+                        "streaming": False,
+                        "replyStreaming": False,
+                        "text": f"Reply {prev} part A, part B.",
+                    }
+                )
+
+            # (1) & (2) Right after send: user message is last visible message,
+            # followed immediately by the thinking indicator, never above it.
+            self.assertEqual(
+                turn_report["afterSend"],
+                expected_prefix
+                + [
+                    {"kind": "user", "text": f"Message {idx}"},
+                    {"kind": "thinking", "hidden": False, "text": "Thinking…"},
+                    {
+                        "kind": "orbit",
+                        "generating": True,
+                        "streaming": False,
+                        "replyStreaming": False,
+                        "text": "",
+                    },
+                ],
+            )
+
+            # While thinking event streams: thinking indicator stays right after user message.
+            self.assertEqual(
+                turn_report["duringThinking"],
+                expected_prefix
+                + [
+                    {"kind": "user", "text": f"Message {idx}"},
+                    {"kind": "thinking", "hidden": False, "text": "Reading the file…"},
+                    {
+                        "kind": "orbit",
+                        "generating": True,
+                        "streaming": False,
+                        "replyStreaming": False,
+                        "text": "",
+                    },
+                ],
+            )
+
+            # (3) Once assistant reply starts streaming: thinking indicator hides in place,
+            # reply row streams with inline .reply.streaming cursor attached to the text node.
+            self.assertEqual(
+                turn_report["duringAnswer"],
+                expected_prefix
+                + [
+                    {"kind": "user", "text": f"Message {idx}"},
+                    {"kind": "thinking", "hidden": True, "text": ""},
+                    {
+                        "kind": "orbit",
+                        "generating": False,
+                        "streaming": True,
+                        "replyStreaming": True,
+                        "text": f"Reply {idx} part A, ",
+                    },
+                ],
+            )
+
+            # The instant streaming ends (done): .streaming cursor is removed immediately.
+            self.assertEqual(
+                turn_report["afterDone"],
+                expected_prefix
+                + [
+                    {"kind": "user", "text": f"Message {idx}"},
+                    {"kind": "thinking", "hidden": True, "text": ""},
+                    {
+                        "kind": "orbit",
+                        "generating": False,
+                        "streaming": False,
+                        "replyStreaming": False,
+                        "text": f"Reply {idx} part A, part B.",
+                    },
+                ],
+            )
+
+    def test_mic_uses_tap_to_start_and_tap_to_stop(self) -> None:
+        home = create_app(provider=FakeStreamingProvider(), store=Store()).test_client().get("/").get_data(as_text=True)
+        task = create_app(provider=FakeStreamingProvider(), store=Store()).test_client().get("/task/T1").get_data(as_text=True)
+        script = _script()
+        self.assertIn('aria-label="Tap to talk"', home)
+        self.assertIn('aria-label="Tap to talk"', task)
+        self.assertNotIn("Hold to talk", home)
+        self.assertNotIn("Hold to talk", task)
+        self.assertIn('button.addEventListener("click", toggleRecording)', script)
+        self.assertIn('"Stop recording and transcribe"', script)
+        self.assertNotIn('button.addEventListener("pointerdown"', script)
+        self.assertNotIn('window.addEventListener("pointerup"', script)
+
+    def test_sidebar_has_simple_send_a_suggestion_entry_without_form_or_categories(self) -> None:
+        home = create_app(provider=FakeStreamingProvider(), store=Store()).test_client().get("/").get_data(as_text=True)
+        self.assertIn("Send a suggestion", home)
+        self.assertIn('id="suggestionInput"', home)
+        self.assertIn('id="suggestionSubmit"', home)
+        self.assertIn('id="suggestionCardHost"', home)
+        suggestion_box = home.split('id="suggestionBox"', 1)[1].split('class="connected-apps-row"', 1)[0]
+        self.assertNotIn("<form", suggestion_box)
+        self.assertNotIn("<select", suggestion_box)
 
     def test_the_label_never_claims_work_that_is_not_happening(self) -> None:
         # Attachments are not uploaded to the model yet (handoff §5.3), so a
@@ -1085,6 +1536,773 @@ class RouteStreamingTests(unittest.TestCase):
         )
         self.assertEqual(provider.calls, [{"think": True, "report_attempts": False, "thinking_level": "quick"}])
         self.assertNotIn("status", [event for event, _ in seen])
+
+
+class ChatUIFixesTests(unittest.TestCase):
+    """Tests for auto-scroll, inline retry/regenerate on failure, and code blocks."""
+
+    def test_auto_scroll_only_scrolls_when_pinned_to_bottom(self) -> None:
+        import subprocess
+
+        node_script = r"""
+const fs = require("fs");
+const vm = require("vm");
+const { TextEncoder, TextDecoder } = require("util");
+
+const appJs = fs.readFileSync("app/static/app.js", "utf8");
+
+class ClassList {
+  constructor(el) { this.el = el; this.set = new Set(); }
+  _sync() { this.el._className = Array.from(this.set).join(" "); }
+  add(...names) { names.forEach(n => n && this.set.add(n)); this._sync(); }
+  remove(...names) { names.forEach(n => this.set.delete(n)); this._sync(); }
+  toggle(name, force) {
+    const shouldAdd = force !== undefined ? !!force : !this.set.has(name);
+    if (shouldAdd) this.set.add(name); else this.set.delete(name);
+    this._sync();
+    return shouldAdd;
+  }
+  contains(name) { return this.set.has(name); }
+}
+
+class Element {
+  constructor(tag, id = "", classes = "") {
+    this.tagName = tag.toUpperCase();
+    this.id = id;
+    this.children = [];
+    this.parentNode = null;
+    this.attributes = {};
+    this.dataset = {};
+    this.listeners = {};
+    this.style = {};
+    this.hidden = false;
+    this.disabled = false;
+    this.value = "";
+    this._textContent = "";
+    this.scrollTop = 0;
+    this.scrollHeight = 500;
+    this.clientHeight = 200;
+    this.classList = new ClassList(this);
+    if (classes) classes.split(/\s+/).forEach(c => c && this.classList.add(c));
+  }
+  set className(v) {
+    this._className = v || "";
+    this.classList.set = new Set((v || "").split(/\s+/).filter(Boolean));
+  }
+  get className() { return Array.from(this.classList.set).join(" "); }
+  set textContent(v) { this._textContent = String(v ?? ""); this.children = []; }
+  get textContent() {
+    if (this.children.length === 0) return this._textContent;
+    return this._textContent + this.children.map(c => c.textContent).join("");
+  }
+  set innerHTML(v) { this._textContent = String(v ?? ""); this.children = []; }
+  get innerHTML() { return this.textContent; }
+  get nextSibling() {
+    if (!this.parentNode) return null;
+    const idx = this.parentNode.children.indexOf(this);
+    return idx >= 0 && idx + 1 < this.parentNode.children.length ? this.parentNode.children[idx + 1] : null;
+  }
+  appendChild(child) {
+    if (child.parentNode) child.parentNode.removeChild(child);
+    child.parentNode = this;
+    this.children.push(child);
+    return child;
+  }
+  removeChild(child) {
+    const idx = this.children.indexOf(child);
+    if (idx >= 0) { this.children.splice(idx, 1); child.parentNode = null; }
+    return child;
+  }
+  insertBefore(newNode, refNode) {
+    if (!refNode) return this.appendChild(newNode);
+    if (newNode.parentNode) newNode.parentNode.removeChild(newNode);
+    const idx = this.children.indexOf(refNode);
+    if (idx < 0) return this.appendChild(newNode);
+    newNode.parentNode = this;
+    this.children.splice(idx, 0, newNode);
+    return newNode;
+  }
+  remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+  setAttribute(k, v) { this.attributes[k] = String(v); }
+  removeAttribute(k) { delete this.attributes[k]; }
+  getAttribute(k) { return this.attributes[k] ?? null; }
+  addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
+  dispatchEvent(evt) { (this.listeners[evt.type] || []).forEach(fn => fn.call(this, evt)); }
+  focus() {}
+  contains(node) {
+    let cur = node;
+    while (cur) { if (cur === this) return true; cur = cur.parentNode; }
+    return false;
+  }
+  matches(sel) {
+    if (sel.startsWith("#")) return this.id === sel.slice(1);
+    if (sel.startsWith(".")) return sel.slice(1).split(".").every(c => this.classList.contains(c));
+    return this.tagName.toLowerCase() === sel.toLowerCase();
+  }
+  closest(sel) {
+    let cur = this;
+    while (cur) { if (cur.matches && cur.matches(sel)) return cur; cur = cur.parentNode; }
+    return null;
+  }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+  querySelectorAll(sel) {
+    const out = [];
+    const visit = (node) => {
+      for (const child of node.children) {
+        if (matchComplex(child, sel)) out.push(child);
+        visit(child);
+      }
+    };
+    visit(this);
+    return out;
+  }
+}
+
+function matchComplex(node, sel) {
+  if (sel === ".chat-row") return node.classList.contains("chat-row");
+  if (sel === ".chat-row.orbit") return node.classList.contains("chat-row") && node.classList.contains("orbit");
+  if (sel === ".chat-row.is-generating, .chat-row.is-streaming") {
+    return node.classList.contains("chat-row") && (node.classList.contains("is-generating") || node.classList.contains("is-streaming"));
+  }
+  if (sel === ".body") return node.classList.contains("body");
+  if (sel === ".reply") return node.classList.contains("reply");
+  if (sel === ".notice") return node.classList.contains("notice");
+  if (sel === ".inline-retry-btn") return node.classList.contains("inline-retry-btn");
+  if (sel === ".jump-to-latest") return node.classList.contains("jump-to-latest");
+  if (sel === "[data-message-action='regenerate']") return node.getAttribute("data-message-action") === "regenerate";
+  if (sel === "[data-message-action='retry']") return node.getAttribute("data-message-action") === "retry";
+  return node.matches(sel);
+}
+
+const byId = {};
+function reg(el) { if (el.id) byId[el.id] = el; return el; }
+
+const homeCenter = reg(new Element("div", "homeCenter", "home-center"));
+reg(new Element("main", "homeMain", "home-main"));
+reg(new Element("div", "welcome", "welcome"));
+const thread = reg(new Element("div", "homeThread", "home-thread"));
+homeCenter.appendChild(thread);
+const turnStatusBar = reg(new Element("div", "turnStatusBar", "turn-status-bar"));
+turnStatusBar.hidden = true;
+const turnStatusText = reg(new Element("span", "turnStatusText", "turn-status-text"));
+turnStatusBar.appendChild(turnStatusText);
+thread.appendChild(turnStatusBar);
+const input = reg(new Element("input", "homeInput"));
+const send = reg(new Element("button", "homeSend", "send-btn-round"));
+reg(new Element("div", "homeFollowups", "followup-chips"));
+
+let pendingFetchResolve = null;
+const document = {
+  documentElement: new Element("html"),
+  activeElement: null,
+  getElementById(id) { return byId[id] || null; },
+  createElement(tag) { return new Element(tag); },
+  querySelector() { return null; },
+  querySelectorAll() { return []; },
+  addEventListener() {},
+};
+const fetchFn = () => new Promise((resolve) => { pendingFetchResolve = resolve; });
+const window = {
+  document,
+  TextDecoder,
+  fetch: fetchFn,
+  setTimeout: () => 1,
+  clearTimeout: () => {},
+  localStorage: { getItem: () => null, setItem: () => {} },
+};
+
+vm.runInNewContext(appJs, { window, document, fetch: fetchFn, TextDecoder, Number, console, Math, JSON, Date, Promise, Array, Object, String, RegExp, encodeURIComponent });
+window.Orbit.bootstrapHome();
+
+(async () => {
+  // Start at bottom (scrollHeight=500, clientHeight=200 => bottom is scrollTop>=260)
+  thread.scrollTop = 300;
+  input.value = "First message";
+  send.dispatchEvent({ type: "click" });
+
+  // Since user was at bottom, sending scrolled to bottom (scrollHeight=500)
+  const scrolledOnSend = thread.scrollTop === 500;
+
+  const encoder = new TextEncoder();
+  const pendingReads = [];
+  pendingFetchResolve({
+    ok: true,
+    status: 200,
+    headers: { get: () => "text/event-stream; charset=utf-8" },
+    body: { getReader: () => ({ read: () => new Promise(r => pendingReads.push(r)) }) },
+  });
+  await new Promise(r => setImmediate(r));
+
+  // Chunk 1 arrives while user is still at bottom -> auto-scrolls to new scrollHeight (600)
+  thread.scrollHeight = 600;
+  pendingReads.shift()({ value: encoder.encode("event: answer\ndata: Part 1 \n\n"), done: false });
+  await new Promise(r => setImmediate(r));
+  const scrolledOnChunk1 = thread.scrollTop === 600;
+
+  // User scrolls up to reread earlier content (scrollTop=80, far from bottom)
+  thread.scrollTop = 80;
+  thread.dispatchEvent({ type: "scroll" });
+  const jumpBtn = homeCenter.querySelector(".jump-to-latest");
+  const jumpVisibleWhenScrolledUp = !!(jumpBtn && !jumpBtn.hidden);
+
+  // Chunk 2 arrives while user is scrolled up -> must NOT yank user down!
+  thread.scrollHeight = 750;
+  pendingReads.shift()({ value: encoder.encode("event: answer\ndata: Part 2\n\n"), done: false });
+  await new Promise(r => setImmediate(r));
+  const stayedAt80OnChunk2 = thread.scrollTop === 80;
+
+  // User returns to the bottom themselves (or clicks Jump to latest)
+  jumpBtn.dispatchEvent({ type: "click" });
+  const jumpedToBottom = thread.scrollTop === 750 && jumpBtn.hidden === true;
+
+  // Chunk 3 arrives after user returned to bottom -> auto-scrolls again!
+  thread.scrollHeight = 820;
+  pendingReads.shift()({ value: encoder.encode("event: answer\ndata:  Part 3\n\n"), done: false });
+  await new Promise(r => setImmediate(r));
+  const scrolledOnChunk3 = thread.scrollTop === 820;
+
+  console.log(JSON.stringify({
+    scrolledOnSend,
+    scrolledOnChunk1,
+    jumpVisibleWhenScrolledUp,
+    stayedAt80OnChunk2,
+    jumpedToBottom,
+    scrolledOnChunk3,
+  }));
+})();
+"""
+        proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=True)
+        result = json.loads(proc.stdout.strip())
+        self.assertTrue(result["scrolledOnSend"])
+        self.assertTrue(result["scrolledOnChunk1"])
+        self.assertTrue(result["jumpVisibleWhenScrolledUp"])
+        self.assertTrue(result["stayedAt80OnChunk2"])
+        self.assertTrue(result["jumpedToBottom"])
+        self.assertTrue(result["scrolledOnChunk3"])
+
+    def test_failed_or_cutoff_message_shows_inline_retry_and_regenerates_in_place(self) -> None:
+        import subprocess
+
+        class FlakyThenOkProvider(FakeStreamingProvider):
+            def __init__(self) -> None:
+                super().__init__()
+                self.attempt = 0
+
+            def reply_stream(self, history, system_prompt: str, **kwargs) -> Iterator[StreamChunk]:
+                self.attempt += 1
+                self.calls.append({"history": [m.content for m in history], "attempt": self.attempt})
+                if self.attempt == 1:
+                    raise RuntimeError("Provider connection dropped")
+                yield StreamChunk(kind="answer", text="Recovered answer in place.")
+
+        store = Store()
+        provider = FlakyThenOkProvider()
+        client = create_app(provider=provider, store=store).test_client()
+
+        # Attempt 1 fails mid-stream after storing user message
+        first_sse = client.post("/api/chat", json={"message": "Explain retry"}).get_data(as_text=True)
+        self.assertIn("event: error", first_sse)
+        self.assertEqual(len(store.home_thread), 1)
+        self.assertEqual(store.home_thread[0].body, "Explain retry")
+
+        # Retrying in place via {"retry": True, "message": "Explain retry"} reuses the user message
+        # rather than appending a duplicate, and stores the recovered Orbit answer.
+        second_sse = client.post("/api/chat", json={"retry": True, "message": "Explain retry"}).get_data(as_text=True)
+        self.assertIn("Recovered answer in place.", second_sse)
+        self.assertEqual(len(store.home_thread), 2)
+        self.assertEqual([m.who for m in store.home_thread], ["You", "Orbit"])
+        self.assertEqual(store.home_thread[1].body, "Recovered answer in place.")
+
+        # Verify client DOM shows inline retry button on failure/cut-off and retries in place
+        node_script = r"""
+const fs = require("fs");
+const vm = require("vm");
+const { TextEncoder, TextDecoder } = require("util");
+
+const [firstSse, secondSse] = JSON.parse(process.argv[1]);
+const appJs = fs.readFileSync("app/static/app.js", "utf8");
+
+class ClassList {
+  constructor(el) { this.el = el; this.set = new Set(); }
+  _sync() { this.el._className = Array.from(this.set).join(" "); }
+  add(...names) { names.forEach(n => n && this.set.add(n)); this._sync(); }
+  remove(...names) { names.forEach(n => this.set.delete(n)); this._sync(); }
+  toggle(name, force) {
+    const shouldAdd = force !== undefined ? !!force : !this.set.has(name);
+    if (shouldAdd) this.set.add(name); else this.set.delete(name);
+    this._sync();
+    return shouldAdd;
+  }
+  contains(name) { return this.set.has(name); }
+}
+
+class Element {
+  constructor(tag, id = "", classes = "") {
+    this.tagName = tag.toUpperCase();
+    this.id = id;
+    this.children = [];
+    this.parentNode = null;
+    this.attributes = {};
+    this.dataset = {};
+    this.listeners = {};
+    this.style = {};
+    this.hidden = false;
+    this.disabled = false;
+    this.value = "";
+    this._textContent = "";
+    this.scrollTop = 0;
+    this.scrollHeight = 100;
+    this.clientHeight = 100;
+    this.classList = new ClassList(this);
+    if (classes) classes.split(/\s+/).forEach(c => c && this.classList.add(c));
+  }
+  set className(v) {
+    this._className = v || "";
+    this.classList.set = new Set((v || "").split(/\s+/).filter(Boolean));
+  }
+  get className() { return Array.from(this.classList.set).join(" "); }
+  set textContent(v) { this._textContent = String(v ?? ""); this.children = []; }
+  get textContent() {
+    if (this.children.length === 0) return this._textContent;
+    return this._textContent + this.children.map(c => c.textContent).join("");
+  }
+  set innerHTML(v) { this._textContent = String(v ?? ""); this.children = []; }
+  get innerHTML() { return this.textContent; }
+  get nextSibling() {
+    if (!this.parentNode) return null;
+    const idx = this.parentNode.children.indexOf(this);
+    return idx >= 0 && idx + 1 < this.parentNode.children.length ? this.parentNode.children[idx + 1] : null;
+  }
+  appendChild(child) {
+    if (child.parentNode) child.parentNode.removeChild(child);
+    child.parentNode = this;
+    this.children.push(child);
+    return child;
+  }
+  removeChild(child) {
+    const idx = this.children.indexOf(child);
+    if (idx >= 0) { this.children.splice(idx, 1); child.parentNode = null; }
+    return child;
+  }
+  insertBefore(newNode, refNode) {
+    if (!refNode) return this.appendChild(newNode);
+    if (newNode.parentNode) newNode.parentNode.removeChild(newNode);
+    const idx = this.children.indexOf(refNode);
+    if (idx < 0) return this.appendChild(newNode);
+    newNode.parentNode = this;
+    this.children.splice(idx, 0, newNode);
+    return newNode;
+  }
+  remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+  setAttribute(k, v) { this.attributes[k] = String(v); }
+  removeAttribute(k) { delete this.attributes[k]; }
+  getAttribute(k) { return this.attributes[k] ?? null; }
+  addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
+  dispatchEvent(evt) {
+    let cur = this;
+    const eventObj = Object.assign({ target: this }, evt);
+    while (cur) {
+      (cur.listeners[evt.type] || []).forEach(fn => fn.call(cur, eventObj));
+      cur = cur.parentNode;
+    }
+  }
+  focus() {}
+  contains(node) {
+    let cur = node;
+    while (cur) { if (cur === this) return true; cur = cur.parentNode; }
+    return false;
+  }
+  matches(sel) {
+    if (sel === "[data-message-action]") return this.getAttribute("data-message-action") !== null;
+    if (sel === "[data-code-copy]") return this.getAttribute("data-code-copy") !== null;
+    if (sel.startsWith("#")) return this.id === sel.slice(1);
+    if (sel.startsWith(".")) return sel.slice(1).split(".").every(c => this.classList.contains(c));
+    return this.tagName.toLowerCase() === sel.toLowerCase();
+  }
+  closest(sel) {
+    let cur = this;
+    while (cur) { if (cur.matches && cur.matches(sel)) return cur; cur = cur.parentNode; }
+    return null;
+  }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+  querySelectorAll(sel) {
+    const out = [];
+    const visit = (node) => {
+      for (const child of node.children) {
+        if (matchComplex(child, sel)) out.push(child);
+        visit(child);
+      }
+    };
+    visit(this);
+    return out;
+  }
+}
+
+function matchComplex(node, sel) {
+  if (sel === ".chat-row") return node.classList.contains("chat-row");
+  if (sel === ".chat-row.orbit") return node.classList.contains("chat-row") && node.classList.contains("orbit");
+  if (sel === ".chat-row.is-generating, .chat-row.is-streaming") {
+    return node.classList.contains("chat-row") && (node.classList.contains("is-generating") || node.classList.contains("is-streaming"));
+  }
+  if (sel === ".body") return node.classList.contains("body");
+  if (sel === ".reply") return node.classList.contains("reply");
+  if (sel === ".notice") return node.classList.contains("notice");
+  if (sel === ".inline-retry-btn") return node.classList.contains("inline-retry-btn");
+  if (sel === "[data-message-action='regenerate']") return node.getAttribute("data-message-action") === "regenerate";
+  if (sel === "[data-message-action='retry']") return node.getAttribute("data-message-action") === "retry";
+  return node.matches(sel);
+}
+
+const byId = {};
+function reg(el) { if (el.id) byId[el.id] = el; return el; }
+reg(new Element("main", "homeMain", "home-main"));
+reg(new Element("div", "welcome", "welcome"));
+const thread = reg(new Element("div", "homeThread", "home-thread"));
+const turnStatusBar = reg(new Element("div", "turnStatusBar", "turn-status-bar"));
+turnStatusBar.hidden = true;
+const turnStatusText = reg(new Element("span", "turnStatusText", "turn-status-text"));
+turnStatusBar.appendChild(turnStatusText);
+thread.appendChild(turnStatusBar);
+const input = reg(new Element("input", "homeInput"));
+const send = reg(new Element("button", "homeSend", "send-btn-round"));
+reg(new Element("div", "homeFollowups", "followup-chips"));
+
+const payloadsSent = [];
+const sseQueue = [firstSse, secondSse];
+const document = {
+  documentElement: new Element("html"),
+  activeElement: null,
+  getElementById(id) { return byId[id] || null; },
+  createElement(tag) { return new Element(tag); },
+  querySelector() { return null; },
+  querySelectorAll() { return []; },
+  addEventListener() {},
+};
+const fetchFn = (url, opts) => {
+  payloadsSent.push(JSON.parse(opts.body));
+  const raw = sseQueue.shift();
+  const encoder = new TextEncoder();
+  let readDone = false;
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    headers: { get: () => "text/event-stream; charset=utf-8" },
+    body: {
+      getReader: () => ({
+        read: () => {
+          if (!readDone) {
+            readDone = true;
+            return Promise.resolve({ value: encoder.encode(raw), done: false });
+          }
+          return Promise.resolve({ value: undefined, done: true });
+        }
+      })
+    }
+  });
+};
+const window = {
+  document,
+  TextDecoder,
+  fetch: fetchFn,
+  setTimeout: () => 1,
+  clearTimeout: () => {},
+  localStorage: { getItem: () => null, setItem: () => {} },
+};
+
+vm.runInNewContext(appJs, { window, document, fetch: fetchFn, TextDecoder, Number, console, Math, JSON, Date, Promise, Array, Object, String, RegExp, encodeURIComponent });
+window.Orbit.bootstrapHome();
+
+(async () => {
+  input.value = "Explain retry";
+  send.dispatchEvent({ type: "click" });
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  const retryBtnsAfterFail = thread.querySelectorAll(".inline-retry-btn");
+  const hasInlineRetryAfterFail = retryBtnsAfterFail.length > 0;
+  const rowsBeforeRetry = thread.querySelectorAll(".chat-row").length;
+
+  // Click the inline retry button on the failed message itself
+  retryBtnsAfterFail[0].dispatchEvent({ type: "click" });
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  const rowsAfterRetry = thread.querySelectorAll(".chat-row");
+  const retryBtnsAfterSuccess = thread.querySelectorAll(".inline-retry-btn");
+  const orbitReply = rowsAfterRetry[1].querySelector(".reply").textContent;
+
+  console.log(JSON.stringify({
+    hasInlineRetryAfterFail,
+    rowsBeforeRetry,
+    rowsAfterRetryCount: rowsAfterRetry.length,
+    retryBtnsAfterSuccessCount: retryBtnsAfterSuccess.length,
+    orbitReply,
+    payloadsSent,
+  }));
+})();
+"""
+        proc = subprocess.run(
+            ["node", "-e", node_script, json.dumps([first_sse, second_sse])],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        res = json.loads(proc.stdout.strip())
+        self.assertTrue(res["hasInlineRetryAfterFail"])
+        self.assertEqual(res["rowsBeforeRetry"], 2)
+        self.assertEqual(res["rowsAfterRetryCount"], 2)  # regenerated in place, no duplicate rows
+        self.assertEqual(res["retryBtnsAfterSuccessCount"], 0)
+        self.assertEqual(res["orbitReply"], "Recovered answer in place.")
+        self.assertEqual(res["payloadsSent"][1], {"retry": True, "message": "Explain retry"})
+
+    def test_code_blocks_render_monospace_syntax_highlighted_with_hover_copy_button(self) -> None:
+        import subprocess
+
+        root = Path(__file__).resolve().parent.parent
+        layout = (root / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
+        self.assertIn(".code-block:hover .code-copy-btn", layout)
+        self.assertIn(".code-pre", layout)
+        self.assertIn("ui-monospace", layout)
+        self.assertIn(".tok-keyword", layout)
+        self.assertIn(".tok-diff-add", layout)
+
+        node_script = r"""
+const fs = require("fs");
+const vm = require("vm");
+const { TextEncoder, TextDecoder } = require("util");
+
+const appJs = fs.readFileSync("app/static/app.js", "utf8");
+
+class ClassList {
+  constructor(el) { this.el = el; this.set = new Set(); }
+  _sync() { this.el._className = Array.from(this.set).join(" "); }
+  add(...names) { names.forEach(n => n && this.set.add(n)); this._sync(); }
+  remove(...names) { names.forEach(n => this.set.delete(n)); this._sync(); }
+  toggle(name, force) {
+    const shouldAdd = force !== undefined ? !!force : !this.set.has(name);
+    if (shouldAdd) this.set.add(name); else this.set.delete(name);
+    this._sync();
+    return shouldAdd;
+  }
+  contains(name) { return this.set.has(name); }
+}
+
+class Element {
+  constructor(tag, id = "", classes = "") {
+    this.tagName = tag.toUpperCase();
+    this.id = id;
+    this.children = [];
+    this.parentNode = null;
+    this.attributes = {};
+    this.dataset = {};
+    this.listeners = {};
+    this.style = {};
+    this.hidden = false;
+    this.disabled = false;
+    this.value = "";
+    this._textContent = "";
+    this.scrollTop = 0;
+    this.scrollHeight = 100;
+    this.clientHeight = 100;
+    this.classList = new ClassList(this);
+    if (classes) classes.split(/\s+/).forEach(c => c && this.classList.add(c));
+  }
+  set className(v) {
+    this._className = v || "";
+    this.classList.set = new Set((v || "").split(/\s+/).filter(Boolean));
+  }
+  get className() { return Array.from(this.classList.set).join(" "); }
+  set textContent(v) { this._textContent = String(v ?? ""); this.children = []; }
+  get textContent() {
+    if (this.children.length === 0) return this._textContent;
+    return this._textContent + this.children.map(c => c.textContent).join("");
+  }
+  set innerHTML(v) { this._rawHtml = String(v ?? ""); this._textContent = String(v ?? ""); this.children = []; }
+  get innerHTML() { return this._rawHtml ?? this.textContent; }
+  get nextSibling() {
+    if (!this.parentNode) return null;
+    const idx = this.parentNode.children.indexOf(this);
+    return idx >= 0 && idx + 1 < this.parentNode.children.length ? this.parentNode.children[idx + 1] : null;
+  }
+  appendChild(child) {
+    if (child.parentNode) child.parentNode.removeChild(child);
+    child.parentNode = this;
+    this.children.push(child);
+    return child;
+  }
+  removeChild(child) {
+    const idx = this.children.indexOf(child);
+    if (idx >= 0) { this.children.splice(idx, 1); child.parentNode = null; }
+    return child;
+  }
+  insertBefore(newNode, refNode) {
+    if (!refNode) return this.appendChild(newNode);
+    if (newNode.parentNode) newNode.parentNode.removeChild(newNode);
+    const idx = this.children.indexOf(refNode);
+    if (idx < 0) return this.appendChild(newNode);
+    newNode.parentNode = this;
+    this.children.splice(idx, 0, newNode);
+    return newNode;
+  }
+  remove() { if (this.parentNode) this.parentNode.removeChild(this); }
+  setAttribute(k, v) { this.attributes[k] = String(v); }
+  removeAttribute(k) { delete this.attributes[k]; }
+  getAttribute(k) { return this.attributes[k] ?? null; }
+  addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); }
+  dispatchEvent(evt) {
+    let cur = this;
+    const eventObj = Object.assign({ target: this }, evt);
+    while (cur) {
+      (cur.listeners[evt.type] || []).forEach(fn => fn.call(cur, eventObj));
+      cur = cur.parentNode;
+    }
+  }
+  focus() {}
+  contains(node) {
+    let cur = node;
+    while (cur) { if (cur === this) return true; cur = cur.parentNode; }
+    return false;
+  }
+  matches(sel) {
+    if (sel === "[data-message-action]") return this.getAttribute("data-message-action") !== null;
+    if (sel === "[data-code-copy]") return this.getAttribute("data-code-copy") !== null;
+    if (sel.startsWith("#")) return this.id === sel.slice(1);
+    if (sel.startsWith(".")) return sel.slice(1).split(".").every(c => this.classList.contains(c));
+    return this.tagName.toLowerCase() === sel.toLowerCase();
+  }
+  closest(sel) {
+    let cur = this;
+    while (cur) { if (cur.matches && cur.matches(sel)) return cur; cur = cur.parentNode; }
+    return null;
+  }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+  querySelectorAll(sel) {
+    const out = [];
+    const visit = (node) => {
+      for (const child of node.children) {
+        if (matchComplex(child, sel)) out.push(child);
+        visit(child);
+      }
+    };
+    visit(this);
+    return out;
+  }
+}
+
+function matchComplex(node, sel) {
+  if (sel === ".chat-row") return node.classList.contains("chat-row");
+  if (sel === ".chat-row.orbit") return node.classList.contains("chat-row") && node.classList.contains("orbit");
+  if (sel === ".chat-row.is-generating, .chat-row.is-streaming") {
+    return node.classList.contains("chat-row") && (node.classList.contains("is-generating") || node.classList.contains("is-streaming"));
+  }
+  if (sel === ".body") return node.classList.contains("body");
+  if (sel === ".reply") return node.classList.contains("reply");
+  if (sel === ".code-block") return node.classList.contains("code-block");
+  if (sel === ".code-copy-btn") return node.classList.contains("code-copy-btn");
+  if (sel === ".code-content") return node.classList.contains("code-content");
+  if (sel === "[data-message-action='regenerate']") return node.getAttribute("data-message-action") === "regenerate";
+  if (sel === "[data-message-action='retry']") return node.getAttribute("data-message-action") === "retry";
+  return node.matches(sel);
+}
+
+const byId = {};
+function reg(el) { if (el.id) byId[el.id] = el; return el; }
+reg(new Element("main", "homeMain", "home-main"));
+reg(new Element("div", "welcome", "welcome"));
+const thread = reg(new Element("div", "homeThread", "home-thread"));
+const turnStatusBar = reg(new Element("div", "turnStatusBar", "turn-status-bar"));
+turnStatusBar.hidden = true;
+const turnStatusText = reg(new Element("span", "turnStatusText", "turn-status-text"));
+turnStatusBar.appendChild(turnStatusText);
+thread.appendChild(turnStatusBar);
+const input = reg(new Element("input", "homeInput"));
+const send = reg(new Element("button", "homeSend", "send-btn-round"));
+reg(new Element("div", "homeFollowups", "followup-chips"));
+
+let copiedText = null;
+const navigator = {
+  clipboard: {
+    writeText(text) {
+      copiedText = text;
+      return Promise.resolve();
+    }
+  }
+};
+const document = {
+  documentElement: new Element("html"),
+  activeElement: null,
+  getElementById(id) { return byId[id] || null; },
+  createElement(tag) { return new Element(tag); },
+  querySelector() { return null; },
+  querySelectorAll() { return []; },
+  addEventListener() {},
+};
+const answerText = "Here is the fix:\n```python\n# greet\ndef greet(name):\n    return \"Hello\"\n```\nAnd the diff:\n```diff\n-old_line\n+new_line\n```";
+const rawSse = `event: answer\ndata: ${answerText.split("\n").join("\ndata: ")}\n\nevent: done\ndata: \n\n`;
+const fetchFn = () => {
+  const encoder = new TextEncoder();
+  let done = false;
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    headers: { get: () => "text/event-stream; charset=utf-8" },
+    body: {
+      getReader: () => ({
+        read: () => {
+          if (!done) { done = true; return Promise.resolve({ value: encoder.encode(rawSse), done: false }); }
+          return Promise.resolve({ value: undefined, done: true });
+        }
+      })
+    }
+  });
+};
+const window = {
+  document,
+  TextDecoder,
+  fetch: fetchFn,
+  setTimeout: () => 1,
+  clearTimeout: () => {},
+  localStorage: { getItem: () => null, setItem: () => {} },
+};
+
+vm.runInNewContext(appJs, { window, document, navigator, fetch: fetchFn, TextDecoder, Number, console, Math, JSON, Date, Promise, Array, Object, String, RegExp, encodeURIComponent });
+window.Orbit.bootstrapHome();
+
+(async () => {
+  input.value = "Show code";
+  send.dispatchEvent({ type: "click" });
+  await new Promise(r => setImmediate(r));
+  await new Promise(r => setImmediate(r));
+
+  const blocks = thread.querySelectorAll(".code-block");
+  const pyHtml = blocks[0].querySelector(".code-content").innerHTML;
+  const diffHtml = blocks[1].querySelector(".code-content").innerHTML;
+  const copyBtn = blocks[0].querySelector(".code-copy-btn");
+  copyBtn.dispatchEvent({ type: "click" });
+  await new Promise(r => setImmediate(r));
+
+  console.log(JSON.stringify({
+    blockCount: blocks.length,
+    pyLang: blocks[0].getAttribute("data-lang"),
+    pyHtml,
+    diffHtml,
+    copiedText,
+    copyBtnLabel: copyBtn.textContent,
+  }));
+})();
+"""
+        proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True, check=True)
+        res = json.loads(proc.stdout.strip())
+        self.assertEqual(res["blockCount"], 2)
+        self.assertEqual(res["pyLang"], "python")
+        self.assertIn("tok-comment", res["pyHtml"])
+        self.assertIn("tok-keyword", res["pyHtml"])
+        self.assertIn("tok-func", res["pyHtml"])
+        self.assertIn("tok-string", res["pyHtml"])
+        self.assertIn("tok-diff-del", res["diffHtml"])
+        self.assertIn("tok-diff-add", res["diffHtml"])
+        self.assertEqual(res["copiedText"], '# greet\ndef greet(name):\n    return "Hello"')
+        self.assertEqual(res["copyBtnLabel"], "Copied")
 
 
 if __name__ == "__main__":

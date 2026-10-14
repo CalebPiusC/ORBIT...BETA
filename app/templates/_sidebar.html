@@ -6,7 +6,7 @@
    layout.html's <head> applies it before first paint. #}
 <div class="sidebar" id="sidebar">
   <div class="sidebar-head">
-    <div class="sidebar-brand"><img class="brand-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" /><span class="brand-word">ORBIT</span></div>
+    <div class="sidebar-brand" title="orbit"><img class="brand-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" /><span class="brand-word">orbit</span></div>
     <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-pressed="false"
             aria-label="Collapse sidebar" title="Collapse sidebar"><span aria-hidden="true">«</span></button>
   </div>
@@ -26,9 +26,19 @@
 
   <div class="sidebar-nav">
     <a class="sidebar-nav-item{% if analytics_active %} active{% endif %}" id="analyticsLink" href="/analytics" title="Analytics"><span class="sidebar-nav-icon" aria-hidden="true">◔</span><span class="sidebar-label">Analytics</span></a>
+    <button type="button" class="sidebar-nav-item" id="suggestionToggle" title="Send a suggestion" aria-label="Send a suggestion"><span class="sidebar-nav-icon" aria-hidden="true">✎</span><span class="sidebar-label">Send a suggestion</span></button>
   </div>
 
   <div class="sidebar-foot">
+    <div class="suggestion-box sidebar-label" id="suggestionBox">
+      <label class="suggestion-heading" for="suggestionInput">Send a suggestion</label>
+      <div class="suggestion-controls">
+        <input type="text" class="suggestion-input" id="suggestionInput" placeholder="Capture a thought…" autocomplete="off" aria-label="Send a suggestion" />
+        <button type="button" class="suggestion-submit" id="suggestionSubmit" aria-label="Send suggestion" title="Send a suggestion">Send</button>
+      </div>
+      <div class="suggestion-feedback" id="suggestionFeedback" role="status" aria-live="polite" hidden></div>
+      <div class="suggestion-card-host" id="suggestionCardHost" aria-live="polite" hidden></div>
+    </div>
     {% if heartbeat %}
     <div class="reminders-row">
       <div class="names sidebar-label">

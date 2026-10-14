@@ -46,6 +46,7 @@ from app.taskplan import (
     TaskRun,
     add_files,
     apply_narration,
+    describe_thinking_step,
     files_in,
     finish_run,
     new_run,
@@ -54,7 +55,9 @@ from app.voice import VoiceService, VoiceServiceUnavailable
 from app.titles import request_title
 from memory.facts import FactStore
 from memory.time_context import with_current_time
-from tools.registry import DEFAULT_AUDIT_LOG_PATH, AuditLog
+from tools.confirmation import DeferredConfirmationGate
+from tools.registry import DEFAULT_AUDIT_LOG_PATH, AuditLog, ToolRegistry
+from tools.suggestions import DEFAULT_SUGGESTIONS_PATH, register_send_suggestion
 
 log = logging.getLogger("orbit.server")
 
@@ -93,11 +96,11 @@ REGENERATE_INSTRUCTION = (
 # Added to the home prompt only when tools are on (Chat mode with a registry).
 TOOL_GUIDANCE = (
     "You may ask for at most one tool action in a reply, and only when the person "
-    "explicitly asks for it: write_note (save a line to their notes), remember_fact or "
-    "forget_fact (save or remove a fact about them), save_plan (save today's plan), or "
-    "pause_heartbeat or resume_heartbeat (pause or resume reminders). Nothing runs until "
-    "the person approves it on screen. Do not say anything was saved, removed, paused or "
-    "resumed until the card shows it was."
+    "explicitly asks for it: write_note (save a line to their notes), send_suggestion "
+    "(save a suggestion), remember_fact or forget_fact (save or remove a fact about them), "
+    "save_plan (save today's plan), or pause_heartbeat or resume_heartbeat (pause or resume "
+    "reminders). Nothing runs until the person approves it on screen. Do not say anything "
+    "was saved, removed, paused or resumed until the card shows it was."
 )
 
 TASK_SYSTEM_PROMPT = (
@@ -221,6 +224,7 @@ def create_app(
     actions: PendingActions | None = None,
     voice_service: Any | None = None,
     model_audit: AuditLog | None = None,
+    suggestions_path: Any | None = None,
 ) -> Flask:
     """Build the Flask app.
 
@@ -253,6 +257,16 @@ def create_app(
     # The queue of tool calls the home chat proposed. Without it, Chat mode is
     # plain text, as before. run_app builds it with the real tools.
     app.config["ACTIONS"] = actions
+    _suggestion_gate = DeferredConfirmationGate()
+    _suggestion_registry = ToolRegistry(_suggestion_gate, audit_log_path=audit.path)
+    register_send_suggestion(
+        _suggestion_registry,
+        suggestions_path=(
+            suggestions_path if suggestions_path is not None else DEFAULT_SUGGESTIONS_PATH
+        ),
+    )
+    _suggestion_queue = PendingActions(_suggestion_registry, _suggestion_gate, audit=audit)
+    _suggestion_action_ids: set[str] = set()
 
     @app.errorhandler(RequestEntityTooLarge)
     def request_too_large(_error: RequestEntityTooLarge) -> Response:
@@ -575,12 +589,14 @@ def create_app(
         st: Store = app.config["STORE"]
         payload = request.get_json(silent=True) or {}
         regenerate = payload.get("regenerate") is True
+        retry = payload.get("retry") is True
         message = payload.get("message")
         message = message.strip() if isinstance(message, str) else ""
         from app.store import ChatMessage as StoreChatMessage
 
         created = None
         sent_at = now_label()
+        record_new_user_message = False
         # Which stored reply this turn rewrites, when regenerating. The by-id
         # path rewrites the message in place; the legacy newest-reply path pops
         # it and lets the new answer take its place.
@@ -616,6 +632,10 @@ def create_app(
                 # delete the conversation that followed it.
                 in_place_message = thread[index]
                 message = previous_user.body
+            elif conv_id is not None and thread and not thread[-1].is_orbit:
+                # The previous attempt stored the user message, then failed or was
+                # cut off before producing a reply. Retry that user message in place.
+                message = thread[-1].body
             else:
                 if conv_id is None or not thread or not thread[-1].is_orbit or thread[-1].action is not None:
                     return Response(
@@ -635,6 +655,39 @@ def create_app(
                 # It is removed here and the new one takes its place.
                 thread.pop()
                 message = previous_user.body
+        elif retry:
+            conv_id = st.active_conversation_id
+            thread = st.threads.get(conv_id or "", [])
+            if conv_id is not None and thread and not thread[-1].is_orbit and (
+                not message or thread[-1].body == message
+            ):
+                message = thread[-1].body
+            elif (
+                conv_id is not None
+                and len(thread) >= 2
+                and thread[-1].is_orbit
+                and thread[-1].action is None
+                and not thread[-2].is_orbit
+                and (not message or thread[-2].body == message)
+            ):
+                in_place_message = thread[-1]
+                message = thread[-2].body
+            else:
+                if not message:
+                    return Response(
+                        json.dumps({"error": "message is required"}),
+                        status=400,
+                        mimetype="application/json",
+                    )
+                if st.active_conversation_id is None:
+                    created = st.start_conversation()
+                conv_id = st.active_conversation_id
+                assert conv_id is not None
+                st.append_message(
+                    conv_id,
+                    StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False),
+                )
+                record_new_user_message = True
         else:
             if not message:
                 return Response(json.dumps({"error": "message is required"}), status=400, mimetype="application/json")
@@ -649,9 +702,10 @@ def create_app(
                 conv_id,
                 StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False),
             )
+            record_new_user_message = True
 
         assert conv_id is not None
-        if not regenerate:
+        if record_new_user_message:
             # One audit line per accepted message. The Analytics view counts
             # these for "messages per day"; the text itself is never recorded.
             _record_event(
@@ -811,11 +865,31 @@ def create_app(
         result = hb.check_now()
         return _json({"status": result["status"], "fired": [n["id"] for n in result["fired"]]})
 
+    @app.post("/api/suggestions")
+    def api_suggestions() -> Response:
+        """Queue one suggestion for confirmation through the tool registry and gate."""
+        payload = request.get_json(silent=True) or {}
+        raw = payload.get("content") if "content" in payload else payload.get("suggestion")
+        if not isinstance(raw, str) or not raw.strip():
+            return _json({"error": "suggestion must not be empty."}, 400)
+        if "\n" in raw or "\r" in raw:
+            return _json({"error": "suggestion must be a single line."}, 400)
+        content = raw.strip()
+        queue: PendingActions = app.config["ACTIONS"] or _suggestion_queue
+        try:
+            action = queue.propose("send_suggestion", {"content": content})
+        except ProposalRejected as exc:
+            return _json({"error": str(exc)}, 400)
+        _suggestion_action_ids.add(action.id)
+        return _json({"id": action.id, "summary": action.summary, "state": "pending"})
+
     @app.post("/api/actions/<action_id>/<decision>")
     def api_action_decide(action_id: str, decision: str) -> Response:
         """Approve or decline one proposed tool call. Both outcomes are audited by the registry."""
         st: Store = app.config["STORE"]
         queue: PendingActions | None = app.config["ACTIONS"]
+        if queue is None and action_id in _suggestion_action_ids:
+            queue = _suggestion_queue
         if queue is None:
             return _json({"error": "tools are not enabled"}, 503)
         if decision not in ("approve", "decline"):
@@ -896,6 +970,7 @@ def create_app(
         message = message.strip() if isinstance(message, str) else ""
         initial = bool(payload.get("initial", False))
         regenerate = payload.get("regenerate") is True
+        retry = payload.get("retry") is True
 
         from app.store import ChatMessage as StoreChatMessage
 
@@ -932,6 +1007,11 @@ def create_app(
                         status=409,
                         mimetype="application/json",
                     )
+            elif not initial and task_obj.chat and not task_obj.chat[-1].is_orbit:
+                # Retrying an unanswered user turn that failed before storing an Orbit reply.
+                pass
+            elif not initial and not task_obj.chat and task_obj.last_turn_initial and task_obj.last_turn_prompt:
+                extra_user = task_obj.last_turn_prompt
             else:
                 if initial or not task_obj.chat or not task_obj.chat[-1].is_orbit:
                     return Response(
@@ -954,6 +1034,50 @@ def create_app(
                         mimetype="application/json",
                     )
                 task_obj.chat.pop()
+        elif retry:
+            if initial or (not message and task_obj.last_turn_initial):
+                if task_obj.chat and task_obj.chat[-1].is_orbit:
+                    in_place_message = task_obj.chat[-1]
+                    history_end = len(task_obj.chat) - 1
+                extra_user = task_obj.last_turn_prompt or (
+                    f"Start the task: {task_obj.title}. {task_obj.description} "
+                    "Give your opening update."
+                )
+                task_obj.last_turn_prompt = extra_user
+                task_obj.last_turn_initial = True
+            elif task_obj.chat and not task_obj.chat[-1].is_orbit and (
+                not message or task_obj.chat[-1].body == message
+            ):
+                task_obj.last_turn_prompt = task_obj.chat[-1].body
+                task_obj.last_turn_initial = False
+            elif (
+                len(task_obj.chat) >= 2
+                and task_obj.chat[-1].is_orbit
+                and not task_obj.chat[-2].is_orbit
+                and (not message or task_obj.chat[-2].body == message)
+            ):
+                in_place_message = task_obj.chat[-1]
+                history_end = len(task_obj.chat) - 1
+                task_obj.last_turn_prompt = task_obj.chat[-2].body
+                task_obj.last_turn_initial = False
+            else:
+                if not message:
+                    return Response(
+                        json.dumps({"error": "message is required"}),
+                        status=400,
+                        mimetype="application/json",
+                    )
+                task_obj.last_turn_prompt = message
+                task_obj.last_turn_initial = False
+                stored_user = StoreChatMessage(who="You", time=sent_at, body=message, is_orbit=False)
+                st.add_chat(task_id, stored_user)
+                _record_event(
+                    "chat_message_received",
+                    conversation_id=task_id,
+                    surface="task",
+                    message_id=stored_user.id,
+                    chars=len(message),
+                )
         elif initial:
             extra_user = (
                 f"Start the task: {task_obj.title}. {task_obj.description} "
@@ -1036,7 +1160,7 @@ def create_app(
                     if active is not None and active.evidence:
                         _note(task_obj, f"{active.title} — “{active.evidence}”")
                 add_files(run, files_in(chunk.text), SOURCE_ORBIT)
-                run.operation = "Working through it…"
+                run.operation = describe_thinking_step(chunk.text, run.steps)
             elif chunk.kind == "answer":
                 add_files(run, files_in(chunk.text), SOURCE_ORBIT)
                 run.operation = "Writing your answer…"

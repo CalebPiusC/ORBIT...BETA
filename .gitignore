@@ -23,6 +23,7 @@ runtime/
 state/
 .orbit/
 notes.txt
+suggestions.txt
 *.state
 *.state.json
 *.db

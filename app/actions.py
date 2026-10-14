@@ -42,6 +42,8 @@ def summarize(tool_name: str, arguments: dict[str, Any]) -> str:
 
     if tool_name == "write_note":
         return f"Add this line to your notes: \u201c{text('content')}\u201d"
+    if tool_name == "send_suggestion":
+        return f"Save this suggestion: \u201c{text('content')}\u201d"
     if tool_name == "remember_fact":
         return f"Remember this about you: \u201c{text('fact')}\u201d"
     if tool_name == "forget_fact":

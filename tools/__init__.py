@@ -9,6 +9,7 @@ from memory.plans import DEFAULT_PLANS_PATH, PlanStore
 from tools.memory import register_memory_tools
 from tools.plans import register_plan_tools
 from tools.notes import DEFAULT_NOTES_PATH, register_write_note
+from tools.suggestions import DEFAULT_SUGGESTIONS_PATH, register_send_suggestion
 from tools.registry import DEFAULT_AUDIT_LOG_PATH, AuditLog, ToolDefinition, ToolOutcome, ToolRegistry
 
 if TYPE_CHECKING:
@@ -22,6 +23,7 @@ def build_tool_registry(
     notes_path: str | Path = DEFAULT_NOTES_PATH,
     facts_path: str | Path = DEFAULT_FACTS_PATH,
     plans_path: str | Path = DEFAULT_PLANS_PATH,
+    suggestions_path: str | Path = DEFAULT_SUGGESTIONS_PATH,
     heartbeat_path: str | Path | None = None,
     heartbeat: "Heartbeat | None" = None,
 ) -> ToolRegistry:
@@ -43,15 +45,18 @@ def build_tool_registry(
             audit=AuditLog(audit_log_path),
         )
     register_plan_tools(registry, plans=PlanStore(plans_path), heartbeat=heartbeat)
+    register_send_suggestion(registry, suggestions_path=suggestions_path)
     return registry
 
 
 __all__ = [
     "ConfirmationGate",
     "ConsoleConfirmationGate",
+    "DEFAULT_SUGGESTIONS_PATH",
     "ProposedAction",
     "ToolDefinition",
     "ToolOutcome",
     "ToolRegistry",
     "build_tool_registry",
+    "register_send_suggestion",
 ]

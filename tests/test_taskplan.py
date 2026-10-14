@@ -23,6 +23,7 @@ from app.taskplan import (
     TaskRun,
     add_files,
     apply_narration,
+    describe_thinking_step,
     files_in,
     finish_run,
     leading_clause,
@@ -194,6 +195,28 @@ class TitleTests(unittest.TestCase):
     def test_an_empty_request_is_untitled_not_a_crash(self) -> None:
         self.assertEqual(summarize_request(""), "Untitled task")
         self.assertEqual(summarize_request("   "), "Untitled task")
+
+    def test_describe_thinking_step_varies_by_real_narration(self) -> None:
+        self.assertEqual(
+            describe_thinking_step("I am reading orders.py to locate the status field."),
+            "Reading the file…",
+        )
+        self.assertEqual(
+            describe_thinking_step("Calling a tool to save the note."),
+            "Calling a tool…",
+        )
+        self.assertEqual(
+            describe_thinking_step("I can reproduce the crash when cart is empty."),
+            "Reproducing the failure…",
+        )
+        self.assertEqual(
+            describe_thinking_step("Running pytest to verify the behavior."),
+            "Checking the tests…",
+        )
+        self.assertEqual(
+            describe_thinking_step("Let me consider the Tradeoffs."),
+            "Working through it…",
+        )
 
 
 if __name__ == "__main__":
