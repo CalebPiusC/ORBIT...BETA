@@ -29,7 +29,7 @@ from onboarding.accounts import (
 )
 from onboarding.content import FAQ, WELCOME_OPTIONS
 from onboarding.feedback import sanitize_context, first_line
-from onboarding.projects import list_folder_paths, list_zip_entries
+from onboarding.projects import ProjectStore, list_folder_paths, list_zip_entries
 from onboarding import session_secret
 
 PASSWORD = "correct-horse-battery"
@@ -1040,6 +1040,53 @@ class TokenSyncTests(OnboardingTestCase):
         self.assertNotIn(".git/config", paths)
         folder = list_folder_paths(["app/src/main.py", "app/.env", "app/node_modules/x.js"])
         self.assertEqual([item["path"] for item in folder], ["src/main.py"])
+
+
+class ProjectLedgerTests(OnboardingTestCase):
+    """One project list, not two.
+
+    The onboarding layer keeps the fuller record of an import; the workspace
+    keeps the store its Projects screens read. Both used to be the same file
+    under two different schemas — which is a crash, not a design — and a project
+    imported here used to be invisible on the Projects page. These pin the fixed
+    behaviour: separate files, and every project on both screens.
+    """
+
+    def test_the_two_project_ledgers_are_different_files(self) -> None:
+        ledger = Path(self.config.projects.path)
+        self.assertNotEqual(ledger.name, "projects.json")  # the workspace's file
+        # And a workspace store reading a ledger row it did not write skips it
+        # instead of failing the whole page.
+        stray = ProjectStore(ledger.parent / "stray.json")
+        stray.create(account_id="u-1", name="Kept", kind="orbit")
+        raw = json.loads((ledger.parent / "stray.json").read_text())
+        raw["projects"].append({"id": "p-foreign", "name": "Not ours"})
+        (ledger.parent / "stray.json").write_text(json.dumps(raw))
+        self.assertEqual([p.name for p in stray.for_account("u-1")], ["Kept"])
+
+    def test_an_imported_project_is_openable_from_the_workspace(self) -> None:
+        self.verified_account()
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("src/app.py", "print('hi')")
+        buffer.seek(0)
+        token = self.csrf_token("/projects/import/zip")
+        response = self.client.post(
+            "/projects/import/zip",
+            data={"csrf_token": token, "archive": (buffer, "myproject.zip")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 302)
+        account = self.config.accounts.find_by_email("ada@example.com")
+        project = self.config.projects.for_account(account.id)[0]
+        # The same id, in the store the Projects overview and the rail read.
+        workspace_store = self.app.config["PROJECTS"]
+        adopted = workspace_store.get_for(project.id, account.id)
+        self.assertIsNotNone(adopted, "the import never reached the workspace store")
+        self.assertEqual(adopted.name, project.name)
+        self.assertIn(project.id, self.html("/projects"))
+        # And the reference it came from survives the crossing.
+        self.assertFalse(adopted.remote["contents_copied"])
 
 
 if __name__ == "__main__":

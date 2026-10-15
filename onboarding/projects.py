@@ -367,9 +367,18 @@ class ProjectStore:
                     self._projects = {}
                     self._loaded = True
                     return
+                known = {name for name in Project.__dataclass_fields__}
                 for raw in document.get("projects", []):
-                    known = {name for name in Project.__dataclass_fields__}
-                    self._projects[raw["id"]] = Project(**{k: v for k, v in raw.items() if k in known})
+                    if not isinstance(raw, dict) or "id" not in raw:
+                        continue
+                    try:
+                        self._projects[raw["id"]] = Project(
+                            **{k: v for k, v in raw.items() if k in known}
+                        )
+                    except (TypeError, ValueError):
+                        # A row this build cannot read is skipped, never fatal:
+                        # one bad record must not blank out every project.
+                        continue
             self._loaded = True
 
     def _save(self) -> None:
@@ -381,6 +390,16 @@ class ProjectStore:
             os.replace(temporary, self.path)
 
     # ----- reads -----
+    def all_projects(self) -> list[Project]:
+        """Every project in this ledger, whoever it belongs to.
+
+        Used once at attach time to bring the workspace's own store up to date
+        with what this layer already recorded. Nothing else should need it.
+        """
+        self._ensure_loaded()
+        with self._lock:
+            return list(self._projects.values())
+
     def for_account(self, account_id: str, *, include_archived: bool = False) -> list[Project]:
         self._ensure_loaded()
         items = [
@@ -794,6 +813,25 @@ class PublishingProjectStore:
     def __init__(self, inner: ProjectStore, app: Any) -> None:
         self._inner = inner
         self._app = app
+
+    def sync_all(self) -> int:
+        """Publish everything the ledger already holds, once, at attach time.
+
+        Projects recorded before the workspace had a store of its own — the
+        demo's sample work, anything imported on an earlier build — would
+        otherwise be visible on one screen and missing from another. Publishing
+        them here is what makes the two lists the same list.
+        """
+        published = 0
+        for project in self._inner.all_projects():
+            if not project.account_id:
+                # A row from another store's schema: not ours to publish.
+                continue
+            before = self._app.config.get("PROJECTS").get_for(project.id, project.account_id)
+            publish_project(self._app, project)
+            if before is None:
+                published += 1
+        return published
 
     def __getattr__(self, name: str) -> Any:
         attribute = getattr(self._inner, name)

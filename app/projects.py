@@ -197,11 +197,16 @@ class ProjectStore:
         silently stops filtering reads as data loss). ``query`` matches name,
         description, summary and language names, case-insensitively.
         """
-        projects = [
-            Project.from_dict(raw)
-            for raw in self._read().get("projects", [])
-            if raw.get("user_id") == user_id
-        ]
+        projects = []
+        for raw in self._read().get("projects", []):
+            if not isinstance(raw, dict) or raw.get("user_id") != user_id:
+                continue
+            try:
+                projects.append(Project.from_dict(raw))
+            except (KeyError, TypeError, ValueError):
+                # A row written by a different store (or a newer build) is
+                # skipped rather than taking the page down with it.
+                continue
         if status is not None:
             projects = [p for p in projects if p.status == status]
         needle = " ".join((query or "").split()).lower()
@@ -227,7 +232,10 @@ class ProjectStore:
     def get_for(self, project_id: str, user_id: str) -> Project | None:
         for raw in self._read().get("projects", []):
             if raw.get("id") == project_id and raw.get("user_id") == user_id:
-                return Project.from_dict(raw)
+                try:
+                    return Project.from_dict(raw)
+                except (KeyError, TypeError, ValueError):
+                    return None
         return None
 
     # ----- mutations -----

@@ -48,6 +48,7 @@ __all__ = [
     "attach",
     "build_onboarding",
     "make_store_factory",
+    "sync_workspace_projects",
 ]
 
 
@@ -91,6 +92,23 @@ def make_store_factory(*, demo_account_id: str | None = None) -> Callable[[Accou
     factory.drop = drop  # type: ignore[attr-defined]
     factory.stores = stores  # type: ignore[attr-defined]
     return factory
+
+
+def sync_workspace_projects(app: Any) -> int:
+    """Publish this layer's project ledger into the store ``app`` is using now.
+
+    ``create_app`` attaches this layer before ``run_app`` swaps the in-memory
+    project store for the file-backed one, so the attach-time reconciliation
+    lands in a store that is about to be replaced. Re-running it once the real
+    store is in place is what keeps every project on both screens.
+    """
+    config: OnboardingConfig | None = app.config.get("ONBOARDING")
+    if config is None:
+        return 0
+    store = config.projects
+    if isinstance(store, PublishingProjectStore):
+        return store.sync_all()
+    return 0
 
 
 def session_secret(runtime_dir: str | Path) -> str:
@@ -139,7 +157,11 @@ def build_onboarding(
     registry = build_registry(public_url=public_url or _guess_public_url())
     config = OnboardingConfig(
         accounts=AccountStore(directory / "accounts.json"),
-        projects=ProjectStore(directory / "projects.json"),
+        # Its own ledger, not the workspace's: the workspace keeps what the
+        # Projects screens read (runtime/projects.json), and this layer keeps the
+        # fuller import records. Two schemas in one file is a crash waiting to
+        # happen, which is exactly what it did.
+        projects=ProjectStore(directory / "onboarding-projects.json"),
         feedback=FeedbackStore(directory / "feedback.json"),
         mailer=build_mailer(directory),
         oauth=registry,
@@ -273,4 +295,7 @@ def attach(app: Any, config: OnboardingConfig) -> None:
     # the project page read, so every project this layer records is published
     # into it under the same id (see PublishingProjectStore).
     config.projects = PublishingProjectStore(config.projects, app)  # type: ignore[assignment]
+    # Bring the workspace's store up to date with whatever this layer wrote
+    # before the two were joined: one list, not two that disagree.
+    config.projects.sync_all()
     attach_blueprint(app, config)

@@ -482,7 +482,12 @@ def create_app(
         PROJECTS list: the three most recently updated projects, straight
         from the store. A page can override either value explicitly; the
         sidebar shows nothing when there is nothing."""
-        st: Store | None = app.config.get("STORE")
+        # The signed-in account's workspace, not the process default: a rail that
+        # listed somebody else's projects would be worse than an empty one.
+        try:
+            st: Store | None = current_store()
+        except Exception:  # a build without a store at all
+            st = app.config.get("STORE")
         project_store: ProjectStore | None = app.config.get("PROJECTS")
         if st is None or project_store is None:
             return {"sidebar_projects": [], "active_project_id": ""}
@@ -1980,6 +1985,14 @@ def run_app(app: Flask) -> None:
         app.config["PROJECTS"] = ProjectStore(
             Path(os.environ.get("ORBIT_PROJECTS_PATH", "runtime/projects.json"))
         )
+    if app.config.get("ONBOARDING") is not None:
+        # The onboarding layer's imports become projects on this store too, and
+        # anything it recorded before this boot is published now. One list.
+        from onboarding import sync_workspace_projects
+
+        published = sync_workspace_projects(app)
+        if published:
+            app.logger.info("workspace projects published from the onboarding ledger: %s", published)
 
     if app.config.get("ACTIONS") is None:
         # Browser tools: the same six tools as the terminal, but the decision

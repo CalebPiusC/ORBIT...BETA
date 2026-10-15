@@ -205,13 +205,22 @@ class ProjectRouteTests(unittest.TestCase):
 
     def test_import_entry_points_render_disabled_and_honest(self) -> None:
         html = self.client.get("/create").get_data(as_text=True)
-        # Visible in the design, disabled because they are not connected.
+        # Every provider is named, and the ones that cannot be connected say so
+        # rather than looking identical to the one that can.
         for name in ("GitHub", "GitLab", "Bitbucket"):
             self.assertIn(name, html, name)
         self.assertIn("is-disabled", html)
         self.assertIn("Not connected", html)
-        self.assertIn("File import isn't built yet", html)
         self.assertNotIn("fetched and added", html)  # no pretend success anywhere
+        # Local files are the one source that needs no provider at all. Without
+        # the onboarding layer there is no account to import into, so the card
+        # is disabled and says why; with it, the real import routes are linked.
+        self.assertIn("Bring in a folder, a ZIP, or individual files", html)
+        if "File import needs an account" in html:
+            self.assertIn('class="drop-zone is-disabled"', html)
+        else:
+            for route in ("/projects/import/folder", "/projects/import/zip", "/projects/import/files"):
+                self.assertIn(route, html, route)
         # The create form only ever posts the idea path.
         self.assertIn('value="new"', html)
         # A source smuggled into the POST is ignored: an idea is what the
@@ -305,7 +314,8 @@ class ProjectRouteTests(unittest.TestCase):
         # the sticky bar names the pick and its real next step
         html = self.client.get("/agents").get_data(as_text=True)
         self.assertIn("Debug", html)
-        self.assertIn("selected — no project is assigned yet", html)
+        self.assertIn("Debug agent selected", html)
+        self.assertIn("No project is assigned yet.", html)
         self.assertIn('class="assign-bar"', html)  # the bar element, not just its CSS
         events = [e for e in self._audit_events() if e.get("event") == "agent_specialist_selected"]
         self.assertEqual(len(events), 1)

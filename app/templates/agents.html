@@ -2,6 +2,14 @@
 {% block title %}orbit — Agents{% endblock %}
 {% block body_class %}v2{% endblock %}
 {% block body %}
+{% set agent_icon = {
+  'coding': '<path d="m8.5 7-4.5 5 4.5 5M15.5 7l4.5 5-4.5 5"/>',
+  'research': '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/><path d="M8.4 10.5h4.2M10.5 8.4v4.2"/>',
+  'debug': '<circle cx="12" cy="13" r="5.5"/><path d="M9 8.5 7 6M15 8.5 17 6M6.5 13H4M20 13h-2.5M7.5 18l-2 2M16.5 18l2 2M12 4.5v2"/>',
+  'review': '<path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.6"/>',
+  'testing': '<path d="M9.5 4h5M11 4v4.7L6.6 16a3 3 0 0 0 2.6 4.4h5.6A3 3 0 0 0 17.4 16L13 8.7V4"/><path d="m10 15.6 2.2 2.1 3.3-3.6"/>',
+  'documentation': '<path d="M5.5 5A2.5 2.5 0 0 1 8 2.5h10.5v16H8A2.5 2.5 0 0 0 5.5 21V5Z"/><path d="M8 18.5A2.5 2.5 0 0 0 5.5 21H19"/>',
+} %}
 <div class="screen screen--active" id="screen-agents">
 {% include "_sidebar.html" %}
 
@@ -10,56 +18,54 @@
     <div class="page-wrap">
 
       <div class="page-topline">
-        <nav class="page-crumb" aria-label="Breadcrumb"><span class="crumb-workspace">{{ user.workspace }}</span><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Agents</span></nav>
+        <nav class="page-crumb" aria-label="Breadcrumb"><span>{{ user.workspace }}</span><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Agents</span></nav>
         <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
       </div>
 
       <header class="page-head-block">
-        <p class="page-eyebrow">Specialists for your projects</p>
-        <h1 class="page-title">The right help, on the right job.</h1>
-        <p class="page-sub">{{ total }} specialties · available across your projects. Choosing one assigns its own conversation inside the project you pick — its brief is the system prompt the conversation actually runs under.</p>
+        <div class="page-head-text">
+          <p class="page-eyebrow">The right help for the work</p>
+          <h1 class="page-title">A specialty for your next step.</h1>
+          <p class="page-sub">Choose an agent type first. Then point it at the project and task you have in mind.</p>
+        </div>
       </header>
 
-      <form class="search-field agents-search" method="get" action="/agents" role="search">
-        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
-        <input type="search" name="q" value="{{ query }}" placeholder="Find an agent by specialty" aria-label="Find an agent by specialty" autocomplete="off" />
-      </form>
+      <div class="agents-search-row">
+        <form class="search-field agents-search" method="get" action="/agents" role="search">
+          <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
+          <input type="search" name="q" value="{{ query }}" placeholder="Find an agent by specialty…" aria-label="Find an agent by specialty" autocomplete="off" />
+        </form>
+        <p class="agents-meta">{{ total }} specialties · Available across your projects</p>
+      </div>
 
       {% if agents %}
       <section class="agents-grid" aria-label="Specialties">
         {% for agent in agents %}
-        <article class="agent-card{% if selected_agent and selected_agent.id == agent.id %} selected{% endif %}">
+        {% set chosen = selected_agent and selected_agent.id == agent.id %}
+        <article class="agent-card{% if chosen %} selected{% endif %}">
           <header class="agent-head">
             <span class="agent-icon" aria-hidden="true">
-              {%- if agent.id == 'coding' -%}
-              <svg class="oi" viewBox="0 0 24 24"><path d="m8.5 7-4.5 5 4.5 5M15.5 7l4.5 5-4.5 5"/></svg>
-              {%- elif agent.id == 'research' -%}
-              <svg class="oi" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
-              {%- elif agent.id == 'debug' -%}
-              <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="13" r="5.5"/><path d="M9 8.5 7 6M15 8.5 17 6M6.5 13H4M20 13h-2.5M7.5 18l-2 2M16.5 18l2 2M12 4.5v2"/></svg>
-              {%- elif agent.id == 'review' -%}
-              <svg class="oi" viewBox="0 0 24 24"><path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.6"/></svg>
-              {%- elif agent.id == 'testing' -%}
-              <svg class="oi" viewBox="0 0 24 24"><path d="M9.5 3.5h5M11 3.5v5.2L6 17a3 3 0 0 0 2.7 4.5H15.3A3 3 0 0 0 18 17l-5-8.3V3.5"/><path d="m9.8 15.6 2.3 2.2 3.4-3.7"/></svg>
-              {%- else -%}
-              <svg class="oi" viewBox="0 0 24 24"><path d="M5.5 5A2.5 2.5 0 0 1 8 2.5h11v16H8a2.5 2.5 0 0 0-2.5 2.5V5Z"/><path d="M8 18.5A2.5 2.5 0 0 0 5.5 21H19"/></svg>
-              {%- endif -%}
+              <svg class="oi" viewBox="0 0 24 24">{{ agent_icon.get(agent.id, agent_icon['documentation'])|safe }}</svg>
             </span>
-            <div class="agent-head-text">
-              <div class="agent-name">{{ agent.name }}</div>
-              <div class="agent-role">{{ agent.role }}</div>
-            </div>
+            {% if chosen %}<span class="agent-selected-flag">Selected ✓</span>{% endif %}
           </header>
+          <h2 class="agent-name">{{ agent.name }}</h2>
+          <p class="agent-role">{{ agent.role }}</p>
           <p class="agent-detail">{{ agent.detail }}</p>
           <p class="agent-quote">“{{ agent.quote }}”</p>
           <div class="agent-actions">
-            {% if selected_agent and selected_agent.id == agent.id %}
-            <span class="agent-selected-flag">Ready to assign ✓</span>
+            {% if chosen %}
+            <span class="agent-ready">
+              <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+              Ready to assign
+            </span>
             <form method="post" action="/agents/deselect" class="inline-form"><button type="submit" class="linkish">Deselect</button></form>
             {% else %}
-            <form method="post" action="/agents/{{ agent.id }}/select">
+            <form method="post" action="/agents/{{ agent.id }}/select" class="inline-form">
               <input type="hidden" name="q" value="{{ query }}" />
-              <button type="submit" class="btn-ghost">Choose {{ agent.name }} →</button>
+              <button type="submit" class="btn-ghost">Choose {{ agent.name }}
+                <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12.5 6.5 19 12l-6.5 5.5"/></svg>
+              </button>
             </form>
             {% endif %}
           </div>
@@ -74,13 +80,19 @@
         <a class="btn-ghost" href="/agents">See them all</a>
       </section>
       {% endif %}
+
+      <p class="page-foot">The Main Agent stays with your project. Specialists help with a particular kind of work.</p>
     </div>
   </main>
 
   {% if selected_agent %}
   <div class="assign-bar" id="selection" role="region" aria-label="Assign the selected specialist">
+    <span class="assign-bar-icon" aria-hidden="true">
+      <svg class="oi" viewBox="0 0 24 24">{{ agent_icon.get(selected_agent.id, agent_icon['documentation'])|safe }}</svg>
+    </span>
     <div class="assign-bar-text">
-      <strong>{{ selected_agent.name }}</strong> selected — no project is assigned yet.
+      <strong>{{ selected_agent.name }} agent selected</strong>
+      <span>Choose where to work next. No project is assigned yet.</span>
     </div>
     {% if assign_targets %}
     <form method="post" action="/agents/{{ selected_agent.id }}/assign" class="assign-bar-form">
@@ -90,7 +102,10 @@
         <option value="{{ p.id }}">{{ p.name }}</option>
         {% endfor %}
       </select>
-      <button type="submit" class="btn-primary">Assign &amp; open the workspace</button>
+      <button type="submit" class="btn-primary">
+        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12.5 6.5 19 12l-6.5 5.5"/></svg>
+        Choose a project
+      </button>
     </form>
     {% else %}
     <div class="assign-bar-none">

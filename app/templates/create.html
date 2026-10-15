@@ -2,6 +2,7 @@
 {% block title %}orbit — Start a project{% endblock %}
 {% block body_class %}v2{% endblock %}
 {% block body %}
+{% set gh_connected = account and account.integrations.get('github_connected') %}
 <div class="screen screen--active" id="screen-create">
 {% include "_sidebar.html" %}
 
@@ -10,14 +11,16 @@
     <div class="page-wrap create-wrap">
 
       <div class="page-topline">
-        <nav class="page-crumb" aria-label="Breadcrumb"><a href="/projects">Projects</a><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Start a project</span></nav>
+        <nav class="page-crumb" aria-label="Breadcrumb"><span>{{ user.workspace }}</span><span class="crumb-sep" aria-hidden="true">/</span><a href="/projects">Projects</a><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Create or import</span></nav>
         <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
       </div>
 
       <header class="page-head-block">
-        <p class="page-eyebrow">New project</p>
-        <h1 class="page-title">Every project starts somewhere.</h1>
-        <p class="page-sub">Name the idea and choose how you want the first step to go — the import routes below are visible so you can see where they'll land, and they are disabled because they are not connected yet.</p>
+        <div class="page-head-text">
+          <p class="page-eyebrow">Make something yours</p>
+          <h1 class="page-title">Every project starts somewhere.</h1>
+          <p class="page-sub">Start with an idea, bring your files, or connect a repository. You choose.</p>
+        </div>
       </header>
 
       {% if notice %}
@@ -27,76 +30,143 @@
       </div>
       {% endif %}
 
-      <section class="create-card" aria-label="Start with an idea">
-        <div class="create-card-head">
-          <h2 class="create-card-title">Start with an idea</h2>
-          <p class="create-card-sub">The only entry point that works today — it creates a real project and lands you in its workspace.</p>
-        </div>
-        <form method="post" action="/projects" class="create-form">
-          <input type="hidden" name="source" value="new" />
-          <div class="field">
-            <label class="field-label" for="projectName">Project name</label>
-            <input class="text-input" id="projectName" name="name" type="text" required maxlength="80" autocomplete="off" placeholder="Fieldnotes, Orbit beta, Order bot…" />
+      <div class="create-grid">
+        {# ---- The idea: the entry point that creates a project here. ---- #}
+        <section class="create-card" aria-label="Start with an idea">
+          <div class="create-card-head">
+            <span class="create-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 4.8l1.7 4.4 4.4 1.7-4.4 1.7L12 17l-1.7-4.4L5.9 10.9l4.4-1.7z"/><path d="M18.4 16.6l.7 1.7 1.7.7-1.7.7-.7 1.7-.7-1.7-1.7-.7 1.7-.7z"/></svg></span>
+            <div>
+              <h2 class="create-card-title">Start with an idea</h2>
+              <p class="create-card-sub">No repository. No setup. Just a starting point.</p>
+            </div>
           </div>
-          <div class="field">
-            <label class="field-label" for="projectDesc">What would you like to build?</label>
-            <textarea class="text-area" id="projectDesc" name="description" maxlength="600" rows="3" placeholder="In your own words — this becomes the project description. You can leave it empty."></textarea>
-          </div>
-          <fieldset class="field plan-choice">
-            <legend class="field-label">The first step</legend>
-            <label class="radio-card">
-              <input type="radio" name="mode" value="plan" checked />
-              <span class="radio-card-body">
-                <span class="radio-card-name">Plan with the Main Agent</span>
-                <span class="radio-card-note">Land in the workspace with the composer primed — describe the goal and let the Main Agent shape the first tasks with you.</span>
-              </span>
-            </label>
-            <label class="radio-card">
-              <input type="radio" name="mode" value="blank" />
-              <span class="radio-card-body">
-                <span class="radio-card-name">Start blank</span>
-                <span class="radio-card-note">Skip the conversation and open the workspace — add the tasks yourself on the Project map.</span>
-              </span>
-            </label>
-          </fieldset>
-          <div class="create-actions">
-            <button type="submit" class="btn-primary">Create the project</button>
-            <a class="btn-ghost" href="/projects">Cancel</a>
-          </div>
-        </form>
-      </section>
+          <form method="post" action="/projects" class="create-form">
+            <input type="hidden" name="source" value="new" />
+            <div class="field">
+              <label class="field-label" for="projectName">Project name</label>
+              <input class="text-input" id="projectName" name="name" type="text" required maxlength="80" autocomplete="off" placeholder="Fieldnotes, Orbit beta, Order bot…" />
+            </div>
+            <div class="field">
+              <label class="field-label" for="projectDesc">What would you like to build?</label>
+              <textarea class="text-area" id="projectDesc" name="description" maxlength="600" rows="4" placeholder="In your own words — this becomes the project description. You can leave it empty."></textarea>
+            </div>
+            <fieldset class="field plan-choice">
+              <legend class="field-label">How would you like to begin?</legend>
+              <label class="radio-card">
+                <input type="radio" name="mode" value="plan" checked />
+                <span class="radio-card-body">
+                  <span class="radio-card-name">Plan with the Main Agent</span>
+                  <span class="radio-card-note">Turn your idea into a clear Project Map before writing any code.</span>
+                </span>
+              </label>
+              <label class="radio-card">
+                <input type="radio" name="mode" value="blank" />
+                <span class="radio-card-body">
+                  <span class="radio-card-name">Start with a blank project</span>
+                  <span class="radio-card-note">Open the workspace straight away and add the first task yourself on the map.</span>
+                </span>
+              </label>
+            </fieldset>
+            <div class="create-actions">
+              <p class="create-hint">You can change the plan as your idea grows.</p>
+              <button type="submit" class="btn-primary">
+                <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12.5 6.5 19 12l-6.5 5.5"/></svg>
+                Create project
+              </button>
+            </div>
+          </form>
+        </section>
 
-      <section class="create-card create-card-import" id="import" aria-label="Import an existing project">
-        <div class="create-card-head">
-          <h2 class="create-card-title">Bring your own project</h2>
-          <p class="create-card-sub">These routes are part of the design, and they are not connected — the row tells you exactly that rather than pretending an import happened.</p>
+        {# ---- The side column: the other two ways in. ---- #}
+        <div class="create-col">
+          <section class="create-card" aria-label="Bring an existing project">
+            <h2 class="create-card-title">Bring an existing project</h2>
+            <p class="create-card-sub">Pick a source. The Main Agent will help you understand what's there and plan your next step.</p>
+            <p class="repo-group-label">From a repository</p>
+            <div class="repo-rows">
+              {% if gh_connected %}
+              <a class="repo-row" href="/projects/import/github">
+                <span class="repo-ico" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-2.7 16.6c.4.1.6-.2.6-.5v-1.9c-2.3.5-2.9-1.1-2.9-1.1-.4-1-1-1.3-1-1.3-.8-.5.1-.5.1-.5.9.1 1.4.9 1.4.9.8 1.4 2.1 1 2.6.8.1-.6.3-1 .6-1.3-2-.2-4.1-1-4.1-4.4 0-1 .3-1.8.9-2.4-.1-.2-.4-1.1.1-2.2 0 0 .7-.2 2.4.9a8.2 8.2 0 0 1 4.4 0c1.7-1.1 2.4-.9 2.4-.9.5 1.1.2 2 .1 2.2.6.6.9 1.4.9 2.4 0 3.4-2.1 4.2-4.1 4.4.4.4.7 1 .7 2v2.9c0 .3.2.6.7.5A8.5 8.5 0 0 0 12 3.5Z"/></svg></span>
+                <span class="repo-body"><span class="repo-name">GitHub</span><span class="repo-note">Read a repository's file listing — repository access is asked for separately, and nothing is copied.</span></span>
+                <span class="repo-go">Import
+                  <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 16 16 8M9.5 8H16v6.5"/></svg>
+                </span>
+              </a>
+              {% elif account %}
+              <a class="repo-row" href="/settings/integrations">
+                <span class="repo-ico" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-2.7 16.6c.4.1.6-.2.6-.5v-1.9c-2.3.5-2.9-1.1-2.9-1.1-.4-1-1-1.3-1-1.3-.8-.5.1-.5.1-.5.9.1 1.4.9 1.4.9.8 1.4 2.1 1 2.6.8.1-.6.3-1 .6-1.3-2-.2-4.1-1-4.1-4.4 0-1 .3-1.8.9-2.4-.1-.2-.4-1.1.1-2.2 0 0 .7-.2 2.4.9a8.2 8.2 0 0 1 4.4 0c1.7-1.1 2.4-.9 2.4-.9.5 1.1.2 2 .1 2.2.6.6.9 1.4.9 2.4 0 3.4-2.1 4.2-4.1 4.4.4.4.7 1 .7 2v2.9c0 .3.2.6.7.5A8.5 8.5 0 0 0 12 3.5Z"/></svg></span>
+                <span class="repo-body"><span class="repo-name">GitHub</span><span class="repo-note">Signing in with GitHub does not grant repository access — connecting asks for it on its own screen.</span></span>
+                <span class="repo-go">Connect
+                  <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 16 16 8M9.5 8H16v6.5"/></svg>
+                </span>
+              </a>
+              {% else %}
+              <div class="repo-row is-disabled" aria-disabled="true">
+                <span class="repo-ico" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0-2.7 16.6c.4.1.6-.2.6-.5v-1.9c-2.3.5-2.9-1.1-2.9-1.1-.4-1-1-1.3-1-1.3-.8-.5.1-.5.1-.5.9.1 1.4.9 1.4.9.8 1.4 2.1 1 2.6.8.1-.6.3-1 .6-1.3-2-.2-4.1-1-4.1-4.4 0-1 .3-1.8.9-2.4-.1-.2-.4-1.1.1-2.2 0 0 .7-.2 2.4.9a8.2 8.2 0 0 1 4.4 0c1.7-1.1 2.4-.9 2.4-.9.5 1.1.2 2 .1 2.2.6.6.9 1.4.9 2.4 0 3.4-2.1 4.2-4.1 4.4.4.4.7 1 .7 2v2.9c0 .3.2.6.7.5A8.5 8.5 0 0 0 12 3.5Z"/></svg></span>
+                <span class="repo-body"><span class="repo-name">GitHub</span><span class="repo-note">Sign in to connect a repository source.</span></span>
+                <span class="repo-badge">Not connected</span>
+              </div>
+              {% endif %}
+
+              {% for label, slug in (('GitLab', 'gitlab'), ('Bitbucket', 'bitbucket')) %}
+              <div class="repo-row is-disabled" aria-disabled="true" title="{{ label }} is not connected yet">
+                <span class="repo-ico" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24">{% if slug == 'gitlab' %}<path d="M12 19.5 4.5 14l2-6.5 2.2 5h6.6l2.2-5L19.5 14z"/>{% else %}<path d="M5 5h14l-2.2 14H7.2z"/><path d="M9.4 10.5h5.2l-.8 5H10z"/>{% endif %}</svg></span>
+                <span class="repo-body"><span class="repo-name">{{ label }}</span><span class="repo-note">Not connected. Connecting {{ label }} is planned — no repository is fetched.</span></span>
+                <span class="repo-badge">Not connected</span>
+              </div>
+              {% endfor %}
+            </div>
+            <p class="repo-foot">Connecting a service is optional. Prefer to keep it local? Bring your files instead.</p>
+          </section>
+
+          <section class="create-card" aria-label="From your computer">
+            <div class="create-card-head">
+              <span class="create-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 16V4.5M7 9.5 12 4.5l5 5"/><path d="M4.5 16.5v1.8a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-1.8"/></svg></span>
+              <div>
+                <h2 class="create-card-title">From your computer</h2>
+                <p class="create-card-sub">A folder, a ZIP, or a few files.</p>
+              </div>
+            </div>
+            {% if account %}
+            <a class="drop-zone" href="/projects/import/folder">
+              <span class="drop-ico" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 16V4.5M7 9.5 12 4.5l5 5"/><path d="M4.5 16.5v1.8a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-1.8"/></svg></span>
+              <p class="drop-text">Bring in a folder, a ZIP, or individual files</p>
+              <p class="drop-note">ORBIT reads the file names and builds a listing. Your files stay on your computer — nothing is uploaded.</p>
+            </a>
+            <div class="upload-actions">
+              <a class="btn-ghost" href="/projects/import/folder">
+                <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8a2 2 0 0 1 2-2h3.2l1.8 2H18a2 2 0 0 1 2 2v6.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>
+                Choose folder
+              </a>
+              <a class="btn-ghost" href="/projects/import/zip">
+                <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="5" width="15" height="14" rx="2"/><path d="M10.6 5v2.6M13.4 5v2.6M10.6 10.4V13M13.4 10.4V13"/></svg>
+                Choose a ZIP
+              </a>
+              <a class="btn-ghost" href="/projects/import/files">
+                <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h6.5L19 8.5V20H8z"/><path d="M14.2 4v4.6H19"/></svg>
+                Choose files
+              </a>
+            </div>
+            {% else %}
+            <div class="drop-zone is-disabled" aria-disabled="true">
+              <span class="drop-ico" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 16V4.5M7 9.5 12 4.5l5 5"/><path d="M4.5 16.5v1.8a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-1.8"/></svg></span>
+              <p class="drop-text">Bring in a folder, a ZIP, or individual files</p>
+              <p class="drop-note">File import needs an account — sign in and this card lists what ORBIT would read.</p>
+            </div>
+            <div class="upload-actions">
+              <span class="repo-badge">Not connected</span>
+            </div>
+            {% endif %}
+          </section>
         </div>
-        <div class="repo-rows">
-          {% for key, label in repo_sources %}
-          <div class="repo-row is-disabled" aria-disabled="true" title="Not connected — connecting {{ label }} is not built yet">
-            <span class="repo-ico" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5M3.5 12a8.5 8.5 0 0 1 8.5-8.5M4.8 15h14.4M8.5 5.2c2 1.4 5 1.4 7 0"/></svg></span>
-            <span class="repo-body">
-              <span class="repo-name">{{ label|replace(' repository','') }} — connect your repos</span>
-              <span class="repo-note">Not connected. Connecting {{ label|replace(' repository','') }} is not built yet, so no repo is fetched.</span>
-            </span>
-            <span class="repo-badge">Not connected</span>
-          </div>
-          {% endfor %}
-        </div>
-        <div class="drop-zone is-disabled" aria-disabled="true">
-          <span class="drop-ico" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 15.5V5M7 9.5l5-4.5 5 4.5"/><rect x="4" y="17" width="16" height="3.5" rx="1.6"/></svg></span>
-          <p class="drop-text"><strong>From your computer</strong> — drop a folder, a ZIP, or files to start from what you already have.</p>
-          <p class="drop-note">File import isn't built yet. Creating a project here starts from an idea; nothing reads or uploads your files.</p>
-          <span class="repo-badge">Not built yet</span>
-        </div>
-      </section>
+      </div>
 
       {% if continue_strip %}
       <a class="continue-strip" href="/projects/{{ continue_strip.id }}">
-        <span class="continue-label">Continue</span>
+        <span class="continue-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
+        <span class="continue-label">Already have something underway?</span>
         <span class="continue-name">{{ continue_strip.name }}</span>
-        <span class="continue-task">{{ continue_strip.task_title }}</span>
-        <span class="continue-age">Updated {{ continue_strip.age }}</span>
+        <span class="continue-task">{{ continue_strip.task_title }}{% if continue_strip.age %} · Updated {{ continue_strip.age }}{% endif %}</span>
         <span class="continue-go">Open workspace →</span>
       </a>
       {% endif %}
