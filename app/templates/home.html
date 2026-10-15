@@ -22,6 +22,11 @@
       </nav>
       <div class="topbar-controls"></div>
       <div class="topbar-actions">
+        {# The rail centres on projects, so the conversation control itself lives
+           here — same real seam app.js has always wired, /api/conversations/new. #}
+        <button type="button" class="topbar-icon-button" id="newConvo" title="New conversation" aria-label="New conversation">
+          <span aria-hidden="true">+</span>
+        </button>
         <button type="button" class="topbar-quiet" data-appearance-toggle
                 aria-label="Appearance: system. Switch theme.">
           <span aria-hidden="true">◐</span> Appearance <span data-appearance-label>System</span>

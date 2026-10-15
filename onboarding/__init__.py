@@ -38,7 +38,7 @@ from onboarding.blueprint import OnboardingConfig, attach as attach_blueprint
 from onboarding.feedback import FeedbackStore
 from onboarding.mailer import build_mailer
 from onboarding.oauth import build_registry
-from onboarding.projects import ProjectStore
+from onboarding.projects import ProjectStore, PublishingProjectStore
 
 __all__ = [
     "AccountStore",
@@ -269,4 +269,8 @@ def attach(app: Any, config: OnboardingConfig) -> None:
     # local preview, so it follows the deployment rather than our good intentions.
     if (config.public_url or "").startswith("https://"):
         app.config["SESSION_COOKIE_SECURE"] = True
+    # The workspace's project store is what the Projects overview, the rail and
+    # the project page read, so every project this layer records is published
+    # into it under the same id (see PublishingProjectStore).
+    config.projects = PublishingProjectStore(config.projects, app)  # type: ignore[assignment]
     attach_blueprint(app, config)

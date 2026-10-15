@@ -736,3 +736,95 @@ def dashboard_state(
         hint=visible_hint(account, "home"),
         has_provider=github_connected,
     )
+
+
+# One import, one row in the Projects overview: this layer's richer kinds, in
+# the workspace's own vocabulary for where a project came from.
+KIND_TO_SOURCE: dict[str, str] = {
+    "orbit": "new",
+    "idea": "new",
+    "github": "github",
+    "gitlab": "gitlab",
+    "bitbucket": "bitbucket",
+    "folder": "local",
+    "zip": "zip",
+    "files": "zip",
+}
+
+
+def publish_project(app: Any, project: Project) -> None:
+    """Give the workspace's project store the project this layer just recorded.
+
+    The onboarding layer reads the import — a repository reference, a ZIP
+    listing, a folder walk — and keeps the fuller record. The workspace keeps
+    its own store, and that is what the Projects overview, the rail, ``/create``
+    and the project page read. Publishing takes the same id into it, so the
+    project somebody just imported is openable from the place they will look
+    for it, and there is no second list that disagrees with the first.
+    """
+    store = app.config.get("PROJECTS")
+    if store is None:
+        return
+    status = "archived" if project.archived else ("idea" if project.kind == "idea" else "building")
+    store.adopt(
+        project_id=project.id,
+        user_id=project.account_id,
+        name=project.name,
+        description=project.description,
+        source=KIND_TO_SOURCE.get(project.kind, "new"),
+        status=status,
+        languages=[project.primary_language] if project.primary_language else [],
+        remote=dict(project.remote),
+        files=list(project.files),
+        notes=project.notes,
+    )
+
+
+class PublishingProjectStore:
+    """This layer's project ledger, kept in step with the workspace's own store.
+
+    Every creation that goes through here — a quick project, a guided plan, an
+    import from a provider, a folder, a ZIP or a set of files — is published
+    into the workspace's store as well. Reads and edits pass straight through.
+    """
+
+    CREATING = ("create", "import_github", "import_archive", "import_folder", "import_files")
+    REFRESHING = ("update",)
+
+    def __init__(self, inner: ProjectStore, app: Any) -> None:
+        self._inner = inner
+        self._app = app
+
+    def __getattr__(self, name: str) -> Any:
+        attribute = getattr(self._inner, name)
+        if not callable(attribute):
+            return attribute
+        if name in self.CREATING:
+
+            def creating(*args: Any, **kwargs: Any) -> Any:
+                result = attribute(*args, **kwargs)
+                if isinstance(result, Project):
+                    publish_project(self._app, result)
+                return result
+
+            return creating
+        if name in self.REFRESHING:
+
+            def refreshing(*args: Any, **kwargs: Any) -> Any:
+                result = attribute(*args, **kwargs)
+                project = result if isinstance(result, Project) else (args[0] if args else None)
+                store = self._app.config.get("PROJECTS")
+                if store is not None and isinstance(project, Project):
+                    # The import screens finish describing a project a moment
+                    # after creating it (access granted, what the walk found).
+                    store.refresh_import(
+                        project.id,
+                        project.account_id,
+                        remote=dict(project.remote),
+                        files=list(project.files),
+                        notes=project.notes,
+                    )
+                return result
+
+            return refreshing
+        return attribute

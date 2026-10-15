@@ -135,8 +135,12 @@ class AppRoutesTests(unittest.TestCase):
         svg = mark.get_data(as_text=True)
         mark.close()
         self.assertIn('viewBox="0 0 64 64"', svg)
-        self.assertIn('rotate(25 32 32)', svg)
-        self.assertIn('rotate(-30 32 32)', svg)
+        self.assertIn('role="img"', svg)
+        self.assertIn("<title>ORBIT</title>", svg)
+        # Two orbits of the same atom, drawn in the brand's copper.
+        self.assertIn('rotate(42 32 32)', svg)
+        self.assertIn('rotate(-42 32 32)', svg)
+        self.assertIn("#AD7048", svg)
 
     def test_only_github_shown_as_connected(self):
         resp = self.client.get("/")
@@ -148,8 +152,8 @@ class AppRoutesTests(unittest.TestCase):
         self.assertIn("Linear", body)
         self.assertIn("Vercel", body)
         self.assertIn("tool-pill not-connected", body)
-        # Exactly one active connection.
-        self.assertIn("Connected apps · 1 active", body)
+        # Exactly one active connection, stated in the settings panel the rail opens.
+        self.assertIn("<span>Connected apps</span><strong>1 active</strong>", body)
         # Sanity: there is no "connected" pill for Linear or Vercel.
         self.assertEqual(body.count("tool-pill connected"), 1)
 
@@ -520,7 +524,7 @@ class ChatBubbleLayoutTests(unittest.TestCase):
         self.assertIn("Add order status tracking", body)
 
     def test_orbit_messages_are_unboxed_and_have_full_reply_width(self) -> None:
-        css = (Path(__file__).resolve().parent.parent / "app" / "templates" / "layout.html").read_text(
+        css = (Path(__file__).resolve().parent.parent / "app" / "static" / "orbit.css").read_text(
             encoding="utf-8"
         )
         orbit = re.search(r"\.chat-bubble\.orbit\s*\{([^}]*)\}", css)
@@ -534,7 +538,9 @@ class ChatBubbleLayoutTests(unittest.TestCase):
 
         user = re.search(r"\.chat-bubble\.user\s*\{([^}]*)\}", css)
         self.assertIsNotNone(user)
-        self.assertIn("background: var(--accent)", user.group(1))
+        # The person's own words are a quiet surface, not a copper slab: the one
+        # accent is for actions, and a wall of it is unreadable at paragraph length.
+        self.assertIn("background: var(--surface-2)", user.group(1))
 
     def test_orbit_messages_are_left_aligned_with_orbital_mark_in_text(self) -> None:
         body = self.client.get("/task/T1").get_data(as_text=True)
@@ -590,7 +596,7 @@ class ChatBubbleLayoutTests(unittest.TestCase):
         root = Path(__file__).resolve().parent.parent
         home = self.client.get("/").get_data(as_text=True)
         script = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
-        styles = (root / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
+        styles = (root / "app" / "static" / "orbit.css").read_text(encoding="utf-8")
         self.assertIn('aria-label="Back to text chat"', home)
         self.assertIn('aria-modal="true"', home)
         self.assertIn("voiceChatBack.focus()", script)
@@ -631,8 +637,12 @@ class ServerMessageTimeTests(unittest.TestCase):
         self.assertEqual(now_label(), datetime.now().strftime("%H:%M"))
 
 
-class DesignMockupSyncTests(unittest.TestCase):
-    """design/orbit_mockup.html is the spec: its palette and chat markup must match the app."""
+class DesignSheetSyncTests(unittest.TestCase):
+    """design/orbit_ui_spec.html is the reference sheet; app/static/orbit.css is the app.
+
+    They are the same design, so the accent tokens have to match exactly: a colour
+    changed in one place is changed in the other in the same commit.
+    """
 
     ROOT = Path(__file__).resolve().parent.parent
 
@@ -641,23 +651,29 @@ class DesignMockupSyncTests(unittest.TestCase):
         self.assertIsNotNone(block, "no :root block found")
         return dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", block.group(1)))
 
-    def test_accent_tokens_match_between_app_and_mockup(self) -> None:
-        app_text = (self.ROOT / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
-        mock_text = (self.ROOT / "design" / "orbit_mockup.html").read_text(encoding="utf-8")
-        app_vars, mock_vars = self._root_vars(app_text), self._root_vars(mock_text)
-        for token in ("--accent", "--accent-bright", "--accent-dim", "--accent-wash", "--accent-soft"):
+    def test_accent_tokens_match_between_app_and_sheet(self) -> None:
+        app_vars = self._root_vars((self.ROOT / "app" / "static" / "orbit.css").read_text(encoding="utf-8"))
+        sheet_vars = self._root_vars((self.ROOT / "design" / "orbit_ui_spec.html").read_text(encoding="utf-8"))
+        for token in ("--accent", "--accent-text", "--accent-wash", "--accent-line", "--on-accent"):
             self.assertIn(token, app_vars)
             self.assertEqual(
-                mock_vars.get(token), app_vars[token].strip(), f"{token} differs between app and mockup"
+                sheet_vars.get(token), app_vars[token].strip(), f"{token} differs between app and sheet"
             )
 
-    def test_mockup_chat_uses_rows_and_has_no_name_labels(self) -> None:
-        mock_text = (self.ROOT / "design" / "orbit_mockup.html").read_text(encoding="utf-8")
-        self.assertNotIn('class="who"', mock_text)
-        self.assertNotIn("You · ", mock_text)
-        self.assertIn('class="chat-row user"', mock_text)
-        self.assertIn('class="chat-row orbit"', mock_text)
-        self.assertIn('class="chat-meta"', mock_text)
+    def test_the_sheet_draws_the_same_chat_rows_the_templates_render(self) -> None:
+        sheet = (self.ROOT / "design" / "orbit_ui_spec.html").read_text(encoding="utf-8")
+        templates = "\n".join(
+            (self.ROOT / "app" / "templates" / name).read_text(encoding="utf-8")
+            for name in ("home.html", "task.html")
+        )
+        for needle in ('class="chat-row user"', 'class="chat-row orbit"', 'class="chat-meta"'):
+            self.assertIn(needle, sheet)
+        # The templates write the same rows from the message they are given.
+        for needle in ('class="chat-row ', 'class="chat-meta"', 'class="chat-bubble '):
+            self.assertIn(needle, templates)
+        # Nobody's name is a label in front of their own words.
+        self.assertNotIn('class="who"', sheet)
+        self.assertNotIn('class="who"', templates)
 
 
 def _root_tokens(path: Path) -> dict[str, str]:
@@ -680,16 +696,16 @@ def _contrast(a: str, b: str) -> float:
 
 
 class PaletteAndBubbleTests(unittest.TestCase):
-    """Copper accent on charcoal neutrals, readable ink on it, and the bubble
-    markup the UI relies on. The brand this pins is the 2026-10-15 product
-    brief's: blue was explored and dropped, the single accent is copper /
-    burnt amber, and surfaces must never be blue-tinted.
+    """Copper accent on warm paper (charcoal in the dark), readable ink on it,
+    and the bubble markup the UI relies on. The brand this pins is the
+    2026-10-15 product brief's: blue was explored and dropped, the single accent
+    is copper / burnt amber, and no surface may lean blue.
     """
 
     ROOT = Path(__file__).resolve().parent.parent
 
     def setUp(self) -> None:
-        self.tokens = _root_tokens(self.ROOT / "app" / "templates" / "layout.html")
+        self.tokens = _root_tokens(self.ROOT / "app" / "static" / "orbit.css")
         self.store = Store()
         self.client = create_app(provider=FakeStreamingProvider(), store=self.store).test_client()
 
@@ -697,38 +713,37 @@ class PaletteAndBubbleTests(unittest.TestCase):
         # The brief's one accent: copper / burnt amber. A regression here is
         # the old blue (or any cool hue) sneaking back in — blue must stay
         # the *smallest* channel of each accent token.
-        for token in ("--accent", "--accent-dim", "--accent-bright"):
+        for token in ("--accent", "--accent-text", "--accent-line"):
             hex_value = self.tokens[token]
             red, green, blue = (int(hex_value[i : i + 2], 16) for i in (1, 3, 5))
             self.assertGreater(red, blue, f"{token} must be warm copper, not blue")
             self.assertGreater(green, blue, f"{token} must be warm copper, not blue")
 
     def test_surfaces_are_neutral_never_blue_tinted(self) -> None:
-        # Charcoal may lean warm, it may not lean blue: blue is the tint that
-        # kept bleeding into backgrounds and competing with the accent.
-        for surface in ("--bg", "--bg-raised", "--bg-sunken", "--bg-card"):
+        # Paper may lean warm, it may not lean blue: blue is the tint that kept
+        # bleeding into backgrounds and competing with the accent.
+        for surface in ("--bg", "--surface", "--surface-2", "--surface-3"):
             hex_value = self.tokens[surface]
             red, _, blue = (int(hex_value[i : i + 2], 16) for i in (1, 3, 5))
             self.assertLessEqual(blue, red, f"{surface} must never be blue-tinted")
 
     def test_text_on_the_accent_fill_is_readable(self) -> None:
-        # A mid-tone copper hits AA with near-black ink, not with the warm
-        # white --text — so fills use --on-accent, and the user bubble (the
-        # main accent fill) must be one of the places that does.
+        # A mid-tone copper hits AA with the warm white --on-accent, so every
+        # fill that carries a glyph uses it — the send button is the main one.
         self.assertGreaterEqual(_contrast(self.tokens["--on-accent"], self.tokens["--accent"]), 4.5)
-        css = (self.ROOT / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
-        bubble = re.search(r"\.chat-bubble\.user\s*\{[^}]*\}", css)
-        self.assertIsNotNone(bubble)
-        self.assertIn("var(--on-accent)", bubble.group(0))
+        css = (self.ROOT / "app" / "static" / "orbit.css").read_text(encoding="utf-8")
+        fill = re.search(r"\.send-btn-round\s*\{[^}]*\}", css)
+        self.assertIsNotNone(fill)
+        self.assertIn("var(--on-accent)", fill.group(0))
 
-    def test_accent_labels_are_readable_on_the_charcoal_surfaces(self) -> None:
-        for surface in ("--bg", "--bg-raised", "--bg-card"):
+    def test_accent_labels_are_readable_on_the_paper_surfaces(self) -> None:
+        for surface in ("--bg", "--surface", "--surface-2"):
             self.assertGreaterEqual(
-                _contrast(self.tokens["--accent-bright"], self.tokens[surface]), 4.5, surface
+                _contrast(self.tokens["--accent-text"], self.tokens[surface]), 4.5, surface
             )
 
     def test_body_text_is_readable_on_every_surface(self) -> None:
-        for surface in ("--bg", "--bg-raised", "--bg-card"):
+        for surface in ("--bg", "--surface", "--surface-2"):
             self.assertGreaterEqual(
                 _contrast(self.tokens["--text"], self.tokens[surface]), 4.5, surface
             )
@@ -786,7 +801,7 @@ class AgentScrollbarTests(unittest.TestCase):
         return found
 
     def test_every_panel_hides_its_scrollbar_in_all_three_engines(self) -> None:
-        for name in ("app/templates/layout.html", "design/orbit_mockup.html"):
+        for name in ("app/static/orbit.css",):
             css = self._css(name)
             self.assertIn("scrollbar-width: none", css, name)
             self.assertIn("-ms-overflow-style: none", css, name)
@@ -804,7 +819,7 @@ class AgentScrollbarTests(unittest.TestCase):
                 self.assertTrue(webkit, f"{name}: {panel} lacks a ::-webkit-scrollbar rule")
 
     def test_scrolling_is_not_disabled_on_the_scroll_containers(self) -> None:
-        css = self._css("app/templates/layout.html")
+        css = self._css("app/static/orbit.css")
         for panel in (".task-work", ".task-chat-log", ".home-thread"):
             bodies = self._rules_for(css, panel)
             self.assertTrue(bodies, panel)
@@ -843,7 +858,10 @@ def _script() -> str:
 
 
 def _layout() -> str:
-    return (Path(__file__).resolve().parent.parent / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
+    """The stylesheet every page loads — the only place component CSS lives."""
+    return (Path(__file__).resolve().parent.parent / "app" / "static" / "orbit.css").read_text(
+        encoding="utf-8"
+    )
 
 
 class WelcomeScreenTests(unittest.TestCase):

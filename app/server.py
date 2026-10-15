@@ -288,6 +288,14 @@ def create_app(
     ``projects`` is the Projects store. The default is in-memory — the app
     factory never writes runtime/projects.json, same as the heartbeat. At boot
     ``run_app`` swaps in the file-backed store so a restart keeps projects.
+
+    ``onboarding`` is the optional onboarding layer (accounts, landing, welcome,
+    projects, settings, feedback). When it is omitted — which is how the offline
+    suite builds every app — no gate is installed and ``/`` renders exactly as it
+    always has. When it is present, ``onboarding.attach`` registers the blueprint,
+    requires a verified account for every non-public route, and installs a resolver
+    so each account gets its own workspace Store.
+
     """
     app = Flask(__name__, template_folder="templates")
     app.secret_key = "orbit-dev-secret"
@@ -306,13 +314,6 @@ def create_app(
         voice_service if voice_service is not None else VoiceService(audit_log=audit)
     )
     # The queue of tool calls the home chat proposed. Without it, Chat mode is
-    ``onboarding`` is the optional onboarding layer (accounts, landing, welcome,
-    projects, settings, feedback). When it is omitted — which is how the offline
-    suite builds every app — no gate is installed and ``/`` renders exactly as it
-    always has. When it is present, ``onboarding.attach`` registers the blueprint,
-    requires a verified account for every non-public route, and installs a resolver
-    so each account gets its own workspace Store.
-
     # plain text, as before. run_app builds it with the real tools.
     app.config["ACTIONS"] = actions
 
@@ -491,10 +492,15 @@ def create_app(
             "active_project_id": "",
         }
 
-    def _sidebar_context() -> dict[str, Any]:
-        """What every page that renders the shared sidebar needs."""
+    def _sidebar_context(**overrides: Any) -> dict[str, Any]:
+        """What every page that renders the shared rail needs.
+
+        The rail's RECENT PROJECTS list and the active row come from the
+        ``_chrome_defaults`` context processor; a route adds only what is local
+        to it (which destination is current) through ``overrides``.
+        """
         st: Store = current_store()
-        return {
+        context = {
             "user": st.user,
             "mode": st.mode,
             "thinking_level": st.thinking_level,
@@ -504,7 +510,10 @@ def create_app(
             "connections": st.connections,
             "connected_count": st.connected_count(),
             "heartbeat": _heartbeat_view(),
+            "analytics_active": False,
         }
+        context.update(overrides)
+        return context
 
     def _date_label(iso: str) -> str:
         """"15 Oct 2026" from the store's UTC timestamp, for card footers."""
@@ -1550,15 +1559,7 @@ def create_app(
         return render_template(
             "analytics.html",
             report=report,
-            user=st.user,
-            mode=st.mode,
-            thinking_level=st.thinking_level,
-            conversations=st.conversations_grouped(),
-            active_conversation_id=st.active_conversation_id,
-            active_conversation_title=PLACEHOLDER_TITLE,
-            connections=st.connections,
-            connected_count=st.connected_count(),
-            heartbeat=_heartbeat_view(),
+            **_sidebar_context(analytics_active=True),
         )
 
     @app.post("/api/task/<task_id>/stream")

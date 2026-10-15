@@ -1,88 +1,59 @@
-{# The rail, shared by every workspace screen so the shell is identical on all of
-   them: brand, the workspace you are in, the primary action, where you have been,
-   help, and the account card pinned to the bottom.
+{# The rail, shared by every screen so the shell is identical on all of them:
+   the brand, the one workspace you are in, where you can go, the projects you
+   touched last, and the account card pinned to the bottom.
 
    Collapsed state is icons-only: each control keeps its tooltip and accessible
-   name. app.js writes the choice to localStorage; the inline script in
-   layout.html's <head> applies it before first paint. #}
-<div class="sidebar" id="sidebar">
+   name. app.js writes the choice to localStorage; the pre-paint script in
+   layout.html's <head> applies it before the first frame. #}
+{% set ws_name = (account.workspace if account and account.workspace else user.workspace) if user else 'Personal space' %}
+<nav class="sidebar" id="sidebar" aria-label="Main">
   <div class="sidebar-head">
-    <a class="sidebar-brand" href="/" title="ORBIT">
+    <a class="sidebar-brand" href="/projects" title="orbit · Projects">
       <img class="brand-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-      <span class="brand-word">orbit</span>
+      <span class="brand-word sidebar-label">orbit</span>
     </a>
     <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-pressed="false"
             aria-label="Collapse sidebar" title="Collapse sidebar"><span aria-hidden="true">«</span></button>
   </div>
 
-  {#- Which space you are in, and how you got here. A signed-in account shows its
-      own name; without the onboarding layer this falls back to the store's user. -#}
-  <button type="button" class="workspace-chip" data-open-settings
-          title="{{ (account.workspace if account and account.workspace else user.workspace) }} · account and settings">
-    <span class="avatar">{{ account.initials if account else user.name[:2]|upper }}</span>
-    <span class="ident">
-      <strong>{{ (account.workspace if account and account.workspace else user.workspace) }}</strong>
-      <span>{{ user.name }}</span>
-    </span>
-    <span class="caret" aria-hidden="true">⌄</span>
-  </button>
+  {#- The single workspace this account has. No switcher is promised and none is
+      faked: the tile names the space, and the account card opens settings. -#}
+  <div class="workspace-tile" title="{{ ws_name }}">
+    <span class="workspace-ico" data-ws-icon aria-hidden="true">{% for part in ws_name.split()[:2] %}{{ part[:1]|upper }}{% endfor %}</span>
+    <span class="workspace-name sidebar-label">{{ ws_name }}</span>
+  </div>
 
-  <button type="button" class="new-convo" id="newConvo" title="New conversation">
-    <span class="new-convo-plus" aria-hidden="true">+</span><span class="sidebar-label">New conversation</span>
-  </button>
-
-  <label class="sidebar-search" for="conversationSearch" title="Search chats">
-    <span aria-hidden="true">⌕</span>
-    <input type="search" id="conversationSearch" placeholder="Search chats" autocomplete="off" aria-label="Search chats" />
-  </label>
-
-  <nav class="sidebar-nav" aria-label="Main">
-    {#- The three destinations that exist. Projects and the workspace are the two
-        you move between; Analytics reads the audit log you already have. -#}
-    <a class="sidebar-nav-item{% if page == 'projects' %} active{% endif %}" id="projectsLink" href="/projects" title="Projects"><span class="sidebar-nav-icon" aria-hidden="true">▦</span><span class="sidebar-label">Projects</span>{% if project_count %}<span class="sidebar-count sidebar-label">{{ project_count }}</span>{% endif %}</a>
-    <a class="sidebar-nav-item{% if page in ('home', 'agents') %} active{% endif %}" id="agentsLink" href="/" title="Workspace"><span class="sidebar-nav-icon" aria-hidden="true">◍</span><span class="sidebar-label">Workspace</span></a>
-    <a class="sidebar-nav-item{% if analytics_active %} active{% endif %}" id="analyticsLink" href="/analytics" title="Analytics"><span class="sidebar-nav-icon" aria-hidden="true">◔</span><span class="sidebar-label">Analytics</span></a>
-  </nav>
+  <div class="sidebar-nav">
+    <a class="sidebar-nav-item{% if projects_active %} active{% endif %}" id="projectsLink" href="/projects" title="Projects">
+      <span class="sidebar-nav-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><rect x="4" y="3.5" width="5.6" height="17" rx="1.4"/><rect x="12.2" y="7.5" width="7.8" height="13" rx="1.4"/></svg></span>
+      <span class="sidebar-label">Projects</span>
+    </a>
+    <a class="sidebar-nav-item{% if agents_active %} active{% endif %}" id="agentsLink" href="/agents" title="Agents">
+      <span class="sidebar-nav-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M10 10.5 6.4 7.5M14 10.5l3.6-3M10 13.5l-3.6 3M14 13.5l3.6 3"/></svg></span>
+      <span class="sidebar-label">Agents</span>
+    </a>
+    <a class="sidebar-nav-item{% if analytics_active %} active{% endif %}" id="analyticsLink" href="/analytics" title="Analytics">
+      <span class="sidebar-nav-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M5 19.5a7 7 0 1 1 9.8-9.8"/><path d="M12 12l6-6M14.6 6H18v3.4"/></svg></span>
+      <span class="sidebar-label">Analytics</span>
+    </a>
+  </div>
 
   <div class="sidebar-scroll">
-    {% if account and projects %}
-    {#- Real projects, newest first, so the rail says what you are building and
-        not only what you have chatted about. -#}
-    <section class="side-section">
-      <h4 class="side-section-title">Recent projects</h4>
-      {% for project in projects[:5] %}
-      <a class="side-row recent-project{% if project.id == active_project_id %} is-current{% endif %}" href="/projects/{{ project.id }}" title="{{ project.name }}">
-        <span class="glyph" aria-hidden="true">{% if project.kind in ('orbit', 'idea') %}◧{% else %}⌸{% endif %}</span><span class="label">{{ project.name }}</span>
+    {% if sidebar_projects %}
+    <div class="sidebar-section">
+      <h4 class="sidebar-heading">Recent projects</h4>
+      {% for project in sidebar_projects %}
+      <a class="sidebar-project{% if project.id == active_project_id %} active{% endif %}" href="/projects/{{ project.id }}" title="{{ project.name }}">
+        <span class="sidebar-project-ico" aria-hidden="true">{% for part in project.name.split()[:2] %}{{ part[:1]|upper }}{% endfor %}</span>
+        <span class="sidebar-label">{{ project.name }}</span>
       </a>
       {% endfor %}
-    </section>
+    </div>
     {% endif %}
-
-    {% for group, items in conversations.items() %}
-    <section class="side-section history-group">
-      <h4 class="side-section-title">{{ group }}</h4>
-      {% for conv in items %}
-      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}" data-conv-id="{{ conv.id }}" title="{{ conv.title }}"><span class="glyph" aria-hidden="true">{{ conv.title[:1]|upper }}</span><span class="label sidebar-label">{{ conv.title }}</span></div>
-      {% endfor %}
-    </section>
-    {% endfor %}
+    <div class="sidebar-spacer"></div>
   </div>
 
   <div class="sidebar-foot">
-    <a class="side-row" href="/settings/help" title="Help & getting started">
-      <span class="glyph" aria-hidden="true">?</span><span class="label sidebar-label">Help &amp; getting started</span>
-    </a>
-    {% if account %}
-    {#- Real destinations for a signed-in person. Without an account these do not
-        render, so the plain workspace rail is exactly what it was. -#}
-    <a class="side-row{% if page == 'feedback' %} is-current{% endif %}" id="feedbackLink" href="/feedback" title="Beta feedback">
-      <span class="glyph" aria-hidden="true">✦</span><span class="label sidebar-label">Beta feedback</span>{% if feedback_count %}<span class="meta sidebar-label">{{ feedback_count }}</span>{% endif %}
-    </a>
-    <a class="side-row{% if page == 'settings' %} is-current{% endif %}" id="settingsLink" href="/settings/profile" title="Settings">
-      <span class="glyph" aria-hidden="true">⚙</span><span class="label sidebar-label">Settings</span>
-    </a>
-    {% endif %}
-
     {% if heartbeat %}
     <div class="reminders-row">
       <div class="names sidebar-label">
@@ -93,22 +64,16 @@
               aria-label="Reminders" title="Reminders" aria-checked="{{ 'false' if heartbeat.paused else 'true' }}"><span class="knob"></span></button>
     </div>
     {% endif %}
-    <div class="connected-apps-row" title="Connected apps · {{ connected_count }} active"><span class="dot{% if connected_count %} on{% endif %}"></span><span class="label-text">Connected apps · {{ connected_count }} active</span></div>
-
-    <div class="account-card">
-      <div class="user-avatar">{{ account.initials if account else user.name[:2]|upper }}</div>
-      <div class="names">
-        <div class="name">{{ user.name }}</div>
-        <div class="sub">{{ (account.workspace if account and account.workspace else user.workspace) }}</div>
+    <a class="side-row" href="/feedback" title="Help &amp; getting started">
+      <span class="glyph" aria-hidden="true">?</span><span class="label sidebar-label">Help &amp; getting started</span>
+    </a>
+    <div class="user-row">
+      <div class="user-avatar">{{ account.initials if account else (user.name[:2]|upper if user else 'Y') }}</div>
+      <div class="names sidebar-label">
+        <div class="name">{{ user.name if user else 'You' }}</div>
+        <div class="sub">{{ ws_name }}</div>
       </div>
-      {% if account %}
-      <form method="post" action="/logout" class="sidebar-signout">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-        <button type="submit" class="utility-settings" aria-label="Sign out of ORBIT" title="Sign out">⏻</button>
-      </form>
-      {% else %}
       <button type="button" class="utility-settings" data-open-settings aria-label="Account and settings" title="Account and settings">⚙</button>
-      {% endif %}
     </div>
   </div>
-</div>
+</nav>

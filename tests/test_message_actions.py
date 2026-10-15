@@ -35,7 +35,11 @@ from providers.personas import model_persona_map, persona_for_model
 from tools.registry import AuditLog
 
 APP_JS = Path(__file__).resolve().parent.parent / "app" / "static" / "app.js"
-LAYOUT = Path(__file__).resolve().parent.parent / "app" / "templates" / "layout.html"
+# The component rules live in the stylesheet every page loads. layout.html carries
+# the pre-paint theme/rail script and the chrome includes, no component CSS.
+LAYOUT = Path(__file__).resolve().parent.parent / "app" / "static" / "orbit.css"
+# The pre-paint script (theme, collapsed rail) is inline in the shell template.
+TEMPLATE = Path(__file__).resolve().parent.parent / "app" / "templates" / "layout.html"
 
 
 def parse_sse(raw: str) -> list[tuple[str, str]]:
@@ -338,10 +342,12 @@ class SidebarCollapseTests(AppCase):
         self.assertIn('class="workspace-tile" title="Personal space"', body)
 
     def test_the_choice_persists_across_reloads_and_applies_before_paint(self) -> None:
-        layout = LAYOUT.read_text(encoding="utf-8")
+        # The pre-paint half lives in the template (it has to run before the first
+        # frame); the rules it applies live in the stylesheet.
+        template = TEMPLATE.read_text(encoding="utf-8")
         script = APP_JS.read_text(encoding="utf-8")
-        self.assertIn('orbit.sidebar.collapsed', layout)  # restored before first paint
-        self.assertIn("sidebar-collapsed-pending", layout)
+        self.assertIn('orbit.sidebar.collapsed', template)  # restored before first paint
+        self.assertIn("sidebar-collapsed-pending", template)
         self.assertIn('var SIDEBAR_STORAGE_KEY = "orbit.sidebar.collapsed";', script)
         self.assertIn("localStorage.setItem(SIDEBAR_STORAGE_KEY", script)
         self.assertIn("localStorage.getItem(SIDEBAR_STORAGE_KEY", script)
