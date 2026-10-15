@@ -1,20 +1,19 @@
-"""The Project Map's data — derived at render time, never stored or guessed.
+"""The Project Map's data — grouped into the owner's stages, derived from real
+task state, never guessed.
 
-The map answers "what is happening inside this project" from the only truthful
-source that exists today: each task's run state (``app.taskplan.TaskRun``).
-Labels mean exactly what the run state can prove:
+From the owner's design frames (2026-10-15): the map is a checklist of stages
+("Foundation", "Find & organize", "Ready to share"), each with its tasks and a
+"x / y complete" count. Rules this module enforces:
 
-  * ``not_started``     — the task has never run (``run is None``).
-  * ``in_progress``     — its run is mid-turn right now.
-  * ``needs_attention`` — the last turn ended without an answer.
-  * ``waiting``         — a turn finished; the next move is the person's
-                          steer, review, or approval. Nothing advances on its
-                          own — that is the approval gate's philosophy applied
-                          to the map.
-
-A turn ending is not "the task is done", so no bucket here is called Done.
-Steps and file counts come from the run object itself, the same source the
-Agent panel renders — the map can never out-report what the panel shows.
+  * Stages are filed by the person — ``Task.stage`` is user data. A task
+    without one lands in the map's plain "Tasks" group; no stage is invented
+    from keywords.
+  * A row's state is derived (``row_state``): "Complete" only when the person
+    marked it (``Task.done``); a turn that merely ended is "Turn finished",
+    never complete. Order matches how urgent each state is to see.
+  * "Next up" is the next not-complete task after the selected one *in its
+    stage* (creation order). "Builds on" is owner-asserted data
+    (``Task.builds_on``), never inferred.
 """
 
 from __future__ import annotations
@@ -23,51 +22,98 @@ from typing import Any
 
 from app.taskplan import FAILED, IDLE, RUNNING
 
-BUCKETS: tuple[tuple[str, str], ...] = (
-    ("not_started", "Not started"),
-    ("in_progress", "In progress"),
-    ("needs_attention", "Needs attention"),
-    ("waiting", "Waiting on you"),
-)
-BUCKET_LABELS: dict[str, str] = dict(BUCKETS)
+UNSTAGED = "Tasks"
 
-
-def bucket_for(task: Any) -> str:
+# key, label — the row states, in the order the map badge logic checks them.
+def row_state(task: Any) -> tuple[str, str]:
+    """(key, label) for one task row, from data only."""
+    if getattr(task, "done", False):
+        return ("done", "Complete")
     run = getattr(task, "run", None)
     if run is None:
-        return "not_started"
+        return ("planned", "Planned")
     status = getattr(run, "status", IDLE)
     if status == RUNNING:
-        return "in_progress"
+        return ("in_progress", "In progress")
     if status == FAILED:
-        return "needs_attention"
-    return "waiting"
+        return ("needs_attention", "Needs attention")
+    return ("finished", "Turn finished")
 
 
-def map_for(tasks: list[Any]) -> list[dict[str, Any]]:
-    """Group ``tasks`` into the four buckets, in display order.
+def task_cell(task: Any) -> dict[str, Any]:
+    """What one map row may show."""
+    key, label = row_state(task)
+    run = getattr(task, "run", None)
+    steps = list(getattr(run, "steps", []) or [])
+    return {
+        "id": task.id,
+        "title": task.title,
+        "state": key,
+        "state_label": label,
+        "done": bool(getattr(task, "done", False)),
+        "steps_done": sum(1 for s in steps if getattr(s, "status", "") == "done"),
+        "steps_total": len(steps),
+    }
 
-    Each entry carries only what the map cells may show: the task's identity
-    and its real step counts. A task with no run reports no steps.
+
+def _stage_name(task: Any) -> str:
+    stage = getattr(task, "stage", None)
+    return stage if stage else UNSTAGED
+
+
+def map_stages(tasks: list[Any]) -> list[dict[str, Any]]:
+    """Group ``tasks`` (creation order) into stages, first-appearance order.
+
+    The unstaged group, when it is not the only one, renders last: stages the
+    person named lead the map.
     """
-    grouped: dict[str, list[dict[str, Any]]] = {key: [] for key, _ in BUCKETS}
+    order: list[str] = []
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    done_count: dict[str, int] = {}
     for task in tasks:
-        run = getattr(task, "run", None)
-        steps = list(getattr(run, "steps", []) or [])
-        grouped[bucket_for(task)].append(
-            {
-                "id": task.id,
-                "title": task.title,
-                "has_run": run is not None,
-                "steps_done": sum(1 for s in steps if getattr(s, "status", "") == "done"),
-                "steps_total": len(steps),
-                "steps": [
-                    {"title": getattr(s, "title", ""), "status": getattr(s, "status", "")}
-                    for s in steps
-                ],
-            }
-        )
+        name = _stage_name(task)
+        if name not in grouped:
+            order.append(name)
+            grouped[name] = []
+            done_count[name] = 0
+        cell = task_cell(task)
+        grouped[name].append(cell)
+        if cell["done"]:
+            done_count[name] += 1
+    named = [n for n in order if n != UNSTAGED]
+    names = named + ([UNSTAGED] if UNSTAGED in order else [])
     return [
-        {"key": key, "label": label, "tasks": grouped[key]}
-        for key, label in BUCKETS
+        {
+            "name": name,
+            "tasks": grouped[name],
+            "done": done_count[name],
+            "total": len(grouped[name]),
+        }
+        for name in names
+        if name in grouped
     ]
+
+
+def progress(tasks: list[Any]) -> tuple[int, int]:
+    """(complete, total) across the whole map — person-marked completes only."""
+    return (sum(1 for t in tasks if getattr(t, "done", False)), len(tasks))
+
+
+def latest_task(tasks: list[Any]) -> Any | None:
+    """The most recently added task (creation order), for card footers."""
+    return tasks[-1] if tasks else None
+
+
+def next_up(tasks: list[Any], task: Any) -> Any | None:
+    """The next not-complete task after ``task`` in its stage, or None."""
+    stage = _stage_name(task)
+    seen = False
+    for candidate in tasks:
+        if candidate is task:
+            seen = True
+            continue
+        if not seen:
+            continue
+        if _stage_name(candidate) == stage and not getattr(candidate, "done", False):
+            return candidate
+    return None

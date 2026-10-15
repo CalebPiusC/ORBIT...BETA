@@ -36,18 +36,16 @@ from providers.base import ChatMessage as ProvChatMessage, StreamChunk, ToolProp
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from app.actions import PendingActions, ProposalRejected
-from app.agents import MAIN_AGENT_ID, agent_types, get_agent
+from app.age import human_age
+from app.agents import MAIN_AGENT_ID, agent_types, get_agent, search_agents
 from app.analytics import RATING_LABELS, build_analytics
 from app.followups import followups_for
-from app.projectmap import map_for
+from app.projectmap import latest_task, map_stages, next_up, progress, row_state
 from app.projects import (
-    IMPORT_SOURCES,
-    LIVE_SOURCES,
     SOURCE_LABELS,
     STATUS_LABELS,
     STATUSES,
     ProjectStore,
-    SourceUnavailable,
 )
 from app.starters import PROJECT_STARTERS, WELCOME_STARTERS
 from app.store import PLACEHOLDER_TITLE, ActionCard, Activity, Store, now_label
@@ -446,6 +444,22 @@ def create_app(
 
     # ----- Projects and Agents (the ORBIT Projects product) -----
 
+    @app.context_processor
+    def _chrome_defaults() -> dict[str, Any]:
+        """Template defaults every page needs, chiefly the sidebar's RECENT
+        PROJECTS list: the three most recently updated projects, straight
+        from the store. A page can override either value explicitly; the
+        sidebar shows nothing when there is nothing."""
+        st: Store | None = app.config.get("STORE")
+        project_store: ProjectStore | None = app.config.get("PROJECTS")
+        if st is None or project_store is None:
+            return {"sidebar_projects": [], "active_project_id": ""}
+        recent = project_store.list_for(st.user.id)[:3]
+        return {
+            "sidebar_projects": [{"id": p.id, "name": p.name} for p in recent],
+            "active_project_id": "",
+        }
+
     def _sidebar_context() -> dict[str, Any]:
         """What every page that renders the shared sidebar needs."""
         st: Store = app.config["STORE"]
@@ -468,18 +482,52 @@ def create_app(
         except (TypeError, ValueError):
             return ""
 
+    def _project_card_view(project: Any, st: Store) -> dict[str, Any]:
+        """One Projects-overview card, per the design frames.
+
+        The description line is the AI summary when the Main Agent has written
+        one, and otherwise the description the owner typed — never an invented
+        sentence. The footer is real workspace state: the newest task with its
+        state, the count of person-marked completes, and how long ago the
+        project last changed.
+        """
+        card = project.card()
+        tasks = st.tasks_for_project(project.id, st.user.id)
+        done, total = progress(tasks)
+        newest = latest_task(tasks)
+        card["task_title"] = newest.title if newest is not None else ""
+        card["task_state"] = row_state(newest)[1] if newest is not None else ""
+        card["tasks_done"] = done
+        card["tasks_total"] = total
+        card["age"] = human_age(project.updated_at)
+        return card
+
+    def _sort_link(base_args: dict[str, str], sort: str) -> str:
+        args = {k: v for k, v in base_args.items() if v}
+        args["sort"] = sort
+        query = "&".join(f"{k}={v}" for k, v in args.items())
+        return url_for("projects_page") + (f"?{query}" if query else "")
+
+    SORTS: dict[str, str] = {"recent": "Recent activity", "name": "Name"}
+
     @app.get("/projects")
     def projects_page() -> str:
         st: Store = app.config["STORE"]
         project_store: ProjectStore = app.config["PROJECTS"]
         query = request.args.get("q", "").strip()
         status = request.args.get("status", "").strip() or None
+        sort = request.args.get("sort", "").strip() or "recent"
+        if sort not in SORTS:
+            sort = "recent"
         if status is not None and status not in STATUS_LABELS:
             # A status the filter cannot have produced is ignored, not honoured
             # with an empty grid that looks like lost data.
             status = None
         cards = project_store.list_for(st.user.id, query=query, status=status)
+        if sort == "name":
+            cards = sorted(cards, key=lambda p: p.name.lower())
         counts = project_store.counts_for(st.user.id)
+        total = sum(counts.values())
         notice_raw = request.args.get("notice", "").strip()
         notice = None
         if notice_raw == "invalid":
@@ -487,27 +535,59 @@ def create_app(
                 "A project needs a name (80 characters or fewer). "
                 "The description is optional, up to 600 characters."
             )
-        elif notice_raw.startswith("import:"):
-            source = notice_raw.split(":", 1)[1]
-            if source in SOURCE_LABELS and source not in LIVE_SOURCES:
-                notice = (
-                    f"{SOURCE_LABELS[source]} import isn't connected yet, so "
-                    "nothing was fetched. You can create the project inside "
-                    "orbit now and bring the files over later."
-                )
+        base_args = {"q": query, "status": status or ""}
+        sort_links = [(key, label, _sort_link(base_args, key)) for key, label in SORTS.items()]
         return render_template(
             "projects.html",
-            projects=[p.card() for p in cards],
-            date_label=_date_label,
+            projects=[_project_card_view(p, st) for p in cards],
             counts=counts,
-            total=sum(counts.values()),
+            total=total,
+            building=counts.get("building", 0),
             statuses=[(key, STATUS_LABELS[key]) for key in STATUSES],
-            sources=[("new", SOURCE_LABELS["new"])]
-            + [(key, SOURCE_LABELS[key]) for key in IMPORT_SOURCES],
-            live_sources=LIVE_SOURCES,
             query=query,
             active_status=status,
+            active_sort=sort,
+            sort_links=sort_links,
             notice=notice,
+            projects_active=True,
+            agents_active=False,
+            **_sidebar_context(),
+        )
+
+    @app.get("/create")
+    def create_page() -> str:
+        """Start a project: the idea form plus the import entry points.
+
+        Import rows render because the design names them, and they sit
+        disabled because no repository provider is connected and file import
+        is not built — the row says so instead of silently failing later.
+        """
+        st: Store = app.config["STORE"]
+        project_store: ProjectStore = app.config["PROJECTS"]
+        notice = None
+        if request.args.get("notice", "").strip() == "invalid":
+            notice = (
+                "A project needs a name (80 characters or fewer). "
+                "The description is optional, up to 600 characters."
+            )
+        projects = project_store.list_for(st.user.id)
+        latest = projects[0] if projects else None
+        # The continue strip: the project you touched last, its newest task,
+        # and when it changed. Rendered only when there is a project at all.
+        continue_strip = None
+        if latest is not None:
+            newest = latest_task(st.tasks_for_project(latest.id, st.user.id))
+            continue_strip = {
+                "id": latest.id,
+                "name": latest.name,
+                "task_title": newest.title if newest is not None else "No tasks yet",
+                "age": human_age(latest.updated_at),
+            }
+        return render_template(
+            "create.html",
+            notice=notice,
+            continue_strip=continue_strip,
+            repo_sources=[(key, SOURCE_LABELS[key]) for key in ("github", "gitlab", "bitbucket")],
             projects_active=True,
             agents_active=False,
             **_sidebar_context(),
@@ -517,56 +597,99 @@ def create_app(
     def create_project() -> Response:
         st: Store = app.config["STORE"]
         project_store: ProjectStore = app.config["PROJECTS"]
-        source = (request.form.get("source") or "new").strip() or "new"
+        # Only the idea path creates anything today: source is always "new",
+        # because every import entry point renders disabled on purpose.
+        mode = (request.form.get("mode") or "blank").strip()
         try:
             project = project_store.create(
                 user_id=st.user.id,
                 name=request.form.get("name", ""),
                 description=request.form.get("description", ""),
-                source=source,
-            )
-        except SourceUnavailable as exc:
-            # An honest refusal, counted: the import entry point is visible in
-            # the dialog, but nothing pretends a fetch happened.
-            _record_event("project_import_unavailable", source=exc.source)
-            return redirect(
-                url_for("projects_page", notice=f"import:{exc.source}") + "#create",
-                code=303,
+                source="new",
             )
         except ValueError:
             _record_event("project_create_rejected", reason="invalid_input")
-            return redirect(url_for("projects_page", notice="invalid") + "#create", code=303)
+            return redirect(url_for("create_page", notice="invalid"), code=303)
         _record_event(
             "project_created",
             project_id=project.id,
             source=project.source,
             status=project.status,
+            mode=mode if mode in ("plan", "blank") else "blank",
         )
-        return redirect(url_for("projects_page"), code=303)
+        # "Plan with the Main Agent" lands in the workspace with the composer
+        # primed to brief the agent; "blank" lands on the plain workspace.
+        target = url_for("project_workspace", project_id=project.id)
+        if mode == "plan":
+            target += "?plan=1#agent"
+        return redirect(target, code=303)
 
     @app.get("/agents")
     def agents_page() -> str:
+        st: Store = app.config["STORE"]
+        project_store: ProjectStore = app.config["PROJECTS"]
+        query = request.args.get("q", "").strip()
+        selected = None
+        if st.selected_agent:
+            try:
+                selected = get_agent(st.selected_agent)
+            except KeyError:
+                # A selection pointing nowhere clears itself rather than
+                # showing a bar that names a specialty that does not exist.
+                st.selected_agent = None
+        assign_targets = [{"id": p.id, "name": p.name} for p in project_store.list_for(st.user.id)]
         return render_template(
             "agents.html",
-            agents=agent_types(),
+            agents=search_agents(query),
+            query=query,
+            total=len(agent_types()),
+            selected_agent=selected,
+            assign_targets=assign_targets,
             projects_active=False,
             agents_active=True,
             **_sidebar_context(),
         )
 
-    @app.post("/agents/<agent_id>/start")
-    def start_agent_conversation(agent_id: str) -> Response:
-        """Start a conversation under an Agents-page card's brief."""
+    @app.post("/agents/<agent_id>/select")
+    def select_agent(agent_id: str) -> Response:
+        """Mark a specialty as picked — the selection bar follows."""
         st: Store = app.config["STORE"]
         try:
             get_agent(agent_id)
         except KeyError:
             return _json({"error": f"unknown agent type: {agent_id!r}"}, 404)
-        conv = st.start_conversation(agent_id=agent_id)
+        st.selected_agent = agent_id
+        _record_event("agent_specialist_selected", agent_id=agent_id)
+        return redirect(url_for("agents_page", q=request.form.get("q", "")) + "#selection", code=303)
+
+    @app.post("/agents/deselect")
+    def deselect_agent() -> Response:
+        st: Store = app.config["STORE"]
+        st.selected_agent = None
+        return redirect(url_for("agents_page"), code=303)
+
+    @app.post("/agents/<agent_id>/assign")
+    def assign_agent(agent_id: str) -> Response:
+        """Assign the selected specialty to a project: the conversation is
+        created and the workspace opens with that specialist's panel."""
+        st: Store = app.config["STORE"]
+        project_store: ProjectStore = app.config["PROJECTS"]
+        try:
+            agent = get_agent(agent_id)
+        except KeyError:
+            return _json({"error": f"unknown agent type: {agent_id!r}"}, 404)
+        project_id = (request.form.get("project_id") or "").strip()
+        if project_store.get_for(project_id, st.user.id) is None:
+            return _json({"error": "unknown project"}, 404)
+        st.project_conversation(project_id, create=True, agent_id=agent.id)
+        st.selected_agent = None
         _record_event(
-            "agent_conversation_started", agent_id=agent_id, conversation_id=conv.id
+            "agent_specialist_assigned", agent_id=agent.id, project_id=project_id
         )
-        return redirect(url_for("home"), code=303)
+        return redirect(
+            url_for("project_workspace", project_id=project_id, agent=agent.id) + "#agent",
+            code=303,
+        )
 
     # ----- the project workspace (map + task details + Main Agent) -----
 
@@ -590,21 +713,84 @@ def create_app(
         ):
             selected = None
         panel = _panel_state(selected) if selected is not None else None
-        thread = st.project_thread(project_id)
+        # Which agent's conversation the rail shows. "main" by default; a
+        # specialist id is honoured only when the specialty exists — an id the
+        # Agents page could not have produced falls back to the Main Agent.
+        agent_id = request.args.get("agent", "").strip() or MAIN_AGENT_ID
+        if agent_id != MAIN_AGENT_ID:
+            try:
+                get_agent(agent_id)
+            except KeyError:
+                agent_id = MAIN_AGENT_ID
+        thread = st.project_thread(project_id, agent_id=agent_id)
+        speaker = (
+            "Main Agent" if agent_id == MAIN_AGENT_ID else get_agent(agent_id).name
+        )
+        # The conversations this project carries, so the rail can offer
+        # exactly the agents that have one here — nothing speculative, and a
+        # conversation whose specialty no longer exists simply drops out.
+        rail_agents: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for conv in st.project_conversations(project_id, st.user.id):
+            cid = conv.agent_id or MAIN_AGENT_ID
+            if cid in seen:
+                continue
+            name = (
+                "Main Agent"
+                if cid == MAIN_AGENT_ID
+                else (get_agent(cid).name if cid in {a.id for a in agent_types()} else None)
+            )
+            if name is None:
+                continue
+            seen.add(cid)
+            rail_agents.append({"id": cid, "name": name})
+        if MAIN_AGENT_ID not in seen:
+            rail_agents.insert(0, {"id": MAIN_AGENT_ID, "name": "Main Agent"})
+        builds_on = (
+            st.get_task(selected.builds_on)
+            if selected is not None and selected.builds_on
+            else None
+        )
+        done_tasks, total_tasks = progress(tasks)
+        stage_names = [s["name"] for s in map_stages(tasks)]
+        view = request.args.get("view", "").strip()
+        if view not in ("", "overview"):
+            view = ""
         return render_template(
             "project.html",
             project=project.card(),
+            project_obj=project,
+            created_label=_date_label(project.created_at),
+            updated_age=human_age(project.updated_at),
             statuses=[(key, STATUS_LABELS[key]) for key in STATUSES],
-            map_buckets=map_for(tasks),
-            task_count=len(tasks),
+            map=map_stages(tasks),
+            done_tasks=done_tasks,
+            total_tasks=total_tasks,
+            tasks=tasks,
+            pin_tasks=[
+                {"id": t.id, "title": t.title, "state_label": row_state(t)[1]}
+                for t in tasks
+            ],
+            stage_names=stage_names,
             selected=selected,
+            selected_state=(row_state(selected) if selected is not None else None),
+            builds_on=builds_on if builds_on is not None and builds_on.project_id == project_id else None,
+            next_task=next_up(tasks, selected) if selected is not None else None,
             panel=panel,
             thread=thread,
             followups=followups_for(thread),
-            starters=PROJECT_STARTERS,
-            date_label=_date_label,
+            agent_id=agent_id,
+            speaker=speaker,
+            rail_agents=rail_agents,
+            starters=(
+                get_agent(agent_id).starters if agent_id != MAIN_AGENT_ID else PROJECT_STARTERS
+            ),
+            plan_hint=request.args.get("plan", "") == "1",
+            view=view,
+            discuss_task=request.args.get("task", "").strip() and selected or None,
             projects_active=True,
             agents_active=False,
+            active_project_id=project_id,
             **_sidebar_context(),
         )
 
@@ -635,21 +821,71 @@ def create_app(
         project_store: ProjectStore = app.config["PROJECTS"]
         if project_store.get_for(project_id, st.user.id) is None:
             return _json({"error": "unknown project"}, 404)
-        task = st.create_task(request.form.get("request", ""), project_id=project_id)
+        builds_on = (request.form.get("builds_on") or "").strip() or None
+        try:
+            task = st.create_task(
+                request.form.get("request", ""),
+                project_id=project_id,
+                stage=request.form.get("stage", "") or None,
+                builds_on=builds_on,
+            )
+        except ValueError:
+            # An empty request or a builds_on that names no real task: the
+            # page re-renders with exactly the form data; nothing half-baked
+            # is filed on the map.
+            return redirect(
+                url_for("project_workspace", project_id=project_id) + "#add-task",
+                code=303,
+            )
         return redirect(
             url_for("project_workspace", project_id=project_id, task=task.id) + "#map",
             code=303,
         )
 
+    @app.post("/projects/<project_id>/tasks/<task_id>/complete")
+    def project_task_complete(project_id: str, task_id: str) -> Response:
+        """Toggle completion on a map task. The person's assertion, audited."""
+        st: Store = app.config["STORE"]
+        project_store: ProjectStore = app.config["PROJECTS"]
+        if project_store.get_for(project_id, st.user.id) is None:
+            return _json({"error": "unknown project"}, 404)
+        task = st.get_task(task_id)
+        if task is None or task.project_id != project_id or task.user_id != st.user.id:
+            return _json({"error": "unknown task"}, 404)
+        updated = st.set_done(task_id, done=not task.done)
+        assert updated is not None
+        _record_event(
+            "task_completion",
+            task_id=task_id,
+            project_id=project_id,
+            state="complete" if updated.done else "reopened",
+        )
+        keep_agent = request.form.get("agent", "").strip() or MAIN_AGENT_ID
+        return redirect(
+            url_for(
+                "project_workspace",
+                project_id=project_id,
+                task=task_id,
+                agent=keep_agent,
+            )
+            + "#details",
+            code=303,
+        )
+
+    def _agent_label(agent_id: str) -> str:
+        return "Main Agent" if agent_id == MAIN_AGENT_ID else get_agent(agent_id).name
+
     @app.post("/api/project/<project_id>/stream")
     def api_project_stream(project_id: str) -> Response:
-        """The workspace's Main Agent conversation, streamed.
+        """A project conversation, streamed: the Main Agent or an assigned specialty.
 
         Same seam, gating and audit as the home chat; the differences are the
         project-scoped conversation it appends to and the project context in
-        the system prompt. Tools are not offered here: the home chat is where
-        the six gated tools live, and a project conversation is not where a
-        note/heartbeat card belongs.
+        the system prompt. ``agent`` (payload or query) picks the conversation
+        and its instructions; ``task_id`` pins the discussion to a map task
+        whose real state is joined to the prompt. Tools are not offered here:
+        the home chat is where the six gated tools live, and a project
+        conversation is not where a note/heartbeat card belongs.
         """
         st: Store = app.config["STORE"]
         project_store: ProjectStore = app.config["PROJECTS"]
@@ -661,10 +897,24 @@ def create_app(
         message = message.strip() if isinstance(message, str) else ""
         if not message:
             return _json({"error": "message is required"}, 400)
+        agent_id = (payload.get("agent") or request.args.get("agent") or "").strip()
+        agent_id = agent_id or MAIN_AGENT_ID
+        if agent_id != MAIN_AGENT_ID:
+            try:
+                get_agent(agent_id)
+            except KeyError:
+                return _json({"error": f"unknown agent type: {agent_id!r}"}, 404)
+        # Optional task pin: the subject of the discussion. A task of another
+        # project is refused — the "Now discussing" strip may never name work
+        # the map cannot show.
+        pinned_id = (payload.get("task_id") or "").strip()
+        pinned = st.get_task(pinned_id) if pinned_id else None
+        if pinned_id and (pinned is None or pinned.project_id != project_id):
+            return _json({"error": "task does not belong to this project"}, 404)
 
         from app.store import ChatMessage as StoreChatMessage
 
-        conv = st.project_conversation(project_id, create=True)
+        conv = st.project_conversation(project_id, create=True, agent_id=agent_id)
         assert conv is not None
         conv_id = conv.id
         sent_at = now_label()
@@ -677,12 +927,37 @@ def create_app(
             conversation_id=conv_id,
             surface="project",
             project_id=project_id,
+            agent_id=agent_id,
             message_id=st.threads[conv_id][-1].id,
             chars=len(message),
         )
         history = _history_from_thread(st.threads[conv_id])
         tasks = st.tasks_for_project(project_id, st.user.id)
-        base_prompt = f"{MAIN_AGENT_PROMPT}\n\n{_project_context(project, tasks)}"
+        task_block = ""
+        if pinned is not None:
+            pin_lines = [
+                "TASK THE PERSON IS DISCUSSING RIGHT NOW",
+                f"Title: {pinned.title}",
+                f"Request: {pinned.description}",
+                f"State: {row_state(pinned)[1]}",
+            ]
+            pin_steps = list(pinned.run.steps) if pinned.run is not None else []
+            if pin_steps:
+                pin_lines.append("Plan steps so far:")
+                pin_lines.extend(
+                    f"- [{'x' if step.status == 'done' else ' '}] {step.title}"
+                    for step in pin_steps
+                )
+            task_block = "\n".join(pin_lines) + "\n\n"
+        if agent_id == MAIN_AGENT_ID:
+            base_prompt = f"{MAIN_AGENT_PROMPT}\n\n{_project_context(project, tasks)}"
+        else:
+            base_prompt = (
+                f"{get_agent(agent_id).instructions}\n\n"
+                f"PROJECT YOU ARE ASSIGNED TO\n{_project_context(project, tasks)}"
+            )
+        if task_block:
+            base_prompt = f"{task_block}{base_prompt}"
         system_prompt = with_current_time(app.config["FACTS"].system_prompt(base_prompt))
         # The Chat/Agent mode and Quick/Deep choices are the person's global
         # ones; the workspace does not fork them.
@@ -703,7 +978,11 @@ def create_app(
             stored_id: str | None = None
             if answer.strip():
                 stored = StoreChatMessage(
-                    who="Orbit", time=now_label(), body=answer, is_orbit=True
+                    who="Orbit",
+                    time=now_label(),
+                    body=answer,
+                    is_orbit=True,
+                    speaker=_agent_label(agent_id),
                 )
                 st.append_message(conv_id, stored)
                 stored_id = stored.id

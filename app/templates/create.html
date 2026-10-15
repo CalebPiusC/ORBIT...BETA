@@ -1,0 +1,106 @@
+{% extends "layout.html" %}
+{% block title %}orbit — Start a project{% endblock %}
+{% block body_class %}v2{% endblock %}
+{% block body %}
+<div class="screen screen--active" id="screen-create">
+{% include "_sidebar.html" %}
+
+  <main class="page-main">
+    {% include "_topbar.html" %}
+    <div class="page-wrap create-wrap">
+
+      <div class="page-topline">
+        <nav class="page-crumb" aria-label="Breadcrumb"><a href="/projects">Projects</a><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Start a project</span></nav>
+        <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
+      </div>
+
+      <header class="page-head-block">
+        <p class="page-eyebrow">New project</p>
+        <h1 class="page-title">Every project starts somewhere.</h1>
+        <p class="page-sub">Name the idea and choose how you want the first step to go — the import routes below are visible so you can see where they'll land, and they are disabled because they are not connected yet.</p>
+      </header>
+
+      {% if notice %}
+      <div class="notice-bar" role="status">
+        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v5M12 16h.01"/></svg>
+        <span>{{ notice }}</span>
+      </div>
+      {% endif %}
+
+      <section class="create-card" aria-label="Start with an idea">
+        <div class="create-card-head">
+          <h2 class="create-card-title">Start with an idea</h2>
+          <p class="create-card-sub">The only entry point that works today — it creates a real project and lands you in its workspace.</p>
+        </div>
+        <form method="post" action="/projects" class="create-form">
+          <input type="hidden" name="source" value="new" />
+          <div class="field">
+            <label class="field-label" for="projectName">Project name</label>
+            <input class="text-input" id="projectName" name="name" type="text" required maxlength="80" autocomplete="off" placeholder="Fieldnotes, Orbit beta, Order bot…" />
+          </div>
+          <div class="field">
+            <label class="field-label" for="projectDesc">What would you like to build?</label>
+            <textarea class="text-area" id="projectDesc" name="description" maxlength="600" rows="3" placeholder="In your own words — this becomes the project description. You can leave it empty."></textarea>
+          </div>
+          <fieldset class="field plan-choice">
+            <legend class="field-label">The first step</legend>
+            <label class="radio-card">
+              <input type="radio" name="mode" value="plan" checked />
+              <span class="radio-card-body">
+                <span class="radio-card-name">Plan with the Main Agent</span>
+                <span class="radio-card-note">Land in the workspace with the composer primed — describe the goal and let the Main Agent shape the first tasks with you.</span>
+              </span>
+            </label>
+            <label class="radio-card">
+              <input type="radio" name="mode" value="blank" />
+              <span class="radio-card-body">
+                <span class="radio-card-name">Start blank</span>
+                <span class="radio-card-note">Skip the conversation and open the workspace — add the tasks yourself on the Project map.</span>
+              </span>
+            </label>
+          </fieldset>
+          <div class="create-actions">
+            <button type="submit" class="btn-primary">Create the project</button>
+            <a class="btn-ghost" href="/projects">Cancel</a>
+          </div>
+        </form>
+      </section>
+
+      <section class="create-card create-card-import" id="import" aria-label="Import an existing project">
+        <div class="create-card-head">
+          <h2 class="create-card-title">Bring your own project</h2>
+          <p class="create-card-sub">These routes are part of the design, and they are not connected — the row tells you exactly that rather than pretending an import happened.</p>
+        </div>
+        <div class="repo-rows">
+          {% for key, label in repo_sources %}
+          <div class="repo-row is-disabled" aria-disabled="true" title="Not connected — connecting {{ label }} is not built yet">
+            <span class="repo-ico" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5M3.5 12a8.5 8.5 0 0 1 8.5-8.5M4.8 15h14.4M8.5 5.2c2 1.4 5 1.4 7 0"/></svg></span>
+            <span class="repo-body">
+              <span class="repo-name">{{ label|replace(' repository','') }} — connect your repos</span>
+              <span class="repo-note">Not connected. Connecting {{ label|replace(' repository','') }} is not built yet, so no repo is fetched.</span>
+            </span>
+            <span class="repo-badge">Not connected</span>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="drop-zone is-disabled" aria-disabled="true">
+          <span class="drop-ico" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 15.5V5M7 9.5l5-4.5 5 4.5"/><rect x="4" y="17" width="16" height="3.5" rx="1.6"/></svg></span>
+          <p class="drop-text"><strong>From your computer</strong> — drop a folder, a ZIP, or files to start from what you already have.</p>
+          <p class="drop-note">File import isn't built yet. Creating a project here starts from an idea; nothing reads or uploads your files.</p>
+          <span class="repo-badge">Not built yet</span>
+        </div>
+      </section>
+
+      {% if continue_strip %}
+      <a class="continue-strip" href="/projects/{{ continue_strip.id }}">
+        <span class="continue-label">Continue</span>
+        <span class="continue-name">{{ continue_strip.name }}</span>
+        <span class="continue-task">{{ continue_strip.task_title }}</span>
+        <span class="continue-age">Updated {{ continue_strip.age }}</span>
+        <span class="continue-go">Open workspace →</span>
+      </a>
+      {% endif %}
+    </div>
+  </main>
+</div>
+{% endblock %}

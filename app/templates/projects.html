@@ -1,175 +1,121 @@
 {% extends "layout.html" %}
 {% block title %}orbit — Projects{% endblock %}
+{% block body_class %}v2{% endblock %}
 {% block body %}
 <div class="screen screen--active" id="screen-projects">
 {% include "_sidebar.html" %}
 
-  <div class="page-main">
+  <main class="page-main">
+    {% include "_topbar.html" %}
     <div class="page-wrap">
 
-      <header class="page-head">
-        <div>
-          <p class="page-eyebrow">Workspace</p>
-          <h1 class="page-title">Projects</h1>
-          <p class="page-sub">
-            {% if total == 1 %}1 project{% else %}{{ total }} projects{% endif %}
-            — everything you're building, in one place.
-          </p>
-        </div>
-        <div class="page-actions">
-          <a class="btn-primary" href="#create">
-            <svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg>
-            New project
+      <div class="page-topline">
+        <nav class="page-crumb" aria-label="Breadcrumb"><span class="crumb-workspace">{{ user.workspace }}</span><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Projects</span></nav>
+        <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
+      </div>
+
+      {% if total == 0 and not query and not active_status %}
+      {# First run: the design's empty hero. Both paths go somewhere real. #}
+      <section class="empty-hero" aria-label="Start">
+        <img class="hero-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+        <h1 class="hero-title">What would you like to make?</h1>
+        <p class="hero-sub">Your projects live here — each with its own map, tasks and Main Agent.</p>
+        <div class="hero-paths">
+          <a class="hero-card" href="/create">
+            <span class="hero-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 4.5v11M6.5 10l5.5-5.5L17.5 10"/><path d="M5 19.5h14"/></svg></span>
+            <span class="hero-card-name">Start with an idea</span>
+            <span class="hero-card-text">Name it, tell the Main Agent what you want to build, and plan the first task together.</span>
+            <span class="hero-card-go">New project →</span>
+          </a>
+          <a class="hero-card" href="/create#import">
+            <span class="hero-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 15.5v-11M6.5 10 12 4.5 17.5 10"/><rect x="4.5" y="17" width="15" height="3" rx="1.5"/></svg></span>
+            <span class="hero-card-name">Bring your own project</span>
+            <span class="hero-card-text">Import from GitHub, GitLab or Bitbucket. No repository provider is connected yet — the import section says so honestly.</span>
+            <span class="hero-card-go">See import →</span>
           </a>
         </div>
+      </section>
+      {% else %}
+
+      <header class="page-head-block">
+        <p class="page-eyebrow">Your personal workspace</p>
+        <h1 class="page-title">Good ideas, moving forward.</h1>
+        <p class="page-sub">
+          {{ total }} project{{ 's' if total != 1 }}{% if building %} — {{ building }} in progress{% endif %}.
+          Pick up where you left off.
+        </p>
       </header>
 
       {% if notice %}
       <div class="notice-bar" role="status">
-        <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v4.5M12 15.8v.2"/></svg>
+        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v5M12 16h.01"/></svg>
         <span>{{ notice }}</span>
       </div>
       {% endif %}
 
-      {# Creation panel: a details element, so it opens and submits with no
-         JavaScript at all. Opened by default when a submission needs an
-         answer (a notice above), or when there is nothing to look at yet. #}
-      <details class="create-panel" id="create"{% if notice or total == 0 %} open{% endif %}>
-        <summary>
-          <svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg>
-          Create or import a project
-          <span class="summary-hint">No GitHub account needed to start — create inside orbit.</span>
-        </summary>
-        <div class="create-body">
-          <form method="post" action="/projects">
-            <div class="create-grid">
-              <div>
-                <label class="field-label" for="projectName">Project name</label>
-                <input class="text-input" id="projectName" name="name" type="text"
-                       maxlength="80" required autocomplete="off"
-                       placeholder="e.g. whatsapp-ordering-bot" />
-                <div class="field-label" style="margin-top:14px;">
-                  <label class="field-label" for="projectDesc" style="margin-bottom:0;">Description <span style="font-weight:400; color:var(--text-faint);">(optional)</span></label>
-                </div>
-                <textarea class="text-area" id="projectDesc" name="description"
-                          maxlength="600"
-                          placeholder="One or two sentences about what it does. orbit writes the AI summary later, from your real workspace conversations."></textarea>
-                <p class="field-hint">The description is yours; the AI summary is written by the Main Agent once the project has one — never guessed.</p>
-              </div>
-              <div>
-                <span class="field-label">Where the project comes from</span>
-                <div class="source-list">
-                  {% for key, label in sources %}
-                  <label class="source-option{% if key not in live_sources %} disabled{% endif %}"
-                         {% if key not in live_sources %}title="Not connected yet — visible so you know it's coming"{% endif %}>
-                    <input type="radio" name="source" value="{{ key }}"
-                           {% if key == 'new' %}checked{% endif %}
-                           {% if key not in live_sources %}disabled{% endif %} />
-                    {% if key == 'new' %}
-                    <svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg>
-                    {% elif key == 'local' %}
-                    <svg class="oi" viewBox="0 0 24 24"><path d="M3.5 7.3c0-.7.6-1.3 1.3-1.3h4.2l2 2.2h8.2c.7 0 1.3.6 1.3 1.3v7.2c0 .7-.6 1.3-1.3 1.3H4.8c-.7 0-1.3-.6-1.3-1.3Z"/></svg>
-                    {% elif key == 'zip' %}
-                    <svg class="oi" viewBox="0 0 24 24"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M9 7h2M11 9H9M9 11h2M11 13H9M9 15h2v3H9z"/></svg>
-                    {% else %}
-                    <svg class="oi" viewBox="0 0 24 24"><circle cx="6.5" cy="6" r="2.2"/><circle cx="6.5" cy="18" r="2.2"/><circle cx="17.5" cy="8" r="2.2"/><path d="M6.5 8.2v7.6M17.5 10.2c0 3.6-3 5.3-6.4 5.3"/></svg>
-                    {% endif %}
-                    <span>
-                      <span class="source-name">{{ label }}</span>
-                      {% if key == 'new' %}
-                        <span class="source-note"> · start empty, build inside orbit</span>
-                      {% endif %}
-                    </span>
-                    {% if key in live_sources %}
-                      <span class="source-badge available">Available</span>
-                    {% else %}
-                      <span class="source-badge">Not connected</span>
-                    {% endif %}
-                  </label>
-                  {% endfor %}
-                </div>
-              </div>
-            </div>
-            <div class="create-actions">
-              <button type="submit" class="btn-primary">
-                <svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg>
-                Create project
-              </button>
-            </div>
-          </form>
-        </div>
-      </details>
-
-      {# Search + the brief's filter: Live / Build in Progress / Archived /
-         Saved Ideas. Chips keep the current search; the search keeps the
-         current chip. #}
       <div class="projects-toolbar">
-        <form class="search-field" method="get" action="/projects">
-          <svg class="oi" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.3-4.3"/></svg>
-          <input type="search" name="q" value="{{ query }}" placeholder="Search projects"
-                 autocomplete="off" aria-label="Search projects" />
+        <form class="search-field" method="get" action="/projects" role="search">
+          <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
+          <input type="search" name="q" value="{{ query }}" placeholder="Search projects" aria-label="Search projects" autocomplete="off" />
           {% if active_status %}<input type="hidden" name="status" value="{{ active_status }}" />{% endif %}
         </form>
-        <nav class="filter-chips" aria-label="Filter by status">
-          <a class="filter-chip{% if not active_status %} active{% endif %}"
-             href="/projects{% if query %}?q={{ query | urlencode }}{% endif %}">
-            All <span class="count">{{ total }}</span>
-          </a>
-          {% for key, label in statuses %}
-          <a class="filter-chip{% if active_status == key %} active{% endif %}"
-             href="/projects?status={{ key }}{% if query %}&q={{ query | urlencode }}{% endif %}">
-            {{ label }} <span class="count">{{ counts[key] }}</span>
-          </a>
+        <nav class="sort-links" aria-label="Sort">
+          {% for key, label, link in sort_links %}
+          <a class="sort-link{% if active_sort == key %} active{% endif %}" href="{{ link }}">{{ label }}</a>
           {% endfor %}
         </nav>
+        <a class="btn-primary" href="/create" id="newProject"><svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg> New project</a>
       </div>
+
+      <nav class="filter-chips" aria-label="Filter by status">
+        <a class="filter-chip{% if not active_status %} active{% endif %}" href="/projects{% if query %}?q={{ query }}{% endif %}">All <span class="count">{{ total }}</span></a>
+        {% for key, label in statuses %}
+        <a class="filter-chip{% if active_status == key %} active{% endif %}" href="/projects?status={{ key }}{% if query %}&q={{ query }}{% endif %}">{{ label }} <span class="count">{{ counts[key] }}</span></a>
+        {% endfor %}
+      </nav>
 
       {% if projects %}
-      <div class="projects-grid">
+      <section class="projects-grid" aria-label="Projects">
         {% for p in projects %}
         <article class="project-card">
-          <div class="pc-head">
+          <header class="pc-head">
+            <span class="pc-icon" aria-hidden="true">{% for part in p.name.split()[:2] %}{{ part[:1] }}{% endfor %}</span>
             <span class="status-badge st-{{ p.status }}"><span class="dot"></span>{{ p.status_label }}</span>
-            <span class="pc-source">{{ p.source_label }}</span>
-          </div>
-          <h3 class="pc-name"><a href="/projects/{{ p.id }}">{{ p.name }}</a></h3>
+          </header>
+          <h2 class="pc-name"><a href="/projects/{{ p.id }}">{{ p.name }}</a></h2>
           {% if p.summary %}
-            <p class="pc-desc">{{ p.summary }}</p>
+          <p class="pc-desc">{{ p.summary }} <span class="pc-desc-origin">· AI summary</span></p>
           {% elif p.description %}
-            <p class="pc-desc">{{ p.description }}</p>
+          <p class="pc-desc">{{ p.description }}</p>
           {% else %}
-            <p class="pc-desc empty">No description yet.</p>
+          <p class="pc-desc empty">No description yet.</p>
           {% endif %}
-          {% if p.languages %}
-          <div class="pc-langs">
-            {% for lang in p.languages %}<span class="pc-lang">{{ lang }}</span>{% endfor %}
-          </div>
-          {% endif %}
-          <div class="pc-footer">
-            {% set updated = date_label(p.updated_at) %}
-            <span>{% if updated %}Updated {{ updated }}{% else %}Just created{% endif %}</span>
-            <a class="pc-open" href="/projects/{{ p.id }}">Open workspace →</a>
-          </div>
+          <p class="pc-tech{% if not p.languages %} pc-tech-none{% endif %}">
+            {% if p.languages %}{{ p.languages|join(' · ') }}{% else %}No technology chosen yet{% endif %}
+          </p>
+          <footer class="pc-foot">
+            {% if p.tasks_total %}
+            <p class="pc-taskline">{{ p.task_title }} <span class="pc-taskstate">· {{ p.task_state }}</span></p>
+            <p class="pc-progressline">{{ p.tasks_done }} of {{ p.tasks_total }} tasks complete{% if p.age %} · {{ p.age }}{% endif %}</p>
+            {% else %}
+            <p class="pc-taskline pc-taskline-none">No tasks yet — the map starts when the first one is added.</p>
+            {% endif %}
+            <a class="pc-open" href="/projects/{{ p.id }}" aria-label="Open {{ p.name }}">↗</a>
+          </footer>
         </article>
         {% endfor %}
-      </div>
-      {% elif total > 0 %}
-      <div class="empty-state">
-        <h2>Nothing matches this view</h2>
-        <p>No projects fit the current search and filter.</p>
-        <a class="btn-ghost" href="/projects">Clear search and filters</a>
-      </div>
+      </section>
+      <p class="grid-caption">AI descriptions come from a real conversation with the project's Main Agent. Cards without one show what you wrote when the project started.</p>
       {% else %}
-      {# The first run: the path forward is the creation panel above, which
-         opens on its own in this state. #}
-      <div class="empty-state">
+      <section class="empty-state" aria-label="No matching projects">
         <img class="empty-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-        <h2>No projects yet</h2>
-        <p>Create your first project inside orbit — no external account needed. Imports from GitHub, GitLab, Bitbucket, a local folder, or a ZIP are listed above and marked honestly until they're connected.</p>
-      </div>
+        <h2>Nothing matches</h2>
+        <p>{% if query %}No project matches “{{ query }}”{% if active_status %} in {{ active_status }}{% endif %}.{% else %}No projects have this status yet.{% endif %}</p>
+        <a class="btn-ghost" href="/projects">Clear the filters</a>
+      </section>
       {% endif %}
-
+      {% endif %}
     </div>
-  </div>
+  </main>
 </div>
 {% endblock %}

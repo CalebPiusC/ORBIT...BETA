@@ -648,3 +648,123 @@ Figma frames reskin it; the DATA underneath is final):
 screens in Figma; embed links hit a login wall from this environment, so frames arrive
 as PNG exports in chat. When they land, reskin `projects.html`, `project.html`,
 `agents.html` and the create dialog — routes, stores and tests should not need to move.
+
+### 5.8 The Figma rebuild (2026-10-15, evening)
+
+The owner delivered 14 PNG frames (dark, light, mobile) for the Projects overview,
+first-run hero, Create-or-import, the Fieldnotes workspace and the Agents grid.
+This pass rebuilt the IA to them under the standing rule: **every control renders
+only data that exists**. What each frame control does — or honestly does not do — is
+below. Anything that reads data comes from the store; anything the store cannot back
+renders disabled with a plain reason or is omitted rather than faked.
+
+**Data model deltas (store):** `Task.stage` (the map section the owner filed the task
+under; never guessed), `Task.builds_on` (another task's id, owner-asserted;
+`create_task` refuses an id that does not exist), `Task.done` + `Store.set_done` —
+completion is the person's mark, never a side effect of a turn. A finished run still
+reads "Turn finished" (`app/projectmap.row_state`). `ChatMessage.speaker` records
+which agent brief wrote a reply ("Main Agent", "Review", …) — provenance, rendered
+as the rail's per-message label. `Store.selected_agent` is the Agents page's
+in-memory "picked, not yet assigned" state. `Store.project_conversation` takes
+`agent_id`: each project carries one conversation per agent brief (main + assigned
+specialties), listed by `project_conversations` for the rail's agent picker.
+
+**Project map v2** (`app/projectmap.py`): stages group tasks in filed order (first
+appearance; the unstaged group renders last under "Tasks") with real
+`x / y complete` counts. Row states: **planned / in progress / needs attention /
+finished / done** — in that derivation order; only the owner-marked `done` renders
+as "Complete". `next_up` is the next open task in the same stage (creation order) —
+an ordering suggestion, not a prediction. `latest_task` drives card footers.
+
+**Projects overview** (`projects.html v2`): eyebrow + headline ("Good ideas, moving
+forward."), counts subline, search, real `?sort=recent|name` links, status chips with
+real counts, 3-column cards — icon tile (initials), status badge, AI-summary-or-owner
+description, technology or "No technology chosen yet", newest task with its state,
+"x of y tasks complete · {human_age}". `app/age.human_age` writes "just now / N min
+ago / N h ago / Yesterday / N days ago / Oct 12" from the real `updated_at`.
+Zero projects renders the design's first-run hero ("What would you like to make?")
+whose two paths go elsewhere real: `/create` and `/create#import`.
+
+**Create** (`/create` + `create.html`): the idea form (name, "What would you like to
+build?", radios "Plan with the Main Agent" — lands in the workspace with
+`?plan=1#agent` and the composer primed — or "Start blank"). The repository rows
+(GitHub/GitLab/Bitbucket) and the file drop zone render **disabled with the reason
+on the row** ("Not connected … not built yet", "File import isn't built yet") —
+they are part of the design, and they must not pretend. `POST /projects` only ever
+creates ideas; a `source` smuggled in the POST is ignored (stored as `new`). The
+continue strip at the bottom names the latest-touched project, its newest task, and
+its real age — only while a project exists.
+
+**Workspace v2** (`project.html`, 3 panes): header (name, status badge, description,
+"x of y tasks complete" + progress from `Task.done`, technology line or fallback,
+"Project info" → overview), tabs "Map & tasks | Project overview" (`?view=overview`
+renders the info card: description with AI-provenance note, real status form, source,
+created/updated, technology, counts). LEFT: the staged map with per-stage
+"x/y complete", state icons (checked ring / accent ring / hollow), state subs, an
+"+ Add a task" form with the stage datalist and a Builds-on select of real tasks.
+CENTER: the selected task's details — stage eyebrow, state badges, description,
+Builds-on / Next-up links, "Requirements" = the real run's plan steps with done
+marks and counter (placeholder text + a real run link when the task never ran),
+"Associated work" = the run's real files, the real latest-activity line, the
+Mark-complete/Reopen toggle (`POST /projects/<id>/tasks/<task_id>/complete`, audited
+`task_completion`), and "Discuss with {agent} →". RIGHT: the agent rail — agent
+picker over the project's real conversations, speaker labels, user bubbles, the
+"Now discussing · <task>" strip when a task is pinned, the Task pin select, Chat /
+Agent and Quick / Deep controls (real, client-rendered by `project.js`; without JS
+nothing inert shows up), follow-up chips.
+
+**Task pinning**: "Discuss" links include `task=<id>`; the stream accepts `task_id`
+and prepends the real "TASK THE PERSON IS DISCUSSING RIGHT NOW" block (title,
+request, state, and the plan steps as `[x]`/`[ ]`) — the agent's context is the
+same truth the screen shows. A task_id from another project is refused 404.
+`?agent=<id>` picks the rail's conversation; its system prompt is
+`get_agent(id).instructions + project context`. Specialist conversations are never
+created by navigation — only `POST /agents/<id>/assign` (audited
+`agent_specialist_assigned`) or a first real message.
+
+**Agents page v2** (`agents.html`): the design's six specialties — Coding, Research,
+Debug, Review, Testing, Documentation — with the owner's taglines, details and the
+quoted example task per card, search by specialty (`search_agents`), "6 specialties"
+count, Choose → the sticky "… selected — no project is assigned yet" bar with the
+real project select; assigning opens the powder room (workspace rail) with that
+agent's conversation. Cards whose claims a seam cannot back carry the limit in the
+brief itself (Research: cannot fetch live pages; Debug: cannot run their code;
+Testing: cannot run their suite).
+
+**Entries the frames show that no capability backs — and what we did instead:**
+Git GitLab/Bitbucket connect (disabled rows), file-drop import (disabled zone),
+"Help & getting started" (omitted), workspace-tile chevron (omitted: one
+workspace), the inline action chips on agent replies ("Create task / Mark
+complete" buttons in the Figma bubbles — **not built**: the agent has no such
+action seam, so nothing fakes a proposal), the mobile hamburger (**omitted** — the
+mobile top bar carries the real Projects/Agents/Analytics links instead), per-reply
+moon labels ("Titan" in the frames — the rail labels each reply with the agent
+brief that wrote it, from stored provenance; moon names stay Agent-mode
+status-line labels, and per-reply model provenance is queued), light-theme
+cream-on-copper primary button text (the frame's ≈2.8:1 does not pass AA — both
+themes keep dark ink on copper fills; the deviation is flagged in the layout's
+light-token comment).
+
+**Theme + sidebar + mobile**: `[data-theme="light"]` token overrides live in
+`layout.html` next to `:root`; a pre-paint script restores `orbit.theme` from
+localStorage (never a dark→cream flash), and every v2 page has a real appearance
+button (aria-pressed, glyph swapped on the same elements; client-side only, no
+route). The new sidebar (brand → workspace tile → Projects/Agents/Analytics →
+RECENT PROJECTS ≤3 real → reminders + connected apps + user card) renders on every
+screen, home/legacy included; the collapse feature and its pre-paint restore are
+kept. Under 900px the v2 layout swaps the sidebar for the top bar.
+
+**Regression, not hidden:** home "/" keeps rendering legacy (its tests stay), but
+its chat history/new-conversation/search controls left the sidebar per the design —
+so for now multi-chat switching on the legacy chat home is not reachable from the
+UI ("New conversation" moved to the home topbar; conversations still persist in the
+store). The home migration phase owns that navigation's rebirth.
+
+**Tests:** `tests/test_workspace.py` rewrites the map suite to the staged API and
+pins stages, completion toggle + audit, details links, overview view, specialist
+prompts, task pinning, speaker labels and the assign flow (28 tests);
+`tests/test_agents.py` the six specialties + search (8); `tests/test_projects.py`
+the hero, disabled import rows, plan mode, the continue strip, sort, select/deselect,
+assignment (24); sidebar/tooltip and home assertions in `test_app.py` /
+`test_message_actions.py` updated to the v2 rail. Full suite: **462 tests, all
+green.**

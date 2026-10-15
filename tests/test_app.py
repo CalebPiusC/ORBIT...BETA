@@ -77,16 +77,20 @@ class AppRoutesTests(unittest.TestCase):
         body = resp.get_data(as_text=True)
         self.assertIn("Caleb", body)
         self.assertIn("Good ", body)  # time-based greeting
-        # Conversation history from the store.
-        self.assertIn("Add order tracking to WhatsApp bot", body)
         # Mode toggle reflects default chat mode.
         self.assertIn('data-arena="mode-chat"', body)
         self.assertIn('data-mode="chat"', body)
         self.assertIn('id="currentConversationTitle"', body)
         self.assertIn("Your ideas, in orbit.", body)
-        self.assertIn("Search chats", body)
         self.assertIn('data-open-settings', body)
         self.assertNotIn('class="plus-badge">ORBIT', body)
+        # The new sidebar (owner's design) is projects-centred: the chat
+        # history and its search left the rail, and the new-conversation
+        # control lives in the home topbar instead.
+        self.assertIn('class="workspace-tile"', body)
+        self.assertIn('id="newConvo"', body)
+        self.assertNotIn('class="history-item', body)
+        self.assertNotIn('id="conversationSearch"', body)
 
     def test_chat_and_agent_turn_prompts_include_lagos_time_context(self):
         home = self.client.post("/api/chat", json={"message": "What time is it?"})

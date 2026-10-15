@@ -1,58 +1,104 @@
 {% extends "layout.html" %}
 {% block title %}orbit — Agents{% endblock %}
+{% block body_class %}v2{% endblock %}
 {% block body %}
 <div class="screen screen--active" id="screen-agents">
 {% include "_sidebar.html" %}
 
-  <div class="page-main">
+  <main class="page-main">
+    {% include "_topbar.html" %}
     <div class="page-wrap">
 
-      <header class="page-head">
-        <div>
-          <p class="page-eyebrow">Workspace</p>
-          <h1 class="page-title">Agents</h1>
-          <p class="page-sub">Pick the kind of help you need — then point it at any project. Each one is the same orbit brain under a job-specific brief, with the same approvals and the same audit.</p>
-        </div>
+      <div class="page-topline">
+        <nav class="page-crumb" aria-label="Breadcrumb"><span class="crumb-workspace">{{ user.workspace }}</span><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Agents</span></nav>
+        <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
+      </div>
+
+      <header class="page-head-block">
+        <p class="page-eyebrow">Specialists for your projects</p>
+        <h1 class="page-title">The right help, on the right job.</h1>
+        <p class="page-sub">{{ total }} specialties · available across your projects. Choosing one assigns its own conversation inside the project you pick — its brief is the system prompt the conversation actually runs under.</p>
       </header>
 
-      <div class="agents-grid">
+      <form class="search-field agents-search" method="get" action="/agents" role="search">
+        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
+        <input type="search" name="q" value="{{ query }}" placeholder="Find an agent by specialty" aria-label="Find an agent by specialty" autocomplete="off" />
+      </form>
+
+      {% if agents %}
+      <section class="agents-grid" aria-label="Specialties">
         {% for agent in agents %}
-        <article class="agent-card">
-          <div class="agent-head">
+        <article class="agent-card{% if selected_agent and selected_agent.id == agent.id %} selected{% endif %}">
+          <header class="agent-head">
             <span class="agent-icon" aria-hidden="true">
-              {% if agent.id == 'builder' %}
-              <svg class="oi" viewBox="0 0 24 24"><path d="m14.5 6.5 3 3L8 19H5v-3Z"/><path d="m12.5 8.5 3 3"/><path d="M4 4l3.5 3.5"/></svg>
-              {% elif agent.id == 'debugger' %}
-              <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="13" r="5.5"/><path d="M12 7.5V4.8M8.5 5 10 7.5M15.5 5 14 7.5M6.5 12H3.8M20.2 12h-2.7M6.8 16.5 4.5 18.8M17.2 16.5l2.3 2.3M12 10.5v5"/></svg>
-              {% elif agent.id == 'researcher' %}
-              <svg class="oi" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.3-4.3M8.5 11h5M11 8.5v5"/></svg>
-              {% else %}
-              <svg class="oi" viewBox="0 0 24 24"><path d="M9 4.5H6.8c-.7 0-1.3.6-1.3 1.3v12.4c0 .7.6 1.3 1.3 1.3h10.4c.7 0 1.3-.6 1.3-1.3V5.8c0-.7-.6-1.3-1.3-1.3H15"/><rect x="9" y="3.5" width="6" height="3" rx="1"/><path d="M8.5 10.5h7M8.5 14h7M8.5 17.5h4"/></svg>
-              {% endif %}
+              {%- if agent.id == 'coding' -%}
+              <svg class="oi" viewBox="0 0 24 24"><path d="m8.5 7-4.5 5 4.5 5M15.5 7l4.5 5-4.5 5"/></svg>
+              {%- elif agent.id == 'research' -%}
+              <svg class="oi" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
+              {%- elif agent.id == 'debug' -%}
+              <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="13" r="5.5"/><path d="M9 8.5 7 6M15 8.5 17 6M6.5 13H4M20 13h-2.5M7.5 18l-2 2M16.5 18l2 2M12 4.5v2"/></svg>
+              {%- elif agent.id == 'review' -%}
+              <svg class="oi" viewBox="0 0 24 24"><path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.6"/></svg>
+              {%- elif agent.id == 'testing' -%}
+              <svg class="oi" viewBox="0 0 24 24"><path d="M9.5 3.5h5M11 3.5v5.2L6 17a3 3 0 0 0 2.7 4.5H15.3A3 3 0 0 0 18 17l-5-8.3V3.5"/><path d="m9.8 15.6 2.3 2.2 3.4-3.7"/></svg>
+              {%- else -%}
+              <svg class="oi" viewBox="0 0 24 24"><path d="M5.5 5A2.5 2.5 0 0 1 8 2.5h11v16H8a2.5 2.5 0 0 0-2.5 2.5V5Z"/><path d="M8 18.5A2.5 2.5 0 0 0 5.5 21H19"/></svg>
+              {%- endif -%}
             </span>
-            <div>
+            <div class="agent-head-text">
               <div class="agent-name">{{ agent.name }}</div>
               <div class="agent-role">{{ agent.role }}</div>
             </div>
-          </div>
+          </header>
           <p class="agent-detail">{{ agent.detail }}</p>
-          <div class="agent-starters">
-            <span class="starters-label">Try starting with</span>
-            {% for starter in agent.starters %}
-            <span class="agent-starter" title="{{ starter.prompt }}">“{{ starter.label }}”</span>
-            {% endfor %}
+          <p class="agent-quote">“{{ agent.quote }}”</p>
+          <div class="agent-actions">
+            {% if selected_agent and selected_agent.id == agent.id %}
+            <span class="agent-selected-flag">Ready to assign ✓</span>
+            <form method="post" action="/agents/deselect" class="inline-form"><button type="submit" class="linkish">Deselect</button></form>
+            {% else %}
+            <form method="post" action="/agents/{{ agent.id }}/select">
+              <input type="hidden" name="q" value="{{ query }}" />
+              <button type="submit" class="btn-ghost">Choose {{ agent.name }} →</button>
+            </form>
+            {% endif %}
           </div>
-          <form class="agent-start" method="post" action="/agents/{{ agent.id }}/start">
-            <button type="submit">
-              <svg class="oi" viewBox="0 0 24 24"><path d="M4.5 12h13M13 6.5l5.5 5.5-5.5 5.5"/></svg>
-              Start a chat with {{ agent.name }}
-            </button>
-          </form>
         </article>
         {% endfor %}
-      </div>
-
+      </section>
+      {% else %}
+      <section class="empty-state" aria-label="No matching specialties">
+        <img class="empty-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+        <h2>No specialty named “{{ query }}”.</h2>
+        <p>The {{ total }} specialties are Coding, Research, Debug, Review, Testing and Documentation.</p>
+        <a class="btn-ghost" href="/agents">See them all</a>
+      </section>
+      {% endif %}
     </div>
+  </main>
+
+  {% if selected_agent %}
+  <div class="assign-bar" id="selection" role="region" aria-label="Assign the selected specialist">
+    <div class="assign-bar-text">
+      <strong>{{ selected_agent.name }}</strong> selected — no project is assigned yet.
+    </div>
+    {% if assign_targets %}
+    <form method="post" action="/agents/{{ selected_agent.id }}/assign" class="assign-bar-form">
+      <select class="text-input" name="project_id" required aria-label="Choose a project">
+        <option value="" disabled selected>Choose a project</option>
+        {% for p in assign_targets %}
+        <option value="{{ p.id }}">{{ p.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="btn-primary">Assign &amp; open the workspace</button>
+    </form>
+    {% else %}
+    <div class="assign-bar-none">
+      <span>No project exists to assign it to.</span>
+      <a class="btn-primary" href="/create">Create a project first</a>
+    </div>
+    {% endif %}
   </div>
+  {% endif %}
 </div>
 {% endblock %}

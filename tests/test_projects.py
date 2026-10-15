@@ -178,10 +178,14 @@ class ProjectRouteTests(unittest.TestCase):
             return []
         return [json.loads(line) for line in self.audit_path.read_text().splitlines() if line.strip()]
 
-    def test_projects_page_renders_empty_state(self) -> None:
+    def test_projects_page_renders_the_first_run_hero(self) -> None:
         html = self.client.get("/projects").get_data(as_text=True)
-        self.assertIn("No projects yet", html)
-        self.assertIn("New project", html)
+        # The design's two real paths out of the empty state.
+        self.assertIn("What would you like to make?", html)
+        self.assertIn("Start with an idea", html)
+        self.assertIn("Bring your own project", html)
+        self.assertIn('href="/create"', html)
+        self.assertNotIn("Good ideas, moving forward", html)  # that's the list view
 
     def test_create_then_list(self) -> None:
         resp = self.client.post(
@@ -199,20 +203,26 @@ class ProjectRouteTests(unittest.TestCase):
         self.assertIn("Takes orders.", html)
         self.assertIn("Build in Progress", html)
 
-    def test_import_refusal_is_honest_and_audited(self) -> None:
+    def test_import_entry_points_render_disabled_and_honest(self) -> None:
+        html = self.client.get("/create").get_data(as_text=True)
+        # Visible in the design, disabled because they are not connected.
+        for name in ("GitHub", "GitLab", "Bitbucket"):
+            self.assertIn(name, html, name)
+        self.assertIn("is-disabled", html)
+        self.assertIn("Not connected", html)
+        self.assertIn("File import isn't built yet", html)
+        self.assertNotIn("fetched and added", html)  # no pretend success anywhere
+        # The create form only ever posts the idea path.
+        self.assertIn('value="new"', html)
+        # A source smuggled into the POST is ignored: an idea is what the
+        # route creates, so "new" is what gets stored.
         resp = self.client.post(
             "/projects",
-            data={"name": "from github", "source": "github"},
+            data={"name": "from github", "source": "github", "mode": "blank"},
         )
         self.assertEqual(resp.status_code, 303)
-        self.assertIn("notice=import:github", resp.headers["Location"])
-        self.assertEqual(self.project_store.list_for("caleb"), [])
-        events = [e for e in self._audit_events() if e.get("event") == "project_import_unavailable"]
-        self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["source"], "github")
-        html = self.client.get("/projects?notice=import:github").get_data(as_text=True)
-        self.assertIn("isn&#39;t connected yet", html)
-        self.assertNotIn("fetched and added", html)  # no pretend success anywhere
+        project = self.project_store.list_for("caleb")[0]
+        self.assertEqual(project.source, "new")
 
     def test_invalid_create_is_rejected(self) -> None:
         resp = self.client.post("/projects", data={"name": "   ", "source": "new"})
@@ -220,33 +230,125 @@ class ProjectRouteTests(unittest.TestCase):
         self.assertIn("notice=invalid", resp.headers["Location"])
         self.assertEqual(self.project_store.list_for("caleb"), [])
 
+    def test_plan_mode_lands_on_the_workspace_with_the_hint(self) -> None:
+        resp = self.client.post("/projects", data={"name": "Scoped", "mode": "plan"})
+        self.assertEqual(resp.status_code, 303)
+        project = self.project_store.list_for("caleb")[0]
+        self.assertEqual(
+            resp.headers["Location"],
+            f"/projects/{project.id}?plan=1#agent",
+        )
+        html = self.client.get(resp.headers["Location"].split("#")[0]).get_data(as_text=True)
+        self.assertIn("You chose", html)  # the plan hint over the composer
+        self.assertIn('data-plan-hint="1"', html)
+
+    def test_the_continue_strip_names_real_recent_work(self) -> None:
+        html = self.client.get("/create").get_data(as_text=True)
+        # no projects → no strip (the CSS class name ships on every page;
+        # the rendered element is what must be absent)
+        self.assertNotIn('class="continue-strip"', html)
+        project = self.project_store.create(user_id="caleb", name="Fieldnotes")
+        self.app.config["STORE"].create_task("Sort by recent", project_id=project.id)
+        html = self.client.get("/create").get_data(as_text=True)
+        self.assertIn('class="continue-strip"', html)
+        strip = html[html.index('class="continue-strip"'):]
+        self.assertIn("Fieldnotes", strip)
+        self.assertIn("Sort by recent", strip)
+        self.assertIn("Updated just now", strip)
+
+    def _grid_only(self, html: str) -> str:
+        """The card grid on its own.
+
+        Assertions scope to it because the sidebar's RECENT PROJECTS list
+        legitimately shows every project, filtered view or not — a plain
+        haystack search would find filtered-out names there.
+        """
+        start = html.index('class="projects-grid"')
+        end = html.index("grid-caption", start)
+        return html[start:end]
+
     def test_search_and_status_filter(self) -> None:
         self.project_store.create(user_id="caleb", name="Order bot")
         archived = self.project_store.create(user_id="caleb", name="Old site")
         self.project_store.set_status(archived.id, "caleb", "archived")
-        html = self.client.get("/projects?status=archived").get_data(as_text=True)
-        self.assertIn("Old site", html)
-        self.assertNotIn("Order bot", html)
-        html = self.client.get("/projects?q=order").get_data(as_text=True)
-        self.assertIn("Order bot", html)
-        self.assertNotIn("Old site", html)
+        grid = self._grid_only(self.client.get("/projects?status=archived").get_data(as_text=True))
+        self.assertIn("Old site", grid)
+        self.assertNotIn("Order bot", grid)
+        # chips carry real counts, including the zeroes
+        html = self.client.get("/projects").get_data(as_text=True)
+        self.assertIn("Archived <span", html)
+        grid = self._grid_only(html)
+        self.assertIn("Order bot", grid)
+        self.assertIn("Old site", grid)
+        grid = self._grid_only(self.client.get("/projects?q=order").get_data(as_text=True))
+        self.assertIn("Order bot", grid)
+        self.assertNotIn("Old site", grid)
         # an unknown status param is ignored rather than emptying the grid
-        html = self.client.get("/projects?status=bogus").get_data(as_text=True)
-        self.assertIn("Order bot", html)
+        grid = self._grid_only(self.client.get("/projects?status=bogus").get_data(as_text=True))
+        self.assertIn("Order bot", grid)
 
-    def test_agent_start_wires_the_conversation_brief(self) -> None:
+    def test_sort_links_really_sort(self) -> None:
+        self.project_store.create(user_id="caleb", name="Zebra")
+        self.project_store.create(user_id="caleb", name="Alpha")
+        grid = self._grid_only(self.client.get("/projects?sort=name").get_data(as_text=True))
+        self.assertLess(grid.index("Alpha"), grid.index("Zebra"))
+        grid = self._grid_only(self.client.get("/projects").get_data(as_text=True))
+        self.assertLess(grid.index("Zebra"), grid.index("Alpha"))  # recent first
+        self.assertNotIn("sort=zebra", grid)
+
+    def test_selecting_and_deselecting_a_specialist(self) -> None:
         store: Store = self.app.config["STORE"]
-        resp = self.client.post("/agents/debugger/start")
+        self.assertIsNone(store.selected_agent)
+        resp = self.client.post("/agents/debug/select")
         self.assertEqual(resp.status_code, 303)
-        conv = store.conversations[0]
-        self.assertEqual(conv.agent_id, "debugger")
-        resp = self.client.post("/agents/not-an-agent/start")
+        self.assertEqual(store.selected_agent, "debug")
+        # the sticky bar names the pick and its real next step
+        html = self.client.get("/agents").get_data(as_text=True)
+        self.assertIn("Debug", html)
+        self.assertIn("selected — no project is assigned yet", html)
+        self.assertIn('class="assign-bar"', html)  # the bar element, not just its CSS
+        events = [e for e in self._audit_events() if e.get("event") == "agent_specialist_selected"]
+        self.assertEqual(len(events), 1)
+        resp = self.client.post("/agents/deselect")
+        self.assertEqual(resp.status_code, 303)
+        self.assertIsNone(store.selected_agent)
+        self.assertNotIn('class="assign-bar"', self.client.get("/agents").get_data(as_text=True))
+        resp = self.client.post("/agents/not-an-agent/select")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_agent_assignment_creates_a_project_conversation(self) -> None:
+        store: Store = self.app.config["STORE"]
+        project = self.project_store.create(user_id="caleb", name="Fieldnotes")
+        resp = self.client.post("/agents/review/assign", data={"project_id": project.id})
+        self.assertEqual(resp.status_code, 303)
+        self.assertIn(f"/projects/{project.id}?agent=review", resp.headers["Location"])
+        conv = store.project_conversation(project.id, agent_id="review")
+        self.assertIsNotNone(conv)
+        self.assertEqual(conv.agent_id, "review")
+        events = [e for e in self._audit_events() if e.get("event") == "agent_specialist_assigned"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["project_id"], project.id)
+        resp = self.client.post("/agents/not-an-agent/assign", data={"project_id": project.id})
         self.assertEqual(resp.status_code, 404)
 
     def test_agents_page_lists_every_card(self) -> None:
         html = self.client.get("/agents").get_data(as_text=True)
-        for name in ("Builder", "Debugger", "Researcher", "Planner"):
+        for name in ("Coding", "Research", "Debug", "Review", "Testing", "Documentation"):
             self.assertIn(name, html)
+        for quote in ("Add the no-results search state.", "Compare local search approaches.",
+                      "Why are duplicate notes appearing?", "Review this search implementation.",
+                      "Test search with an empty notebook.", "Explain how notes are stored."):
+            self.assertIn(quote, html)
+        self.assertIn("6 specialties", html)
+        self.assertIn("Find an agent by specialty", html)
+
+    def test_agents_search_filters_by_specialty(self) -> None:
+        html = self.client.get("/agents?q=libraries").get_data(as_text=True)
+        self.assertIn("Research", html)
+        self.assertNotIn("Debug<", html)
+        html = self.client.get("/agents?q=zzz").get_data(as_text=True)
+        self.assertIn("No specialty named", html)
+        self.assertIn("Coding, Research, Debug, Review, Testing and Documentation", html)
 
 
 class ProjectTaskLinkTests(unittest.TestCase):

@@ -20,6 +20,14 @@
   if (!composer || !input || !thread) return;
 
   const projectId = composer.getAttribute("data-project-id");
+  const agentId = composer.getAttribute("data-agent") || "main";
+  const speaker = composer.getAttribute("data-speaker") || "Main Agent";
+  const taskPin = document.getElementById("wsTaskPin");
+  const modeZone = document.getElementById("wsModeZone");
+  // The task the conversation is pinned to right now. Initial value is the
+  // server-rendered "Now discussing" task (when the page opened on one).
+  const pinned = { taskId: composer.getAttribute("data-task-id") || "" };
+  if (taskPin && taskPin.value && !pinned.taskId) pinned.taskId = taskPin.value;
   let streaming = false;
 
   function nearBottom() {
@@ -33,6 +41,12 @@
   function addRow(who, text) {
     const row = document.createElement("div");
     row.className = "chat-row " + who;
+    if (who === "orbit") {
+      const label = document.createElement("div");
+      label.className = "chat-speaker";
+      label.textContent = speaker;
+      row.appendChild(label);
+    }
     const bubble = document.createElement("div");
     bubble.className = "chat-bubble " + who;
     const body = document.createElement("div");
@@ -147,7 +161,10 @@
       const resp = await fetch("/api/project/" + encodeURIComponent(projectId) + "/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
+        // agent: which conversation this turn belongs to (rail picks it);
+        // task_id: the pinned "Now discussing" task, so the server can join
+        // its real state to the prompt.
+        body: JSON.stringify({ message, agent: agentId, task_id: pinned.taskId || undefined }),
       });
       if (!resp.ok || !(resp.headers.get("content-type") || "").includes("text/event-stream")) {
         let detail = "The turn could not start.";
@@ -253,6 +270,77 @@
     const chip = e.target.closest(".ws-chip");
     if (chip) sendPrompt(chip.getAttribute("data-prompt"));
   });
+
+  /* The task pin ("Task · …" above the composer): switching it redirects to
+     the same workspace discussing that task, so the strip and prompt are
+     server-rendered truth, never a client claim. */
+  if (taskPin) {
+    taskPin.addEventListener("change", () => {
+      const id = taskPin.value;
+      const url = "/projects/" + encodeURIComponent(projectId) +
+        "?task=" + encodeURIComponent(id || "") +
+        (agentId && agentId !== "main" ? "&agent=" + encodeURIComponent(agentId) : "") +
+        "#agent";
+      window.location.href = url;
+    });
+  }
+
+  /* Chat / Agent and Quick / Deep: the workspace rail's compact forms of the
+     same global settings the home topbar carries. Rendered by JS (the toggles
+     fetch JSON), so without JavaScript nothing inert shows up. */
+  function renderModeZone(currentMode, currentThinking) {
+    if (!modeZone) return;
+    modeZone.textContent = "";
+    const seg = document.createElement("span");
+    seg.className = "ws-mode-seg";
+    ["chat", "agent"].forEach((m) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ws-mode-opt" + (m === currentMode ? " active" : "");
+      b.textContent = m === "chat" ? "Chat" : "Agent";
+      b.title = m === currentMode
+        ? "This is the current mode."
+        : "Switch to " + (m === "chat" ? "Chat" : "Agent") + " mode everywhere in orbit.";
+      b.disabled = m === currentMode;
+      b.addEventListener("click", () => {
+        fetch("/api/mode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: m }),
+        })
+          .then((r) => r.json().catch(() => null))
+          .then((data) => renderModeZone(data && data.mode ? data.mode : m, currentThinking))
+          .catch(() => {/* a failed toggle leaves the control as it was */});
+      });
+      seg.appendChild(b);
+    });
+    const think = document.createElement("button");
+    think.type = "button";
+    think.className = "ws-mode-opt ws-think-opt";
+    think.textContent = currentThinking === "deep" ? "Deep" : "Quick";
+    think.title = "Switch the Agent-mode narration depth (" +
+      (currentThinking === "deep" ? "currently Deep" : "currently Quick") + ").";
+    think.addEventListener("click", () => {
+      const next = currentThinking === "deep" ? "quick" : "deep";
+      fetch("/api/thinking-level", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thinking_level: next }),
+      })
+        .then((r) => r.json().catch(() => null))
+        .then((data) => renderModeZone(currentMode, data && data.thinking_level ? data.thinking_level : next))
+        .catch(() => {/* leave as-is on failure */});
+    });
+    modeZone.appendChild(seg);
+    modeZone.appendChild(think);
+  }
+  renderModeZone(composer.getAttribute("data-mode") || "chat",
+                 composer.getAttribute("data-thinking") || "quick");
+
+  /* "Plan with the Main Agent" drops you here ready to type. */
+  if (composer.getAttribute("data-plan-hint") === "1" && !thread.children.length) {
+    input.focus();
+  }
 
   window.OrbitWorkspace = { sendPrompt };
   thread.scrollTop = thread.scrollHeight;
