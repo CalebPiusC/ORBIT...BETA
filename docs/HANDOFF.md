@@ -606,7 +606,45 @@ What exists now, and the rules that protect it:
   fallbacks; the wordmark is lowercase "orbit" on every branding surface, including the
   `ORBIT` eyebrow label that used to render above voice replies.
 
-Not built yet (next passes, in order): the project **workspace** route + Project Map +
-Task Details + project-scoped Main Agent chat; status changes from the UI; the light
-theme; sidebar/history rework so project-less conversations have a home in the new IA;
-the home/task screens' migration into the IA.
+Not built yet (next passes, in order): the light theme; sidebar/history rework so
+project-less conversations have a home in the new IA; the home/task screens' migration
+into the IA; real syntax highlighting in workspace code blocks (they currently format
+as plain blocks with a copy button — honest, never claimed as highlighted).
+
+### 5.7 The project workspace (2026-10-15, afternoon)
+
+The brief's three pillars, built as functional scaffolding (plain layout — the owner's
+Figma frames reskin it; the DATA underneath is final):
+
+- **Project Map** — `app/projectmap.py`. Buckets are derived at render time from each
+  task's real run state (`TaskRun`): Not started / In progress / Needs attention /
+  Waiting on you. A finished turn is never labelled "done" — nothing advances without
+  the person (the approval gate's philosophy, applied to the map). Step counts come
+  from the run object, the same source as the Agent panel, so the map can never
+  out-report the panel.
+- **Task Details** — `?task=<id>` on the workspace renders the task's request and its
+  real run panel (steps with evidence lines, activity, approval state), plus a link
+  into the existing `/task/<id>` Builder view. A task id that is not this project's
+  renders no details — enforced server-side, like every gate here.
+- **Main Agent conversation** — one project-scoped conversation
+  (`Conversation.project_id`, find-or-create on first send, never in the home history),
+  streamed at `POST /api/project/<project_id>/stream` through the same `_sse_response`
+  machinery, audit surface `project`, with the project context block as the prompt's
+  ground truth (`MAIN_AGENT_PROMPT` + `_project_context`). Tools are deliberately not
+  offered there. `app/static/project.js` is its client: DOM-built messages, truthful
+  status phases, every turn ends visibly.
+- **The AI summary is real now** — `app/summaries.py` + `ChatProvider.summarize()`
+  (default via `reply()`; the Gemini override makes the no-tools call, same shape as
+  `title()`). Written once, after the first completed exchange, through
+  `ProjectStore.set_summary`; a failed call writes nothing and is not retried. Cards
+  show the summary, else the owner's description, else "No description yet."
+- Status changes from the workspace header (`POST /projects/<id>/status`), audited as
+  `project_status_changed` with from/to. Tasks are added from the map
+  (`POST /projects/<id>/tasks`) and land attached (`Task.project_id`).
+- `tests/test_workspace.py` pins all of it (20 tests), including the empty stream →
+  visible error + audit rule from §1.8.
+
+**Figma note for the next pass:** the owner is designing the Projects/Workspace/Agents
+screens in Figma; embed links hit a login wall from this environment, so frames arrive
+as PNG exports in chat. When they land, reskin `projects.html`, `project.html`,
+`agents.html` and the create dialog — routes, stores and tests should not need to move.

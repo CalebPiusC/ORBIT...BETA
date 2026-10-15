@@ -132,7 +132,7 @@
             <span class="status-badge st-{{ p.status }}"><span class="dot"></span>{{ p.status_label }}</span>
             <span class="pc-source">{{ p.source_label }}</span>
           </div>
-          <h3 class="pc-name">{{ p.name }}</h3>
+          <h3 class="pc-name"><a href="/projects/{{ p.id }}">{{ p.name }}</a></h3>
           {% if p.summary %}
             <p class="pc-desc">{{ p.summary }}</p>
           {% elif p.description %}
@@ -148,6 +148,7 @@
           <div class="pc-footer">
             {% set updated = date_label(p.updated_at) %}
             <span>{% if updated %}Updated {{ updated }}{% else %}Just created{% endif %}</span>
+            <a class="pc-open" href="/projects/{{ p.id }}">Open workspace →</a>
           </div>
         </article>
         {% endfor %}

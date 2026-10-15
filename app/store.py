@@ -52,6 +52,10 @@ class Conversation:
     # anything else names an AgentType from app/agents.py and picks that
     # card's system prompt instead of the plain home prompt.
     agent_id: str = "main"
+    # The project workspace this conversation belongs to, if any. A project
+    # conversation is the Main Agent thread for that project; it renders in
+    # the workspace, never in the home chat history.
+    project_id: str | None = None
 
 
 @dataclass
@@ -204,7 +208,52 @@ class Store:
 
     # ----- per-user scoping (single-user today, every read uses it) -----
     def conversations_for(self, user_id: str = DEFAULT_USER_ID) -> list[Conversation]:
-        return [c for c in self.conversations if c.user_id == user_id]
+        return [
+            c
+            for c in self.conversations
+            if c.user_id == user_id and c.project_id is None
+        ]
+
+    # ----- project conversations (the workspace's Main Agent thread) -----
+    def project_conversation(
+        self,
+        project_id: str,
+        *,
+        create: bool = False,
+        user_id: str = DEFAULT_USER_ID,
+    ) -> Conversation | None:
+        """The one Main Agent conversation a project workspace carries.
+
+        Find-or-create: reading a workspace (GET) never creates anything — the
+        conversation is born when the person sends the first message
+        (``create=True`` from the stream route). It is titled on creation:
+        naming calls belong to the home history, not to a thread that never
+        renders there.
+        """
+        for conv in self.conversations:
+            if conv.project_id == project_id and conv.user_id == user_id:
+                return conv
+        if not create:
+            return None
+        conv = Conversation(
+            id=f"pc-{uuid.uuid4().hex[:10]}",
+            title="Project conversation",
+            group="Today",
+            user_id=user_id,
+            titled=True,
+            project_id=project_id,
+        )
+        self.conversations.insert(0, conv)
+        self.threads[conv.id] = []
+        return conv
+
+    def project_thread(
+        self, project_id: str, user_id: str = DEFAULT_USER_ID
+    ) -> list[ChatMessage]:
+        conv = self.project_conversation(project_id, user_id=user_id)
+        if conv is None:
+            return []
+        return self.threads.get(conv.id, [])
 
     def tasks_for(self, user_id: str = DEFAULT_USER_ID) -> list[Task]:
         return [t for t in self.tasks.values() if t.user_id == user_id]

@@ -35,3 +35,26 @@ WELCOME_STARTERS: tuple[Starter, ...] = (
         "I should fix first.",
     ),
 )
+
+# The workspace's Main Agent thread, when it has no messages yet. Same rule:
+# real prompts the person could have typed, about THIS project — the Main
+# Agent's context block is what makes "this project" mean something.
+PROJECT_STARTERS: tuple[Starter, ...] = (
+    Starter(
+        "Summarize this project",
+        "Tell me what this project is and what state it's in, based on everything "
+        "you know about it.",
+    ),
+    Starter(
+        "What first?",
+        "Look at the tasks on this project's map and tell me which one I should "
+        "start with and why. If the map is empty, help me break the project's goal "
+        "into its first few tasks.",
+    ),
+    Starter(
+        "Plan the next task",
+        "Help me turn the next piece of work for this project into a concrete task "
+        "I can add to the map: what it covers, what done looks like, and what to "
+        "watch out for.",
+    ),
+)

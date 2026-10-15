@@ -68,6 +68,23 @@ def title_request(user_text: str, answer: str) -> str:
     )
 
 
+SUMMARY_SYSTEM_PROMPT = (
+    "You write short project summaries. Reply with only the summary: one or "
+    "two plain sentences about what the project is, no quotes, no label such "
+    "as 'Summary:'."
+)
+
+
+def summary_request(project_name: str, description: str, user_text: str, answer: str) -> str:
+    """The user turn sent with SUMMARY_SYSTEM_PROMPT. Only the first exchange is sent."""
+    return (
+        "Summarize what this project is, from its first exchange.\n\n"
+        f"Project: {project_name[:200]}\n"
+        f"Description from the owner: {description[:500] or '(none)'}\n\n"
+        f"User: {user_text[:1000]}\n\nAssistant: {answer[:1000]}"
+    )
+
+
 class ChatProvider(ABC):
     """The chat-only seam between ORBIT and a language-model provider."""
 
@@ -86,6 +103,22 @@ class ChatProvider(ABC):
         """
         history = [ChatMessage(role="user", content=title_request(user_text, answer))]
         return self.reply(history, TITLE_SYSTEM_PROMPT)
+
+    def summarize(self, project_name: str, description: str, user_text: str, answer: str) -> str:
+        """Return a one-or-two-sentence summary of what a project is.
+
+        One lightweight call, made once per project after its first Main-Agent
+        exchange — the same contract as ``title()``: the default goes through
+        ``reply()``, and a provider that can detach tools should override it,
+        so a summary request can never propose an action.
+        """
+        history = [
+            ChatMessage(
+                role="user",
+                content=summary_request(project_name, description, user_text, answer),
+            )
+        ]
+        return self.reply(history, SUMMARY_SYSTEM_PROMPT)
 
     def reply_stream(
         self,

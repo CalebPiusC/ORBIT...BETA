@@ -1,0 +1,180 @@
+{% extends "layout.html" %}
+{% block title %}orbit — {{ project.name }}{% endblock %}
+{% block body %}
+<div class="screen screen--active" id="screen-project">
+{% include "_sidebar.html" %}
+
+  <div class="page-main ws-main">
+    <div class="ws-grid">
+
+      <section class="ws-work" aria-label="Project work">
+        <nav class="ws-breadcrumb"><a href="/projects">← Projects</a> / {{ project.name }}</nav>
+
+        <header class="ws-head">
+          <div class="ws-head-main">
+            <h1 class="page-title">{{ project.name }}</h1>
+            <div class="ws-meta">
+              <span class="status-badge st-{{ project.status }}"><span class="dot"></span>{{ project.status_label }}</span>
+              <span class="ws-source">{{ project.source_label }}</span>
+              {% set updated = date_label(project.updated_at) %}
+              {% if updated %}<span class="ws-updated">Updated {{ updated }}</span>{% endif %}
+            </div>
+            {% if project.summary %}
+            <p class="ws-desc">{{ project.summary }} <span class="ws-desc-origin">· AI summary by orbit's Main Agent</span></p>
+            {% elif project.description %}
+            <p class="ws-desc">{{ project.description }} <span class="ws-desc-origin">· your description</span></p>
+            {% else %}
+            <p class="ws-desc ws-desc-empty">No description yet — ask the Main Agent to summarize the project once you've talked about it.</p>
+            {% endif %}
+          </div>
+          <form class="ws-status" method="post" action="/projects/{{ project.id }}/status">
+            <label class="field-label" for="wsStatus">Status</label>
+            <div class="ws-status-row">
+              <select class="text-input" id="wsStatus" name="status">
+                {% for key, label in statuses %}
+                <option value="{{ key }}"{% if project.status == key %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn-ghost">Update</button>
+            </div>
+          </form>
+        </header>
+
+        {# ============ A. The Project Map — derived from real run states,
+             nothing seeded or guessed (app/projectmap.py) ============ #}
+        <section class="ws-map" id="map" aria-label="Project map">
+          <div class="ws-section-head">
+            <h2 class="ws-section-title">Project map</h2>
+            <span class="ws-section-sub">{{ task_count }} task{{ 's' if task_count != 1 }}</span>
+          </div>
+          <div class="ws-buckets">
+            {% for bucket in map_buckets %}
+            <div class="ws-bucket">
+              <div class="ws-bucket-head">{{ bucket.label }} <span class="count">{{ bucket.tasks | length }}</span></div>
+              <div class="ws-bucket-body">
+                {% for t in bucket.tasks %}
+                <a class="ws-task-cell{% if selected and selected.id == t.id %} active{% endif %}"
+                   href="/projects/{{ project.id }}?task={{ t.id }}#map">
+                  <span class="ws-task-title">{{ t.title }}</span>
+                  {% if t.has_run %}
+                  <span class="ws-task-progress">{{ t.steps_done }}/{{ t.steps_total }} steps</span>
+                  {% else %}
+                  <span class="ws-task-progress none">Not run yet</span>
+                  {% endif %}
+                </a>
+                {% else %}
+                <span class="ws-bucket-empty">—</span>
+                {% endfor %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+
+          <form class="ws-new-task" method="post" action="/projects/{{ project.id }}/tasks">
+            <input class="text-input" name="request" type="text" required autocomplete="off"
+                   maxlength="400" placeholder="Add a task — say what the work is, e.g. &quot;Fix the crash in checkout.py&quot;" />
+            <button type="submit" class="btn-primary">
+              <svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg>
+              Add task
+            </button>
+          </form>
+        </section>
+
+        {# ============ B. Task Details — only for a task the map opened,
+             and only what actually exists for it ============ #}
+        {% if selected %}
+        <section class="ws-details" id="taskDetails" aria-label="Task details">
+          <div class="ws-section-head">
+            <h2 class="ws-section-title">Task details</h2>
+            <a class="ws-details-close" href="/projects/{{ project.id }}#map">Close ×</a>
+          </div>
+          <h3 class="ws-details-title">{{ selected.title }}</h3>
+          <p class="ws-details-request">{{ selected.description }}</p>
+          {% if panel %}
+          <div class="ws-run">
+            <div class="ws-run-line">Run state: <strong>{{ panel.operation }}</strong>{% if panel.approved %} · approved{% endif %}{% if panel.applied %} · applied{% endif %}</div>
+            {% if panel.steps %}
+            <ol class="ws-steps">
+              {% for step in panel.steps %}
+              <li class="ws-step st-{{ step.status }}">
+                <span class="ws-step-title">{{ step.title }}</span>
+                {% if step.evidence %}<span class="ws-step-evidence">“{{ step.evidence }}”</span>{% endif %}
+              </li>
+              {% endfor %}
+            </ol>
+            {% endif %}
+            {% if panel.activity %}
+            <div class="ws-activity">
+              {% for row in panel.activity[:6] %}
+              <div class="ws-activity-row"><span class="ws-activity-text">{{ row.text }}</span><span class="ws-activity-time">{{ row.time }}</span></div>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+          {% else %}
+          <p class="ws-no-run">This task hasn't run yet. Open it in the Builder to start the work.</p>
+          {% endif %}
+          <a class="btn-ghost" href="/task/{{ selected.id }}">Open this task in the Builder →</a>
+        </section>
+        {% endif %}
+      </section>
+
+      {# ============ C. The Main Agent conversation — project-centred,
+           streamed; the same seam and audit as every other chat ============ #}
+      <aside class="ws-agent" aria-label="Main Agent">
+        <div class="ws-agent-head">
+          <h2 class="ws-section-title">Main Agent</h2>
+          <p class="ws-agent-sub">Ask about this project, plan its work, or shape the next task. The context is {{ project.name }} — nothing else leaks in.</p>
+        </div>
+
+        <div class="ws-thread" id="wsThread" aria-live="polite" aria-atomic="false">
+          {% if thread %}
+            {% for msg in thread %}
+            <div class="chat-row {% if msg.is_orbit %}orbit{% else %}user{% endif %}"{% if msg.id %} data-message-id="{{ msg.id }}"{% endif %}>
+              <div class="chat-bubble {% if msg.is_orbit %}orbit{% else %}user{% endif %}">
+                {% if msg.is_orbit %}
+                <div class="body"><img class="orbit-icon" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" /><span class="reply">{{ msg.body }}</span></div>
+                {% else %}
+                <div class="body">{{ msg.body }}</div>
+                {% endif %}
+              </div>
+              <div class="chat-meta">{{ msg.time }}</div>
+            </div>
+            {% endfor %}
+          {% else %}
+          <div class="ws-thread-empty">
+            <img class="empty-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+            <p>No conversation yet — this thread is about <strong>{{ project.name }}</strong> only.</p>
+            <div class="ws-chips">
+              {% for starter in starters %}
+              <button type="button" class="ws-chip" data-prompt="{{ starter.prompt }}">{{ starter.label }}</button>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="ws-turn-status" id="wsTurnStatus" role="status" aria-live="polite" hidden>
+          <img class="ws-turn-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+          <span id="wsTurnStatusText">Thinking…</span>
+        </div>
+
+        <div class="ws-followups ws-chips" id="wsFollowups">
+          {% for chip in followups %}
+          <button type="button" class="ws-chip" data-prompt="{{ chip.prompt }}">{{ chip.label }}</button>
+          {% endfor %}
+        </div>
+
+        <form class="ws-composer" id="wsComposer" data-project-id="{{ project.id }}">
+          <textarea class="text-input" id="wsInput" rows="2" required
+                    placeholder="Talk to the Main Agent about {{ project.name }}…"></textarea>
+          <button type="submit" class="btn-primary" id="wsSend">Send</button>
+          <noscript><p class="ws-noscript">The Main Agent conversation needs JavaScript — replies stream in live.</p></noscript>
+        </form>
+      </aside>
+
+    </div>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='project.js') }}"></script>
+{% endblock %}
