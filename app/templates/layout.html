@@ -3,41 +3,61 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>{% block title %}ORBIT{% endblock %}</title>
+<title>{% block title %}orbit{% endblock %}</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='orbit-mark.svg') }}" />
+<!-- Space Grotesk + Inter (product brief, Part 2). The system stacks behind
+     them keep the app fully usable where fonts cannot be fetched — the layout
+     never depends on the webfont arriving. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
 <style>
   /* ===========================================================
-     ORBIT — home screen + coding-agent task view, in dark blue.
+     orbit — home screen + coding-agent task view, in dark blue.
      Accent tokens match design/orbit_mockup.html exactly; keep them
      in sync with the visual system.
      =========================================================== */
 
   :root {
-    /* Brand surfaces */
-    --bg: #10131C;            /* Midnight Navy — main background */
-    --bg-raised: #141925;     /* Sidebar Navy — sidebar */
-    --bg-sunken: #10131C;     /* inset surfaces (Midnight Navy) */
-    --bg-card: #1B202B;       /* Deep Slate — inputs, cards, panels */
-    --border: #2B303B;        /* Border Grey */
-    --border-soft: rgba(43, 48, 59, 0.6);  /* Border Grey, subtler separators */
+    /* Brand surfaces — warm charcoal, never blue-tinted. The product brief's
+       identity pass (2026-10-15) retired the blue palette: blue kept bleeding
+       into backgrounds and competing with the accent. */
+    --bg: #141210;            /* Charcoal — main background */
+    --bg-raised: #1B1916;     /* Raised charcoal — sidebar */
+    --bg-sunken: #100E0C;     /* inset surfaces */
+    --bg-card: #221F1B;       /* Card charcoal — inputs, cards, panels */
+    --border: #383430;        /* Warm border grey */
+    --border-soft: rgba(56, 52, 48, 0.55);  /* subtler separators */
     /* Text */
     --text: #F4F0EA;          /* Warm White — primary text, wordmark */
-    --text-dim: #A09FA8;      /* Ash Grey — secondary text */
-    --text-faint: #A09FA8;    /* Ash Grey — muted text (kept AA-readable) */
-    /* Brand accent — dark blue. Light text (--text) sits on --accent. */
-    --accent: #1f4a8f;        /* Dark blue — user bubble fill, primary buttons */
-    --accent-bright: #6b98de; /* Light blue — active labels, Orbit icon (AA on the navy surfaces) */
-    --accent-dim: #16336a;    /* Deeper blue — borders, thinking-block edge */
-    --accent-wash: rgba(31, 74, 143, 0.22); /* selected background */
-    --accent-soft: rgba(31, 74, 143, 0.45); /* focus ring */
+    --text-dim: #ACA69C;      /* Ash — secondary text */
+    --text-faint: #ACA69C;    /* Ash — muted text (kept AA-readable) */
+    /* Brand accent — copper / burnt amber, used sparingly and deliberately:
+       primary CTAs, active states, the orbit mark, key status highlights.
+       A mid-tone copper pairs with near-black text (--on-accent): at this
+       luminance neither cream (~2.8:1) nor slightly-blackened copper passes
+       AA with light text, so fills get dark ink. */
+    --accent: #C87F3F;        /* Burnt amber — user bubble fill, primary buttons */
+    --on-accent: #1B1208;     /* Near-black text on copper fills (AA) */
+    --accent-bright: #E2A97A; /* Light copper — active labels, the orbit mark */
+    --accent-dim: #7C5326;    /* Deep copper — borders, thinking-block edge */
+    --accent-wash: rgba(200, 127, 63, 0.16); /* selected background */
+    --accent-soft: rgba(200, 127, 63, 0.45); /* focus ring */
     /* Functional status colors — kept distinct from brand */
     --green: #78B88A;         /* Success */
     --amber: #E5B567;         /* Warning */
     --red: #E17D7D;           /* Error */
     --red-wash: rgba(225, 125, 125, 0.12);
-    --radius: 10px;
-    --radius-sm: 7px;
-    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    --radius: 16px;           /* standardized card/panel/bubble/modal radius */
+    --radius-sm: 10px;
+    /* Soft drop-shadow elevation instead of hard 1px borders. */
+    --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.35);
+    --shadow-pop: 0 10px 34px rgba(0, 0, 0, 0.5);
+    /* Space Grotesk carries the wordmark, section headers and card titles;
+       Inter carries everything else. Weight contrast is deliberate — nothing
+       flattens to one weight. */
+    --font-display: "Space Grotesk", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; font-size: 14px; }
@@ -50,7 +70,7 @@
     background: var(--bg-raised); border-right: 1px solid var(--border-soft);
     display: flex; flex-direction: column; padding: 14px 10px;
   }
-  .sidebar-brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 16px; font-weight: 700; letter-spacing: 0.05em; }
+  .sidebar-brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 16px; font-weight: 600; letter-spacing: 0.01em; font-family: var(--font-display); }
   /* The wordmark and favicon share the same orbital SVG mark. */
   .brand-mark { display: block; width: 18px; height: 18px; flex-shrink: 0; }
 
@@ -116,7 +136,7 @@
     padding: 6px 16px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
     display: flex; align-items: center; gap: 6px;
   }
-  .mode-toggle button.active { background: var(--accent); color: var(--text); font-weight: 600; }
+  .mode-toggle button.active { background: var(--accent); color: var(--on-accent); font-weight: 600; }
   .mode-toggle button.active:hover { filter: brightness(1.15); }
   .home-topbar-controls { display: flex; align-items: center; justify-content: center; gap: 8px; }
   .thinking-toggle button { padding: 6px 10px; font-size: 11px; }
@@ -164,7 +184,7 @@
     transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
   }
   .welcome-action:hover, .welcome-action:focus-visible {
-    color: var(--text); border-color: rgba(107,152,222,0.45); background: rgba(107,152,222,0.06);
+    color: var(--text); border-color: rgba(107,152,222,0.45); background: var(--accent-wash);
   }
 
   /* The live status line: what the turn is actually doing, in words. */
@@ -273,7 +293,7 @@
   .voice-view-transcript { color: var(--text-faint); font-size: 13px; }
   .voice-view-reply { color: var(--text-dim); font-size: 14px; }
   .voice-view-reply::before {
-    content: "ORBIT"; display: block; margin-bottom: 4px; color: var(--accent-bright);
+    content: "orbit"; display: block; margin-bottom: 4px; color: var(--accent-bright);
     font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
   }
   .voice-view-transcript[hidden], .voice-view-reply[hidden] { display: none; }
@@ -284,7 +304,7 @@
   .reply-audio { display: block; width: min(320px, 100%); height: 34px; margin-top: 6px; }
   .send-btn-round {
     width: 32px; height: 32px; border-radius: 50%;
-    background: var(--accent); border: none; color: var(--text);
+    background: var(--accent); border: none; color: var(--on-accent);
     display: flex; align-items: center; justify-content: center; cursor: pointer;
     /* The mockup drew this as a div; as a real <button> it must not inherit
        the browser's button font/padding, and it needs a visible focus ring. */
@@ -385,7 +405,7 @@
   .task-start-actions { display: flex; align-items: center; gap: 9px; margin-top: 10px; }
   .start-task-btn {
     font: inherit; font-size: 12px; font-weight: 600; padding: 7px 15px; border-radius: var(--radius-sm);
-    border: none; background: var(--accent); color: var(--text); cursor: pointer;
+    border: none; background: var(--accent); color: var(--on-accent); cursor: pointer;
   }
   .start-task-btn:hover:not(:disabled) { filter: brightness(1.15); }
   .start-task-btn:disabled { opacity: 0.6; cursor: default; }
@@ -475,7 +495,7 @@
     display: flex; flex-direction: column;
   }
   .chat-bubble.user {
-    background: var(--accent); color: var(--text);
+    background: var(--accent); color: var(--on-accent);
     border-bottom-right-radius: 3px;
   }
   .chat-bubble.orbit {
@@ -597,7 +617,7 @@
   }
   .action-buttons button:hover { color: var(--text); border-color: var(--accent-dim); }
   .action-buttons button:disabled { opacity: 0.5; cursor: default; }
-  .action-buttons .action-approve { background: var(--accent); border-color: var(--accent); color: var(--text); }
+  .action-buttons .action-approve { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   .action-buttons button:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
   .action-result { margin-top: 8px; font-size: 12px; color: var(--text-dim); }
   .action-card[data-state="approved"] .action-result { color: var(--green); }
@@ -842,6 +862,190 @@
     .task-work-head { flex-wrap: wrap; gap: 8px; }
     .task-status-bar { gap: 10px; padding: 7px 12px; font-size: 10px; }
   }
+  /* =====================================================================
+     ORBIT Projects — the product IA from the 2026-10-15 brief. These pages
+     set the visual standard the older screens migrate to: 16px radii, soft
+     shadow elevation, one outline icon set (1.5px stroke, round caps),
+       Space Grotesk display type over Inter.
+       ===================================================================== */
+  .page-main {
+    flex: 1; min-width: 0; overflow-y: auto;
+    padding: 34px 40px 60px;
+  }
+  .page-wrap { max-width: 1060px; margin: 0 auto; }
+  .page-eyebrow {
+    margin: 0 0 6px; font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--accent-bright); font-weight: 600;
+  }
+  .page-title { margin: 0; font-family: var(--font-display); font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+  .page-sub { margin: 7px 0 0; color: var(--text-faint); font-size: 13.5px; }
+  .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+  .page-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--accent); color: var(--on-accent); border: none; border-radius: var(--radius);
+    padding: 10px 16px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none;
+  }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-primary svg { width: 15px; height: 15px; }
+  .btn-ghost {
+    display: inline-flex; align-items: center; gap: 7px; background: transparent;
+    border: 1px solid var(--border); color: var(--text-dim); border-radius: var(--radius);
+    padding: 10px 14px; font: inherit; font-size: 13px; cursor: pointer; text-decoration: none;
+  }
+  .btn-ghost:hover { color: var(--text); border-color: var(--accent-dim); }
+
+  /* Toolbar: search + the brief's four-bucket status filter. */
+  .projects-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 22px; }
+  .search-field {
+    display: flex; align-items: center; gap: 8px; flex: 1; min-width: 220px; max-width: 340px;
+    background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: var(--radius);
+    padding: 9px 13px; color: var(--text-faint);
+  }
+  .search-field:focus-within { border-color: var(--accent-dim); }
+  .search-field svg { width: 15px; height: 15px; flex-shrink: 0; }
+  .search-field input {
+    flex: 1; min-width: 0; background: none; border: none; outline: none;
+    color: var(--text); font: inherit; font-size: 13px;
+  }
+  .filter-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .filter-chip {
+    display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
+    padding: 7px 12px; border-radius: 999px; font-size: 12px; font-weight: 500;
+    color: var(--text-dim); border: 1px solid var(--border-soft); background: transparent;
+  }
+  .filter-chip:hover { color: var(--text); border-color: var(--border); }
+  .filter-chip.active { background: var(--accent-wash); border-color: var(--accent-dim); color: var(--accent-bright); }
+  .filter-chip .count { font-size: 11px; opacity: 0.75; }
+
+  .notice-bar {
+    display: flex; align-items: flex-start; gap: 9px; margin-bottom: 18px;
+    background: var(--accent-wash); border: 1px solid var(--accent-dim); border-radius: var(--radius);
+    color: var(--accent-bright); padding: 11px 14px; font-size: 13px; line-height: 1.5;
+  }
+  .notice-bar svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; }
+
+  /* The creation panel — a details element so it works without JS; the
+     server re-renders it open when a submission needs an answer. */
+  .create-panel {
+    margin-bottom: 24px; background: var(--bg-card); border-radius: var(--radius);
+    box-shadow: var(--shadow-card); overflow: hidden;
+  }
+  .create-panel > summary {
+    list-style: none; cursor: pointer; padding: 14px 18px;
+    display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 13.5px;
+    color: var(--text);
+  }
+  .create-panel > summary::-webkit-details-marker { display: none; }
+  .create-panel > summary svg { width: 15px; height: 15px; transition: transform 0.15s ease; }
+  .create-panel[open] > summary svg { transform: rotate(45deg); }
+  .create-panel > summary .summary-hint { font-weight: 400; color: var(--text-faint); font-size: 12px; margin-left: auto; }
+  .create-body { padding: 4px 18px 18px; border-top: 1px solid var(--border-soft); }
+  .create-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding-top: 14px; }
+  @media (max-width: 720px) { .create-grid { grid-template-columns: 1fr; } }
+  .field-label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--text-dim); }
+  .field-hint { font-size: 11.5px; color: var(--text-faint); margin-top: 5px; line-height: 1.5; }
+  .text-input, .text-area {
+    width: 100%; background: var(--bg-sunken); border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm); color: var(--text); font: inherit; font-size: 13px;
+    padding: 9px 12px; outline: none;
+  }
+  .text-area { resize: vertical; min-height: 74px; }
+  .text-input:focus, .text-area:focus { border-color: var(--accent-dim); }
+  .source-list { display: flex; flex-direction: column; gap: 7px; }
+  .source-option {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+    border: 1px solid var(--border-soft); border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .source-option:hover { border-color: var(--border); }
+  .source-option input { accent-color: var(--accent); margin: 0; }
+  .source-option svg { width: 16px; height: 16px; color: var(--text-dim); flex-shrink: 0; }
+  .source-option .source-name { font-size: 13px; font-weight: 500; }
+  .source-option .source-note { font-size: 11.5px; color: var(--text-faint); }
+  .source-option .source-badge {
+    margin-left: auto; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-faint);
+    white-space: nowrap;
+  }
+  /* Unconnected entry points are visible and discoverable — just not
+     selectable. Nothing pretends to import. */
+  .source-option.disabled { opacity: 0.55; cursor: not-allowed; }
+  .source-option.disabled:hover { border-color: var(--border-soft); }
+  .source-option .source-badge.available { color: var(--green); border-color: var(--green); }
+  .create-actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+
+  /* Project cards: the three-tier hierarchy from the brief — bold primary
+     label, muted secondary line, status set apart. */
+  .projects-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .project-card {
+    display: flex; flex-direction: column; gap: 10px;
+    background: var(--bg-card); border-radius: var(--radius); padding: 18px;
+    box-shadow: var(--shadow-card);
+  }
+  .pc-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;
+    padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  .status-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .status-badge.st-live { color: var(--green); border-color: var(--green); }
+  .status-badge.st-building { color: var(--accent-bright); border-color: var(--accent-dim); }
+  .status-badge.st-archived { color: var(--text-faint); }
+  .status-badge.st-idea { color: var(--amber); border-color: var(--amber); }
+  .pc-source { font-size: 11px; color: var(--text-faint); }
+  .pc-name { margin: 0; font-family: var(--font-display); font-size: 16.5px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+  .pc-desc { margin: 0; color: var(--text-dim); font-size: 13px; line-height: 1.55; flex: 1; overflow-wrap: anywhere; }
+  .pc-desc.empty { color: var(--text-faint); font-style: italic; }
+  .pc-langs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pc-lang { font-size: 11px; color: var(--text-dim); border: 1px solid var(--border-soft); border-radius: 999px; padding: 3px 9px; }
+  .pc-footer { display: flex; align-items: center; justify-content: space-between; color: var(--text-faint); font-size: 11.5px; border-top: 1px solid var(--border-soft); padding-top: 11px; }
+
+  /* Empty states: a real path forward, not a dead grid (brief §7). */
+  .empty-state {
+    text-align: center; padding: 60px 30px; background: var(--bg-card);
+    border-radius: var(--radius); box-shadow: var(--shadow-card);
+  }
+  .empty-state .empty-mark { width: 54px; height: 54px; margin-bottom: 16px; opacity: 0.9; }
+  .empty-state h2 { margin: 0 0 8px; font-family: var(--font-display); font-size: 20px; font-weight: 600; }
+  .empty-state p { margin: 0 auto 18px; max-width: 460px; color: var(--text-faint); font-size: 13.5px; line-height: 1.6; }
+
+  /* Agents page: a grid of specializations, each one a real system prompt. */
+  .agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .agent-card {
+    display: flex; flex-direction: column; gap: 12px;
+    background: var(--bg-card); border-radius: var(--radius); padding: 20px;
+    box-shadow: var(--shadow-card);
+  }
+  .agent-head { display: flex; align-items: center; gap: 12px; }
+  .agent-icon {
+    width: 38px; height: 38px; border-radius: 12px; flex-shrink: 0;
+    background: var(--accent-wash); border: 1px solid var(--accent-dim);
+    display: flex; align-items: center; justify-content: center; color: var(--accent-bright);
+  }
+  .agent-icon svg { width: 19px; height: 19px; }
+  .agent-name { font-family: var(--font-display); font-size: 16px; font-weight: 600; }
+  .agent-role { font-size: 12.5px; color: var(--text-faint); margin-top: 2px; }
+  .agent-detail { margin: 0; color: var(--text-dim); font-size: 13px; line-height: 1.6; flex: 1; }
+  .agent-starters { display: flex; flex-direction: column; gap: 5px; }
+  .agent-starters .starters-label { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); font-weight: 600; margin-bottom: 2px; }
+  .agent-starter { font-size: 12px; color: var(--text-dim); padding: 6px 10px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); }
+  .agent-start { align-self: flex-start; }
+  .agent-start button { display: inline-flex; align-items: center; gap: 7px; background: var(--accent); color: var(--on-accent); border: none; border-radius: var(--radius); padding: 9px 15px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+  .agent-start button:hover { filter: brightness(1.08); }
+  .agent-start svg { width: 14px; height: 14px; }
+
+  /* Inline SVG icon set: one stroke weight, one corner rounding, everywhere. */
+  .oi { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .sidebar-nav-icon { display: inline-flex; align-items: center; justify-content: center; min-width: 15px; }
+  .sidebar-nav-icon svg { width: 15px; height: 15px; }
+
+  @media (max-width: 900px) {
+    .page-main { padding: 24px 18px 44px; }
+    .page-head { flex-direction: column; align-items: flex-start; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
   }

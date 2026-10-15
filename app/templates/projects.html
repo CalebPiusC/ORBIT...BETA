@@ -1,0 +1,174 @@
+{% extends "layout.html" %}
+{% block title %}orbit — Projects{% endblock %}
+{% block body %}
+<div class="screen screen--active" id="screen-projects">
+{% include "_sidebar.html" %}
+
+  <div class="page-main">
+    <div class="page-wrap">
+
+      <header class="page-head">
+        <div>
+          <p class="page-eyebrow">Workspace</p>
+          <h1 class="page-title">Projects</h1>
+          <p class="page-sub">
+            {% if total == 1 %}1 project{% else %}{{ total }} projects{% endif %}
+            — everything you're building, in one place.
+          </p>
+        </div>
+        <div class="page-actions">
+          <a class="btn-primary" href="#create">
+            <svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg>
+            New project
+          </a>
+        </div>
+      </header>
+
+      {% if notice %}
+      <div class="notice-bar" role="status">
+        <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v4.5M12 15.8v.2"/></svg>
+        <span>{{ notice }}</span>
+      </div>
+      {% endif %}
+
+      {# Creation panel: a details element, so it opens and submits with no
+         JavaScript at all. Opened by default when a submission needs an
+         answer (a notice above), or when there is nothing to look at yet. #}
+      <details class="create-panel" id="create"{% if notice or total == 0 %} open{% endif %}>
+        <summary>
+          <svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg>
+          Create or import a project
+          <span class="summary-hint">No GitHub account needed to start — create inside orbit.</span>
+        </summary>
+        <div class="create-body">
+          <form method="post" action="/projects">
+            <div class="create-grid">
+              <div>
+                <label class="field-label" for="projectName">Project name</label>
+                <input class="text-input" id="projectName" name="name" type="text"
+                       maxlength="80" required autocomplete="off"
+                       placeholder="e.g. whatsapp-ordering-bot" />
+                <div class="field-label" style="margin-top:14px;">
+                  <label class="field-label" for="projectDesc" style="margin-bottom:0;">Description <span style="font-weight:400; color:var(--text-faint);">(optional)</span></label>
+                </div>
+                <textarea class="text-area" id="projectDesc" name="description"
+                          maxlength="600"
+                          placeholder="One or two sentences about what it does. orbit writes the AI summary later, from your real workspace conversations."></textarea>
+                <p class="field-hint">The description is yours; the AI summary is written by the Main Agent once the project has one — never guessed.</p>
+              </div>
+              <div>
+                <span class="field-label">Where the project comes from</span>
+                <div class="source-list">
+                  {% for key, label in sources %}
+                  <label class="source-option{% if key not in live_sources %} disabled{% endif %}"
+                         {% if key not in live_sources %}title="Not connected yet — visible so you know it's coming"{% endif %}>
+                    <input type="radio" name="source" value="{{ key }}"
+                           {% if key == 'new' %}checked{% endif %}
+                           {% if key not in live_sources %}disabled{% endif %} />
+                    {% if key == 'new' %}
+                    <svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg>
+                    {% elif key == 'local' %}
+                    <svg class="oi" viewBox="0 0 24 24"><path d="M3.5 7.3c0-.7.6-1.3 1.3-1.3h4.2l2 2.2h8.2c.7 0 1.3.6 1.3 1.3v7.2c0 .7-.6 1.3-1.3 1.3H4.8c-.7 0-1.3-.6-1.3-1.3Z"/></svg>
+                    {% elif key == 'zip' %}
+                    <svg class="oi" viewBox="0 0 24 24"><rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M9 7h2M11 9H9M9 11h2M11 13H9M9 15h2v3H9z"/></svg>
+                    {% else %}
+                    <svg class="oi" viewBox="0 0 24 24"><circle cx="6.5" cy="6" r="2.2"/><circle cx="6.5" cy="18" r="2.2"/><circle cx="17.5" cy="8" r="2.2"/><path d="M6.5 8.2v7.6M17.5 10.2c0 3.6-3 5.3-6.4 5.3"/></svg>
+                    {% endif %}
+                    <span>
+                      <span class="source-name">{{ label }}</span>
+                      {% if key == 'new' %}
+                        <span class="source-note"> · start empty, build inside orbit</span>
+                      {% endif %}
+                    </span>
+                    {% if key in live_sources %}
+                      <span class="source-badge available">Available</span>
+                    {% else %}
+                      <span class="source-badge">Not connected</span>
+                    {% endif %}
+                  </label>
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+            <div class="create-actions">
+              <button type="submit" class="btn-primary">
+                <svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg>
+                Create project
+              </button>
+            </div>
+          </form>
+        </div>
+      </details>
+
+      {# Search + the brief's filter: Live / Build in Progress / Archived /
+         Saved Ideas. Chips keep the current search; the search keeps the
+         current chip. #}
+      <div class="projects-toolbar">
+        <form class="search-field" method="get" action="/projects">
+          <svg class="oi" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.3-4.3"/></svg>
+          <input type="search" name="q" value="{{ query }}" placeholder="Search projects"
+                 autocomplete="off" aria-label="Search projects" />
+          {% if active_status %}<input type="hidden" name="status" value="{{ active_status }}" />{% endif %}
+        </form>
+        <nav class="filter-chips" aria-label="Filter by status">
+          <a class="filter-chip{% if not active_status %} active{% endif %}"
+             href="/projects{% if query %}?q={{ query | urlencode }}{% endif %}">
+            All <span class="count">{{ total }}</span>
+          </a>
+          {% for key, label in statuses %}
+          <a class="filter-chip{% if active_status == key %} active{% endif %}"
+             href="/projects?status={{ key }}{% if query %}&q={{ query | urlencode }}{% endif %}">
+            {{ label }} <span class="count">{{ counts[key] }}</span>
+          </a>
+          {% endfor %}
+        </nav>
+      </div>
+
+      {% if projects %}
+      <div class="projects-grid">
+        {% for p in projects %}
+        <article class="project-card">
+          <div class="pc-head">
+            <span class="status-badge st-{{ p.status }}"><span class="dot"></span>{{ p.status_label }}</span>
+            <span class="pc-source">{{ p.source_label }}</span>
+          </div>
+          <h3 class="pc-name">{{ p.name }}</h3>
+          {% if p.summary %}
+            <p class="pc-desc">{{ p.summary }}</p>
+          {% elif p.description %}
+            <p class="pc-desc">{{ p.description }}</p>
+          {% else %}
+            <p class="pc-desc empty">No description yet.</p>
+          {% endif %}
+          {% if p.languages %}
+          <div class="pc-langs">
+            {% for lang in p.languages %}<span class="pc-lang">{{ lang }}</span>{% endfor %}
+          </div>
+          {% endif %}
+          <div class="pc-footer">
+            {% set updated = date_label(p.updated_at) %}
+            <span>{% if updated %}Updated {{ updated }}{% else %}Just created{% endif %}</span>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+      {% elif total > 0 %}
+      <div class="empty-state">
+        <h2>Nothing matches this view</h2>
+        <p>No projects fit the current search and filter.</p>
+        <a class="btn-ghost" href="/projects">Clear search and filters</a>
+      </div>
+      {% else %}
+      {# The first run: the path forward is the creation panel above, which
+         opens on its own in this state. #}
+      <div class="empty-state">
+        <img class="empty-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+        <h2>No projects yet</h2>
+        <p>Create your first project inside orbit — no external account needed. Imports from GitHub, GitLab, Bitbucket, a local folder, or a ZIP are listed above and marked honestly until they're connected.</p>
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+</div>
+{% endblock %}

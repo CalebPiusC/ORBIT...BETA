@@ -48,6 +48,10 @@ class Conversation:
     # Whether the one-time naming call has been made. It is made once, after
     # the first completed exchange, whether or not it succeeds.
     titled: bool = False
+    # Which agent brief the conversation runs under. "main" is the default;
+    # anything else names an AgentType from app/agents.py and picks that
+    # card's system prompt instead of the plain home prompt.
+    agent_id: str = "main"
 
 
 @dataclass
@@ -109,6 +113,9 @@ class Task:
     applied: bool = False
     last_turn_prompt: str | None = None
     last_turn_initial: bool = False
+    # The project this task belongs to, if any. Tasks created from a project's
+    # workspace carry its id, which is what the Project Map renders from.
+    project_id: str | None = None
 
 
 @dataclass
@@ -202,6 +209,16 @@ class Store:
     def tasks_for(self, user_id: str = DEFAULT_USER_ID) -> list[Task]:
         return [t for t in self.tasks.values() if t.user_id == user_id]
 
+    def tasks_for_project(self, project_id: str, user_id: str = DEFAULT_USER_ID) -> list[Task]:
+        """The tasks one project's workspace renders, newest first."""
+        tasks = [
+            t
+            for t in self.tasks.values()
+            if t.project_id == project_id and t.user_id == user_id
+        ]
+        tasks.sort(key=lambda t: t.id, reverse=True)
+        return tasks
+
     # ----- conversations -----
     @property
     def home_thread(self) -> list[ChatMessage]:
@@ -216,17 +233,20 @@ class Store:
                 return conv
         return None
 
-    def start_conversation(self) -> Conversation:
+    def start_conversation(self, agent_id: str = "main") -> Conversation:
         """Create the conversation the first send belongs to, and make it active.
 
         It goes to the top of the Today group. It keeps the placeholder title
-        until the naming call lands.
+        until the naming call lands. ``agent_id`` is the Agents-page card the
+        conversation started from (or "main" for the default assistant) — the
+        chat route picks the matching system prompt from it.
         """
         conv = Conversation(
             id=f"h-{uuid.uuid4().hex[:10]}",
             title=PLACEHOLDER_TITLE,
             group="Today",
             user_id=self.user.id,
+            agent_id=agent_id,
         )
         self.conversations.insert(0, conv)
         self.threads[conv.id] = []
@@ -318,12 +338,13 @@ class Store:
     def get_task(self, task_id: str) -> Task | None:
         return self.tasks.get(task_id)
 
-    def create_task(self, request: str) -> Task:
+    def create_task(self, request: str, project_id: str | None = None) -> Task:
         """A task from a request the person typed.
 
         The title comes from the request itself (no model call for a heading),
         and the task starts with no run: the Agent panel appears once it runs
-        and plans its checklist from this text.
+        and plans its checklist from this text. ``project_id`` attaches the
+        task to a project workspace's map; unattached tasks stay standalone.
         """
         text = " ".join((request or "").split())
         if not text:
@@ -337,6 +358,7 @@ class Store:
             description=text,
             activity=[Activity(text="Task created from your request.", time=now_label())],
             chat=[],
+            project_id=project_id,
         )
         self.tasks[task_id] = task
         return task

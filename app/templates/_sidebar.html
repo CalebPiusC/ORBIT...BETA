@@ -6,7 +6,7 @@
    layout.html's <head> applies it before first paint. #}
 <div class="sidebar" id="sidebar">
   <div class="sidebar-head">
-    <div class="sidebar-brand"><img class="brand-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" /><span class="brand-word">ORBIT</span></div>
+    <div class="sidebar-brand"><img class="brand-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" /><span class="brand-word">orbit</span></div>
     <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-pressed="false"
             aria-label="Collapse sidebar" title="Collapse sidebar"><span aria-hidden="true">«</span></button>
   </div>
@@ -25,6 +25,8 @@
   </div>
 
   <div class="sidebar-nav">
+    <a class="sidebar-nav-item{% if projects_active %} active{% endif %}" id="projectsLink" href="/projects" title="Projects"><span class="sidebar-nav-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><rect x="3.5" y="4" width="7" height="7" rx="1.8"/><rect x="13.5" y="4" width="7" height="7" rx="1.8"/><rect x="3.5" y="14" width="7" height="6.5" rx="1.8"/><rect x="13.5" y="14" width="7" height="6.5" rx="1.8"/></svg></span><span class="sidebar-label">Projects</span></a>
+    <a class="sidebar-nav-item{% if agents_active %} active{% endif %}" id="agentsLink" href="/agents" title="Agents"><span class="sidebar-nav-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><circle cx="5.5" cy="16.5" r="2.5"/><circle cx="18.5" cy="16.5" r="2.5"/><path d="M10 10.7 6.6 14.3M14 10.7l3.4 3.6"/></svg></span><span class="sidebar-label">Agents</span></a>
     <a class="sidebar-nav-item{% if analytics_active %} active{% endif %}" id="analyticsLink" href="/analytics" title="Analytics"><span class="sidebar-nav-icon" aria-hidden="true">◔</span><span class="sidebar-label">Analytics</span></a>
   </div>
 

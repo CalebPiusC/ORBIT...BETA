@@ -558,3 +558,55 @@ themselves.
 - The view (`GET /analytics`) is neutral by construction: counts, days and shares, with no
   streak, comparison, target or "you should" wording. A missing log is reported as having
   nothing to count, not as a failure.
+
+### 5.6 ORBIT Projects: the product rebrand and the Projects backbone (2026-10-15)
+
+The owner delivered a product brief (`orbit-product-brief.md`, kept in chat, not in the
+repo) that turns ORBIT into "a full project for people to use": a **Projects page**, a
+per-project **workspace** (Project Map + Task Details + Main Agent conversation), and a
+separate **Agents page**, under a new visual identity. The owner's explicit decisions:
+
+- **"All old design leaves."** This is the explicit proposal §1.4 requires before
+  conflicting with `design/orbit_mockup.html`. The mockup's *brand layer* was updated
+  (blue → copper on charcoal); its screen structure still stands for the home/task
+  screens until their Projects migration lands. The brief's brand rules are now pinned
+  by tests: `PaletteAndBubbleTests` asserts the accent is copper (blue smallest channel),
+  surfaces are never blue-tinted (B ≤ R), copper fills carry near-black `--on-accent`
+  ink at AA contrast, and layout↔mockup tokens still match. **Do not reintroduce blue
+  without a new explicit decision from the owner.**
+- **Imports are UI-only, none wired.** Every brief entry point (GitHub, GitLab,
+  Bitbucket, local folder, ZIP) renders in the creation dialog; only "New project"
+  works. Unconnected sources are disabled in the UI *and* refused in
+  `ProjectStore.create` (`SourceUnavailable` → audit `project_import_unavailable`,
+  nothing stored) — the enforcement is in the store, not in the disabled radio.
+- **Persistence: yes, chosen by the builder (owner: "i don't know").** Projects use the
+  repo's own convention: `app/projects.ProjectStore` over `memory.jsonstore.JsonStore` at
+  `runtime/projects.json` (git-ignored). `create_app()` defaults to in-memory so tests
+  never touch `runtime/`; `run_app` swaps in the file (override: `ORBIT_PROJECTS_PATH`).
+
+What exists now, and the rules that protect it:
+
+- `app/projects.py` — `Project` + `ProjectStore`. Statuses are exactly the brief's
+  filter: `live` / `building` / `archived` / `idea` → Live / Build in Progress /
+  Archived / Saved Ideas; a test pins the labels verbatim. `summary` is written only by
+  `set_summary` (the Main Agent's seam) — until then cards show the owner's description
+  or an honest "No description yet." Never generated at render time.
+- `app/agents.py` — the Agents-page registry: four agent **types** (Builder, Debugger,
+  Researcher, Planner), each a real system prompt + real starter prompts. Moon names
+  stay reserved for model slots (`providers/personas.py`); a test keeps the two from
+  conflating. Cards may not claim capabilities the seam lacks (no "browses the web",
+  no "runs your tests") — pinned by `test_agents.py`.
+- Routes: `GET /projects`, `POST /projects` (form, 303 redirect, honest `?notice=` for
+  refused imports and invalid input), `GET /agents`, `POST /agents/<id>/start` (starts a
+  conversation carrying `agent_id`; `api_chat` swaps in that card's system prompt —
+  tools, gating, history, and audit are untouched).
+- `Store.Conversation.agent_id` and `Store.Task.project_id` thread the new seams;
+  `tasks_for_project` feeds the future Project Map.
+- Typography: Space Grotesk (display) + Inter (body) via Google Fonts with system
+  fallbacks; the wordmark is lowercase "orbit" on every branding surface, including the
+  `ORBIT` eyebrow label that used to render above voice replies.
+
+Not built yet (next passes, in order): the project **workspace** route + Project Map +
+Task Details + project-scoped Main Agent chat; status changes from the UI; the light
+theme; sidebar/history rework so project-less conversations have a home in the new IA;
+the home/task screens' migration into the IA.

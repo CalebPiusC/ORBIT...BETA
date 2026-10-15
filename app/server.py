@@ -27,15 +27,27 @@ import logging
 import os
 import sys
 from collections.abc import Iterable, Iterator
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable
 
-from flask import Flask, Response, render_template, request, stream_with_context
+from flask import Flask, Response, redirect, render_template, request, stream_with_context, url_for
 from providers.base import ChatMessage as ProvChatMessage, StreamChunk, ToolProposal
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from app.actions import PendingActions, ProposalRejected
+from app.agents import MAIN_AGENT_ID, agent_types, get_agent
 from app.analytics import RATING_LABELS, build_analytics
 from app.followups import followups_for
+from app.projects import (
+    IMPORT_SOURCES,
+    LIVE_SOURCES,
+    SOURCE_LABELS,
+    STATUS_LABELS,
+    STATUSES,
+    ProjectStore,
+    SourceUnavailable,
+)
 from app.starters import WELCOME_STARTERS
 from app.store import PLACEHOLDER_TITLE, ActionCard, Activity, Store, now_label
 from app.taskplan import (
@@ -221,6 +233,7 @@ def create_app(
     actions: PendingActions | None = None,
     voice_service: Any | None = None,
     model_audit: AuditLog | None = None,
+    projects: ProjectStore | None = None,
 ) -> Flask:
     """Build the Flask app.
 
@@ -234,12 +247,17 @@ def create_app(
     testing the app never touches runtime/heartbeat.json. Without a heartbeat
     the heartbeat routes answer 503 and home shows no notices. Voice providers
     are lazy by default; tests may inject a fake ``voice_service``.
+
+    ``projects`` is the Projects store. The default is in-memory — the app
+    factory never writes runtime/projects.json, same as the heartbeat. At boot
+    ``run_app`` swaps in the file-backed store so a restart keeps projects.
     """
     app = Flask(__name__, template_folder="templates")
     app.secret_key = "orbit-dev-secret"
     app.config["MAX_CONTENT_LENGTH"] = MAX_VOICE_UPLOAD_BYTES
     app.config["PROVIDER"] = provider
     app.config["STORE"] = store or Store()
+    app.config["PROJECTS"] = projects if projects is not None else ProjectStore()
     app.config["FACTS"] = facts if facts is not None else FactStore()
     app.config["HEARTBEAT"] = heartbeat
     # The audit log is built first so the voice service can record a real model
@@ -387,6 +405,130 @@ def create_app(
             followups=followups_for(st.home_thread),
             heartbeat=_heartbeat_view(),
         )
+
+    # ----- Projects and Agents (the ORBIT Projects product) -----
+
+    def _sidebar_context() -> dict[str, Any]:
+        """What every page that renders the shared sidebar needs."""
+        st: Store = app.config["STORE"]
+        return {
+            "user": st.user,
+            "mode": st.mode,
+            "thinking_level": st.thinking_level,
+            "conversations": st.conversations_grouped(),
+            "active_conversation_id": st.active_conversation_id,
+            "active_conversation_title": PLACEHOLDER_TITLE,
+            "connections": st.connections,
+            "connected_count": st.connected_count(),
+            "heartbeat": _heartbeat_view(),
+        }
+
+    def _date_label(iso: str) -> str:
+        """"15 Oct 2026" from the store's UTC timestamp, for card footers."""
+        try:
+            return datetime.fromisoformat(iso).strftime("%d %b %Y")
+        except (TypeError, ValueError):
+            return ""
+
+    @app.get("/projects")
+    def projects_page() -> str:
+        st: Store = app.config["STORE"]
+        project_store: ProjectStore = app.config["PROJECTS"]
+        query = request.args.get("q", "").strip()
+        status = request.args.get("status", "").strip() or None
+        if status is not None and status not in STATUS_LABELS:
+            # A status the filter cannot have produced is ignored, not honoured
+            # with an empty grid that looks like lost data.
+            status = None
+        cards = project_store.list_for(st.user.id, query=query, status=status)
+        counts = project_store.counts_for(st.user.id)
+        notice_raw = request.args.get("notice", "").strip()
+        notice = None
+        if notice_raw == "invalid":
+            notice = (
+                "A project needs a name (80 characters or fewer). "
+                "The description is optional, up to 600 characters."
+            )
+        elif notice_raw.startswith("import:"):
+            source = notice_raw.split(":", 1)[1]
+            if source in SOURCE_LABELS and source not in LIVE_SOURCES:
+                notice = (
+                    f"{SOURCE_LABELS[source]} import isn't connected yet, so "
+                    "nothing was fetched. You can create the project inside "
+                    "orbit now and bring the files over later."
+                )
+        return render_template(
+            "projects.html",
+            projects=[p.card() for p in cards],
+            date_label=_date_label,
+            counts=counts,
+            total=sum(counts.values()),
+            statuses=[(key, STATUS_LABELS[key]) for key in STATUSES],
+            sources=[("new", SOURCE_LABELS["new"])]
+            + [(key, SOURCE_LABELS[key]) for key in IMPORT_SOURCES],
+            live_sources=LIVE_SOURCES,
+            query=query,
+            active_status=status,
+            notice=notice,
+            projects_active=True,
+            agents_active=False,
+            **_sidebar_context(),
+        )
+
+    @app.post("/projects")
+    def create_project() -> Response:
+        st: Store = app.config["STORE"]
+        project_store: ProjectStore = app.config["PROJECTS"]
+        source = (request.form.get("source") or "new").strip() or "new"
+        try:
+            project = project_store.create(
+                user_id=st.user.id,
+                name=request.form.get("name", ""),
+                description=request.form.get("description", ""),
+                source=source,
+            )
+        except SourceUnavailable as exc:
+            # An honest refusal, counted: the import entry point is visible in
+            # the dialog, but nothing pretends a fetch happened.
+            _record_event("project_import_unavailable", source=exc.source)
+            return redirect(
+                url_for("projects_page", notice=f"import:{exc.source}") + "#create",
+                code=303,
+            )
+        except ValueError:
+            _record_event("project_create_rejected", reason="invalid_input")
+            return redirect(url_for("projects_page", notice="invalid") + "#create", code=303)
+        _record_event(
+            "project_created",
+            project_id=project.id,
+            source=project.source,
+            status=project.status,
+        )
+        return redirect(url_for("projects_page"), code=303)
+
+    @app.get("/agents")
+    def agents_page() -> str:
+        return render_template(
+            "agents.html",
+            agents=agent_types(),
+            projects_active=False,
+            agents_active=True,
+            **_sidebar_context(),
+        )
+
+    @app.post("/agents/<agent_id>/start")
+    def start_agent_conversation(agent_id: str) -> Response:
+        """Start a conversation under an Agents-page card's brief."""
+        st: Store = app.config["STORE"]
+        try:
+            get_agent(agent_id)
+        except KeyError:
+            return _json({"error": f"unknown agent type: {agent_id!r}"}, 404)
+        conv = st.start_conversation(agent_id=agent_id)
+        _record_event(
+            "agent_conversation_started", agent_id=agent_id, conversation_id=conv.id
+        )
+        return redirect(url_for("home"), code=303)
 
     @app.get("/task/<task_id>")
     def task(task_id: str) -> str:
@@ -684,7 +826,21 @@ def create_app(
         queue: PendingActions | None = app.config["ACTIONS"]
         use_tools = queue is not None and st.mode == "chat"
         thinking_level = st.thinking_level
-        home_prompt = HOME_SYSTEM_PROMPT + (f" {TOOL_GUIDANCE}" if use_tools else "")
+        # A conversation started from an Agents-page card runs under that
+        # card's brief instead of the plain home prompt. Everything else about
+        # the turn — tools, gating, history, audit — is identical.
+        base_prompt = HOME_SYSTEM_PROMPT
+        conv = st.get_conversation(conv_id)
+        if conv is not None and conv.agent_id != MAIN_AGENT_ID:
+            try:
+                base_prompt = get_agent(conv.agent_id).instructions
+            except KeyError:
+                log.warning(
+                    "conversation %s has unknown agent_id %r; using the main prompt",
+                    conv_id,
+                    conv.agent_id,
+                )
+        home_prompt = base_prompt + (f" {TOOL_GUIDANCE}" if use_tools else "")
         # Read the facts now, once per turn, so an edit lands on the next reply.
         if regenerate:
             home_prompt = f"{home_prompt} {REGENERATE_INSTRUCTION}"
@@ -1260,6 +1416,15 @@ def run_app(app: Flask) -> None:
         heartbeat = Heartbeat(settings=load_heartbeat_settings())
         app.config["HEARTBEAT"] = heartbeat
     start_scheduler(heartbeat, interval_seconds=heartbeat.settings.interval_seconds)
+
+    # Projects persist across restarts — the same rule the heartbeat state
+    # follows: create_app stays in-memory so tests never touch runtime/, and
+    # the file-backed store only exists once the real server boots.
+    project_store = app.config.get("PROJECTS")
+    if project_store is not None and not project_store.persistent:
+        app.config["PROJECTS"] = ProjectStore(
+            Path(os.environ.get("ORBIT_PROJECTS_PATH", "runtime/projects.json"))
+        )
 
     if app.config.get("ACTIONS") is None:
         # Browser tools: the same six tools as the terminal, but the decision

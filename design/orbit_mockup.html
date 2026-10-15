@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ORBIT</title>
+<title>orbit</title>
 <link rel="icon" type="image/svg+xml" href="../app/static/orbit-mark.svg" />
 <style>
   /* ===========================================================
-     ORBIT — home screen + coding-agent task view, in dark blue.
+     orbit — home screen + coding-agent task view, copper on charcoal.
 
      This REPLACES the earlier node-graph dashboard mockup as the
      front door. Structure follows two reference screens Caleb
@@ -37,31 +37,39 @@
    =========================================================== */
 
   :root {
-    /* Brand surfaces */
-    --bg: #10131C;            /* Midnight Navy — main background */
-    --bg-raised: #141925;     /* Sidebar Navy — sidebar */
-    --bg-sunken: #10131C;     /* inset surfaces (Midnight Navy) */
-    --bg-card: #1B202B;       /* Deep Slate — inputs, cards, panels */
-    --border: #2B303B;        /* Border Grey */
-    --border-soft: rgba(43, 48, 59, 0.6);  /* Border Grey, subtler separators */
+    /* Brand surfaces — warm charcoal, never blue-tinted. Updated 2026-10-15
+       per the ORBIT Projects product brief (Part 2, Visual Identity): the
+       blue palette was explored and DROPPED; the single accent is copper /
+       burnt amber. The brief is now the governing brand spec; the screen
+       STRUCTURE below remains the spec for the home + task screens until
+       their Projects migration lands. */
+    --bg: #141210;            /* Charcoal — main background */
+    --bg-raised: #1B1916;     /* Raised charcoal — sidebar */
+    --bg-sunken: #100E0C;     /* inset surfaces */
+    --bg-card: #221F1B;       /* Card charcoal — inputs, cards, panels */
+    --border: #383430;        /* Warm border grey */
+    --border-soft: rgba(56, 52, 48, 0.55);  /* subtler separators */
     /* Text */
     --text: #F4F0EA;          /* Warm White — primary text, wordmark */
-    --text-dim: #A09FA8;      /* Ash Grey — secondary text */
-    --text-faint: #A09FA8;    /* Ash Grey — muted text (kept AA-readable) */
-    /* Brand accent — dark blue. Light text (--text) sits on --accent. */
-    --accent: #1f4a8f;        /* Dark blue — user bubble fill, primary buttons */
-    --accent-bright: #6b98de; /* Light blue — active labels, Orbit icon (AA on the navy surfaces) */
-    --accent-dim: #16336a;    /* Deeper blue — borders, thinking-block edge */
-    --accent-wash: rgba(31, 74, 143, 0.22); /* selected background */
-    --accent-soft: rgba(31, 74, 143, 0.45); /* focus ring */
+    --text-dim: #ACA69C;      /* Ash — secondary text */
+    --text-faint: #ACA69C;    /* Ash — muted text (kept AA-readable) */
+    /* Brand accent — copper / burnt amber, with near-black ink on fills
+       (a mid-tone copper hits AA with dark text, not light text). */
+    --accent: #C87F3F;        /* Burnt amber — user bubble fill, primary buttons */
+    --on-accent: #1B1208;     /* Near-black text on copper fills (AA) */
+    --accent-bright: #E2A97A; /* Light copper — active labels, the orbit mark */
+    --accent-dim: #7C5326;    /* Deep copper — borders, thinking-block edge */
+    --accent-wash: rgba(200, 127, 63, 0.16); /* selected background */
+    --accent-soft: rgba(200, 127, 63, 0.45); /* focus ring */
     /* Functional status colors — kept distinct from brand */
     --green: #78B88A;         /* Success */
     --amber: #E5B567;         /* Warning */
     --red: #E17D7D;           /* Error */
     --red-wash: rgba(225, 125, 125, 0.12);
-    --radius: 10px;
-    --radius-sm: 7px;
-    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    --radius: 16px;           /* standardized card/panel/bubble/modal radius */
+    --radius-sm: 10px;
+    --font-display: "Space Grotesk", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; font-size: 14px; }
@@ -140,7 +148,7 @@
     padding: 6px 16px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
     display: flex; align-items: center; gap: 6px;
   }
-  .mode-toggle button.active { background: var(--accent); color: var(--text); font-weight: 600; }
+  .mode-toggle button.active { background: var(--accent); color: var(--on-accent); font-weight: 600; }
   .mode-toggle button.active:hover { filter: brightness(1.15); }
   .home-topbar-controls { display: flex; align-items: center; justify-content: center; gap: 8px; }
   .thinking-toggle button { padding: 6px 10px; font-size: 11px; }
@@ -188,7 +196,7 @@
   .reply-audio { display: block; width: min(320px, 100%); height: 34px; margin-top: 6px; }
   .send-btn-round {
     width: 32px; height: 32px; border-radius: 50%;
-    background: var(--accent); border: none; color: var(--text);
+    background: var(--accent); border: none; color: var(--on-accent);
     display: flex; align-items: center; justify-content: center; cursor: pointer;
     /* The mockup drew this as a div; as a real <button> it must not inherit
        the browser's button font/padding, and it needs a visible focus ring. */
@@ -344,7 +352,7 @@
     display: flex; flex-direction: column;
   }
   .chat-bubble.user {
-    background: var(--accent); color: var(--text);
+    background: var(--accent); color: var(--on-accent);
     border-bottom-right-radius: 3px;
   }
   .chat-bubble.orbit {

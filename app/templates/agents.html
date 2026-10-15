@@ -1,0 +1,58 @@
+{% extends "layout.html" %}
+{% block title %}orbit — Agents{% endblock %}
+{% block body %}
+<div class="screen screen--active" id="screen-agents">
+{% include "_sidebar.html" %}
+
+  <div class="page-main">
+    <div class="page-wrap">
+
+      <header class="page-head">
+        <div>
+          <p class="page-eyebrow">Workspace</p>
+          <h1 class="page-title">Agents</h1>
+          <p class="page-sub">Pick the kind of help you need — then point it at any project. Each one is the same orbit brain under a job-specific brief, with the same approvals and the same audit.</p>
+        </div>
+      </header>
+
+      <div class="agents-grid">
+        {% for agent in agents %}
+        <article class="agent-card">
+          <div class="agent-head">
+            <span class="agent-icon" aria-hidden="true">
+              {% if agent.id == 'builder' %}
+              <svg class="oi" viewBox="0 0 24 24"><path d="m14.5 6.5 3 3L8 19H5v-3Z"/><path d="m12.5 8.5 3 3"/><path d="M4 4l3.5 3.5"/></svg>
+              {% elif agent.id == 'debugger' %}
+              <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="13" r="5.5"/><path d="M12 7.5V4.8M8.5 5 10 7.5M15.5 5 14 7.5M6.5 12H3.8M20.2 12h-2.7M6.8 16.5 4.5 18.8M17.2 16.5l2.3 2.3M12 10.5v5"/></svg>
+              {% elif agent.id == 'researcher' %}
+              <svg class="oi" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.3-4.3M8.5 11h5M11 8.5v5"/></svg>
+              {% else %}
+              <svg class="oi" viewBox="0 0 24 24"><path d="M9 4.5H6.8c-.7 0-1.3.6-1.3 1.3v12.4c0 .7.6 1.3 1.3 1.3h10.4c.7 0 1.3-.6 1.3-1.3V5.8c0-.7-.6-1.3-1.3-1.3H15"/><rect x="9" y="3.5" width="6" height="3" rx="1"/><path d="M8.5 10.5h7M8.5 14h7M8.5 17.5h4"/></svg>
+              {% endif %}
+            </span>
+            <div>
+              <div class="agent-name">{{ agent.name }}</div>
+              <div class="agent-role">{{ agent.role }}</div>
+            </div>
+          </div>
+          <p class="agent-detail">{{ agent.detail }}</p>
+          <div class="agent-starters">
+            <span class="starters-label">Try starting with</span>
+            {% for starter in agent.starters %}
+            <span class="agent-starter" title="{{ starter.prompt }}">“{{ starter.label }}”</span>
+            {% endfor %}
+          </div>
+          <form class="agent-start" method="post" action="/agents/{{ agent.id }}/start">
+            <button type="submit">
+              <svg class="oi" viewBox="0 0 24 24"><path d="M4.5 12h13M13 6.5l5.5 5.5-5.5 5.5"/></svg>
+              Start a chat with {{ agent.name }}
+            </button>
+          </form>
+        </article>
+        {% endfor %}
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}
