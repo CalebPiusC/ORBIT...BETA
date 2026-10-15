@@ -1,0 +1,100 @@
+{% extends "layout.html" %}
+{#
+  The dedicated feedback space. The same form also floats on every page (the
+  Feedback button bottom-right) — both paths write to the same store, and the
+  floating one never navigates away, so a report never costs work on screen.
+#}
+{% block title %}orbit — Beta feedback{% endblock %}
+{% block body_class %}v2{% endblock %}
+{% block body %}
+<div class="screen screen--active" id="screen-feedback">
+{% include "_sidebar.html" %}
+
+  <main class="page-main">
+    {% include "_topbar.html" %}
+    <div class="page-wrap feedback-wrap">
+
+      <div class="page-topline">
+        <nav class="page-crumb" aria-label="Breadcrumb"><a href="/dashboard">Dashboard</a><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Feedback</span></nav>
+        <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
+      </div>
+
+      <header class="page-head-block">
+        <p class="page-eyebrow">Beta feedback</p>
+        <h1 class="page-title">Tell us what to build — or what to fix.</h1>
+        <p class="page-sub">Feature suggestions, bug reports, and everything in between. Feedback here is read by the people building ORBIT, and it shapes what ships next.</p>
+      </header>
+
+      {% if sent %}
+      <div class="notice-bar notice-ok" role="status">
+        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 5-5.5"/></svg>
+        <span>Thank you — your feedback is in. It landed in the list below.</span>
+      </div>
+      {% endif %}
+      {% if error %}
+      <div class="notice-bar notice-error" role="alert">
+        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v5M12 16h.01"/></svg>
+        <span>{{ error }}</span>
+      </div>
+      {% endif %}
+
+      <div class="feedback-grid">
+        <section class="settings-card" aria-label="Send feedback">
+          <form method="post" action="/feedback" class="settings-form" data-feedback-page-form>
+            <div class="field">
+              <span class="field-label">What kind of feedback is it?</span>
+              <div class="chip-grid">
+                {% for key, label in kinds.items() %}
+                <label class="pick-chip">
+                  <input type="radio" name="kind" value="{{ key }}"{% if values.get('kind', 'feature') == key %} checked{% endif %} />
+                  <span class="chip-face">{{ label }}</span>
+                </label>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="fbTitle">Give it a short title</label>
+              <input class="text-input" id="fbTitle" name="title" type="text" maxlength="120"
+                     placeholder="e.g. Import should accept .zip files" value="{{ values.get('title', '') }}" required />
+            </div>
+            <div class="field">
+              <label class="field-label" for="fbBody">The details</label>
+              <textarea class="text-area" id="fbBody" name="body" rows="6" maxlength="2000"
+                        placeholder="What were you trying to do? What happened — or what do you wish happened?">{{ values.get('body', '') }}</textarea>
+              <p class="field-hint" style="margin-top:4px;">Please don't include secrets, keys, or personal data.</p>
+            </div>
+            <div class="settings-actions">
+              <button class="btn-primary" type="submit" data-busy-label="Sending…">
+                <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Send feedback</span>
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section aria-label="Your previous feedback">
+          <h2 class="dash-section-title">Your previous notes {% if entries %}<span class="settings-count">({{ entries | length }})</span>{% endif %}</h2>
+          {% if entries %}
+          <div class="feedback-list">
+            {% for entry in entries[:20] %}
+            <article class="feedback-item">
+              <header class="feedback-item-head">
+                <span class="feedback-kind kind-{{ entry.kind }}">{{ kinds.get(entry.kind, entry.kind) }}</span>
+                <span class="feedback-date">{{ (entry.created_at or '')[:10] }}</span>
+              </header>
+              <h3 class="feedback-item-title">{{ entry.title }}</h3>
+              <p class="feedback-item-body">{{ entry.body }}</p>
+              {% if entry.page %}<p class="feedback-item-page">Sent from {{ entry.page }}</p>{% endif %}
+            </article>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="feedback-empty">
+            <p>No notes yet. The first one you send lands here — bugs, ideas, or a quick "this feels off" are all useful.</p>
+          </div>
+          {% endif %}
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+{% endblock %}

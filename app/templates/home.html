@@ -25,11 +25,19 @@
            centres on projects), so the conversation control itself moved here —
            same real seam app.js always wired, /api/conversations/new. #}
         <button type="button" class="topbar-icon-button" id="newConvo" title="New conversation" aria-label="New conversation">+</button>
+        {% if account %}
+        <a class="topbar-icon-button" href="/settings" aria-label="Settings" title="Profile &amp; settings">⚙</a>
+        <a class="topbar-account" href="/settings" title="{{ user.name }} · {{ user.workspace }}" aria-label="Account and settings for {{ user.name }}">
+          <span class="topbar-avatar">{{ user.name[:2]|upper }}</span>
+          <span class="topbar-account-name">{{ user.name }}</span>
+        </a>
+        {% else %}
         <button type="button" class="topbar-icon-button" data-open-settings aria-label="Settings" title="Settings">⚙</button>
         <button type="button" class="topbar-account" data-open-settings title="{{ user.name }} · {{ user.workspace }}" aria-label="Account and settings for {{ user.name }}">
           <span class="topbar-avatar">{{ user.name[:2]|upper }}</span>
           <span class="topbar-account-name">{{ user.name }}</span>
         </button>
+        {% endif %}
       </div>
     </div>
 

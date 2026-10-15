@@ -17,7 +17,7 @@
       <header class="page-head-block">
         <p class="page-eyebrow">New project</p>
         <h1 class="page-title">Every project starts somewhere.</h1>
-        <p class="page-sub">Name the idea and choose how you want the first step to go — the import routes below are visible so you can see where they'll land, and they are disabled because they are not connected yet.</p>
+        <p class="page-sub">Three ways in — pick the one that fits how you think. They all create a real project and land you in its workspace; importing an existing project lives further down the page.</p>
       </header>
 
       {% if notice %}
@@ -27,10 +27,34 @@
       </div>
       {% endif %}
 
-      <section class="create-card" aria-label="Start with an idea">
+      {# The first-run tip: one contextual hint about what this page actually
+         does, dismissible, and it only describes working behavior. #}
+      <div class="notice-bar" role="note" id="createTip" hidden>
+        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.5V16M12 8h.01"/></svg>
+        <span>Tip: all three modes below end in a real workspace with a project map and a Main Agent. The import routes at the bottom are the only ones that aren't connected — and they say so.</span>
+        <button type="button" class="checklist-dismiss" data-dismiss-create-tip aria-label="Dismiss this tip" style="margin-left:auto;">✕</button>
+      </div>
+
+      <div class="entry-tabs" role="tablist" aria-label="How do you want to start?">
+        <button type="button" class="entry-tab active" role="tab" aria-selected="true" data-entry-tab="direct" id="tab-direct" aria-controls="panel-direct">
+          <span class="entry-tab-name">Create directly</span>
+          <span class="entry-tab-note">Name it and open the workspace</span>
+        </button>
+        <button type="button" class="entry-tab" role="tab" aria-selected="false" data-entry-tab="guided" id="tab-guided" aria-controls="panel-guided">
+          <span class="entry-tab-name">Guided setup</span>
+          <span class="entry-tab-note">Three short steps, reviewed first</span>
+        </button>
+        <button type="button" class="entry-tab" role="tab" aria-selected="false" data-entry-tab="describe" id="tab-describe" aria-controls="panel-describe">
+          <span class="entry-tab-name">Describe to the Main Agent</span>
+          <span class="entry-tab-note">Say it in words; plan it together</span>
+        </button>
+      </div>
+
+      {# ==================== mode 1: direct ==================== #}
+      <section class="create-card entry-panel" id="panel-direct" role="tabpanel" aria-labelledby="tab-direct" aria-label="Create directly">
         <div class="create-card-head">
           <h2 class="create-card-title">Start with an idea</h2>
-          <p class="create-card-sub">The only entry point that works today — it creates a real project and lands you in its workspace.</p>
+          <p class="create-card-sub">The straight line: a name, a sentence about it, and how you want the first step to go.</p>
         </div>
         <form method="post" action="/projects" class="create-form">
           <input type="hidden" name="source" value="new" />
@@ -39,7 +63,7 @@
             <input class="text-input" id="projectName" name="name" type="text" required maxlength="80" autocomplete="off" placeholder="Fieldnotes, Orbit beta, Order bot…" />
           </div>
           <div class="field">
-            <label class="field-label" for="projectDesc">What would you like to build?</label>
+            <label class="field-label" for="projectDesc">What would you like to build? <span class="field-hint">optional</span></label>
             <textarea class="text-area" id="projectDesc" name="description" maxlength="600" rows="3" placeholder="In your own words — this becomes the project description. You can leave it empty."></textarea>
           </div>
           <fieldset class="field plan-choice">
@@ -66,10 +90,91 @@
         </form>
       </section>
 
+      {# ==================== mode 2: guided ==================== #}
+      <section class="create-card entry-panel" id="panel-guided" role="tabpanel" aria-labelledby="tab-guided" hidden aria-label="Guided setup">
+        <div class="create-card-head">
+          <h2 class="create-card-title">Guided setup</h2>
+          <p class="create-card-sub">Three steps. You review everything on the last one before the project exists — nothing is created halfway.</p>
+        </div>
+        <ol class="guided-steps" aria-hidden="true">
+          <li class="guided-step-dot active" data-guided-dot="0"><span>1</span> Name it</li>
+          <li class="guided-step-dot" data-guided-dot="1"><span>2</span> What it's for</li>
+          <li class="guided-step-dot" data-guided-dot="2"><span>3</span> Review</li>
+        </ol>
+        <form method="post" action="/projects" class="create-form" data-guided-form>
+          <input type="hidden" name="source" value="new" />
+          <input type="hidden" name="mode" value="guided" />
+
+          <fieldset class="guided-step" data-guided-step="0">
+            <legend class="field-label">Step 1 — what do we call it?</legend>
+            <p class="create-card-sub" style="margin-bottom:12px;">The working title for the workspace, the map and the sidebar. You can rename it later.</p>
+            <div class="field">
+              <input class="text-input" id="guidedName" name="name" type="text" maxlength="80" autocomplete="off" placeholder="Order bot, Portfolio refresh, Fieldnotes…" required />
+              <p class="guided-error" data-guided-error="name" hidden>A project needs a name (80 characters or fewer).</p>
+            </div>
+          </fieldset>
+
+          <fieldset class="guided-step" data-guided-step="1" hidden>
+            <legend class="field-label">Step 2 — what is it for?</legend>
+            <p class="create-card-sub" style="margin-bottom:12px;">This becomes the project description, so the Main Agent's first answers already know the goal.</p>
+            <div class="field">
+              <label class="visually-hidden" for="guidedDesc">What is it for?</label>
+              <textarea class="text-area" id="guidedDesc" name="description" maxlength="600" rows="4" placeholder="Example: A WhatsApp ordering bot for a suya spot — customers order by chat, vendors track status."></textarea>
+            </div>
+            <div class="field">
+              <label class="field-label" for="guidedTask">A first task to seed the map <span class="field-hint">optional</span></label>
+              <input class="text-input" id="guidedTask" name="first_task" type="text" maxlength="240" autocomplete="off" placeholder="e.g. Sketch the order-status flow before any code" />
+              <p class="field-hint" style="margin-top:5px;">If you add one, it lands on the project map as a real task — the map is never standing empty.</p>
+            </div>
+          </fieldset>
+
+          <fieldset class="guided-step" data-guided-step="2" hidden>
+            <legend class="field-label">Step 3 — review and create</legend>
+            <p class="create-card-sub" style="margin-bottom:12px;">Exactly what will be created. Go back to change anything.</p>
+            <dl class="guided-review">
+              <div class="guided-review-row"><dt>Project</dt><dd data-guided-review="name">—</dd></div>
+              <div class="guided-review-row"><dt>Description</dt><dd data-guided-review="description">—</dd></div>
+              <div class="guided-review-row"><dt>First task</dt><dd data-guided-review="task">—</dd></div>
+              <div class="guided-review-row"><dt>Lands on</dt><dd>The new project's workspace, with its (possibly seeded) map.</dd></div>
+            </dl>
+          </fieldset>
+
+          <div class="create-actions">
+            <button type="button" class="btn-ghost" data-guided-back hidden>Back</button>
+            <button type="button" class="btn-primary" data-guided-next>Continue</button>
+            <button type="submit" class="btn-primary" data-guided-create hidden>Create the project</button>
+          </div>
+        </form>
+      </section>
+
+      {# ==================== mode 3: describe to the agent ==================== #}
+      <section class="create-card entry-panel" id="panel-describe" role="tabpanel" aria-labelledby="tab-describe" hidden aria-label="Describe to the Main Agent">
+        <div class="create-card-head">
+          <h2 class="create-card-title" id="describe">Describe it to the Main Agent</h2>
+          <p class="create-card-sub">Say what you want in plain words. The project is created with your description, and the workspace opens with the Main Agent ready to turn the goal into a real task map — you steer, it drafts, you approve.</p>
+        </div>
+        <form method="post" action="/projects" class="create-form">
+          <input type="hidden" name="source" value="new" />
+          <input type="hidden" name="mode" value="describe" />
+          <div class="field">
+            <label class="field-label" for="describeName">Give it a short name</label>
+            <input class="text-input" id="describeName" name="name" type="text" required maxlength="80" autocomplete="off" placeholder="Suya order bot, Reading tracker…" />
+          </div>
+          <div class="field">
+            <label class="field-label" for="describeIdea">Describe the idea</label>
+            <textarea class="text-area" id="describeIdea" name="description" maxlength="600" rows="5" placeholder="What should it do? Who is it for? What does 'working' look like? The more real detail you give the Main Agent, the better its first plan."></textarea>
+          </div>
+          <div class="create-actions">
+            <button type="submit" class="btn-primary">Create and start planning</button>
+            <a class="btn-ghost" href="/projects">Cancel</a>
+          </div>
+        </form>
+      </section>
+
       <section class="create-card create-card-import" id="import" aria-label="Import an existing project">
         <div class="create-card-head">
           <h2 class="create-card-title">Bring your own project</h2>
-          <p class="create-card-sub">These routes are part of the design, and they are not connected — the row tells you exactly that rather than pretending an import happened.</p>
+          <p class="create-card-sub">These routes are part of the design, and they are not connected — the row tells you exactly that rather than pretending an import happened. Connecting a Git provider is always optional, and never part of signing in.</p>
         </div>
         <div class="repo-rows">
           {% for key, label in repo_sources %}
@@ -103,4 +208,107 @@
     </div>
   </main>
 </div>
+<script>
+  // The /create entry modes: tab switching plus the guided stepper. All three
+  // panels exist in the DOM (each a real form posting to /projects); the tabs
+  // only choose which one you see, and the stepper walks the guided form.
+  (function () {
+    var tabs = Array.prototype.slice.call(document.querySelectorAll("[data-entry-tab]"));
+    var panels = {
+      direct: document.getElementById("panel-direct"),
+      guided: document.getElementById("panel-guided"),
+      describe: document.getElementById("panel-describe"),
+    };
+
+    function selectTab(key, focus) {
+      tabs.forEach(function (tab) {
+        var active = tab.getAttribute("data-entry-tab") === key;
+        tab.classList.toggle("active", active);
+        tab.setAttribute("aria-selected", active ? "true" : "false");
+        if (active && focus) tab.focus();
+      });
+      Object.keys(panels).forEach(function (name) {
+        if (panels[name]) panels[name].hidden = name !== key;
+      });
+      if (key === "describe") {
+        try { history.replaceState(null, "", "#describe"); } catch (_e) { /* file:// or locked history: the tab still switched */ }
+      }
+    }
+
+    tabs.forEach(function (tab) {
+      tab.addEventListener("click", function () { selectTab(tab.getAttribute("data-entry-tab")); });
+    });
+
+    // Deep links: /create?guided=1 opens the stepper; /create#import legitimately
+    // stays on the first tab but scrolls later; /create#describe picks describe.
+    var qs = "";
+    try { qs = window.location.search || ""; } catch (_e) { qs = ""; }
+    var hash = "";
+    try { hash = window.location.hash || ""; } catch (_e) { hash = ""; }
+    if (qs.indexOf("guided=1") !== -1) selectTab("guided");
+    else if (hash === "#describe") selectTab("describe");
+
+    // ----- the guided stepper -----
+    var form = document.querySelector("[data-guided-form]");
+    if (!form) return;
+    var steps = Array.prototype.slice.call(form.querySelectorAll("[data-guided-step]"));
+    var dots = Array.prototype.slice.call(document.querySelectorAll("[data-guided-dot]"));
+    var backBtn = form.querySelector("[data-guided-back]");
+    var nextBtn = form.querySelector("[data-guided-next]");
+    var createBtn = form.querySelector("[data-guided-create]");
+    var nameInput = document.getElementById("guidedName");
+    var nameError = form.querySelector('[data-guided-error="name"]');
+    var current = 0;
+
+    function fillReview() {
+      var name = (nameInput.value || "").trim() || "—";
+      var desc = (document.getElementById("guidedDesc").value || "").trim();
+      var task = (document.getElementById("guidedTask").value || "").trim();
+      form.querySelector('[data-guided-review="name"]').textContent = name;
+      form.querySelector('[data-guided-review="description"]').textContent = desc || "None yet — you can add it from the workspace.";
+      form.querySelector('[data-guided-review="task"]').textContent = task || "None — the map starts empty.";
+    }
+
+    function showStep(index) {
+      current = index;
+      steps.forEach(function (step, i) { step.hidden = i !== index; });
+      dots.forEach(function (dot, i) {
+        dot.classList.toggle("active", i === index);
+        dot.classList.toggle("done", i < index);
+      });
+      backBtn.hidden = index === 0;
+      nextBtn.hidden = index === steps.length - 1;
+      createBtn.hidden = index !== steps.length - 1;
+      if (index === steps.length - 1) fillReview();
+      var firstField = steps[index].querySelector("input, textarea");
+      if (firstField) firstField.focus();
+    }
+
+    nextBtn.addEventListener("click", function () {
+      if (current === 0) {
+        var ok = (nameInput.value || "").trim().length > 0;
+        nameError.hidden = ok;
+        nameInput.classList.toggle("invalid", !ok);
+        if (!ok) { nameInput.focus(); return; }
+      }
+      showStep(Math.min(current + 1, steps.length - 1));
+    });
+    backBtn.addEventListener("click", function () { showStep(Math.max(current - 1, 0)); });
+    nameInput.addEventListener("input", function () {
+      if ((nameInput.value || "").trim()) { nameError.hidden = true; nameInput.classList.remove("invalid"); }
+    });
+
+    // ----- the first-run tip, shown once per browser -----
+    var TIP_KEY = "orbit.create.tip.dismissed";
+    var tip = document.getElementById("createTip");
+    try {
+      if (tip && window.localStorage.getItem(TIP_KEY) !== "1") tip.hidden = false;
+    } catch (_e) { if (tip) tip.hidden = false; }
+    var dismiss = document.querySelector("[data-dismiss-create-tip]");
+    if (dismiss) dismiss.addEventListener("click", function () {
+      tip.hidden = true;
+      try { window.localStorage.setItem(TIP_KEY, "1"); } catch (_e) { /* stays dismissed for this page */ }
+    });
+  })();
+</script>
 {% endblock %}

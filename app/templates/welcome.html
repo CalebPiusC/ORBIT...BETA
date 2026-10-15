@@ -1,0 +1,81 @@
+{% extends "public.html" %}
+{#
+  The first screen after registration. Rules from the brief, kept deliberately:
+  four honest starting options, nothing forced, and a way out ("skip") that is
+  as visible as everything else. Each card goes somewhere real — no dead ends.
+#}
+{% block title %}orbit — Welcome{% endblock %}
+{% block nav %}{% endblock %}
+{% block body %}
+<main class="onboard-shell">
+  <header class="onboard-head">
+    <img class="card-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+    <p class="auth-eyebrow">You're in</p>
+    <h1 class="onboard-title">Welcome to ORBIT, {{ first_name }}.</h1>
+    <p class="onboard-sub">
+      Your workspace is ready. Pick a way in — or skip everything and just explore.
+      Nothing here is a required setup step.
+    </p>
+  </header>
+
+  <div class="path-grid" role="list">
+    <a class="path-card" href="/create" role="listitem">
+      <span class="path-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
+      </span>
+      <span>
+        <span class="path-name">Create a new project</span>
+        <span class="path-note">Name an idea and open its workspace — directly, with a guided setup, or by describing it to the Main Agent.</span>
+        <span class="path-go">Start a project →</span>
+      </span>
+    </a>
+
+    <a class="path-card" href="/create#import" role="listitem">
+      <span class="path-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 15.5V4M7 8.5l5-4.5 5 4.5"/><rect x="4.5" y="17" width="15" height="3.5" rx="1.6"/></svg>
+      </span>
+      <span>
+        <span class="path-name">Import an existing project</span>
+        <span class="path-note">From GitHub, GitLab, Bitbucket, or files on your computer. Entry points are shown honestly — what's not connected says so.</span>
+        <span class="path-go">See import options →</span>
+      </span>
+    </a>
+
+    <a class="path-card" href="/settings#integrations" role="listitem">
+      <span class="path-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="7" r="2.6"/><circle cx="17" cy="17" r="2.6"/><path d="M9.4 8.4l5.2 5.2M17 7.5V4.5M17 7.5h-3"/></svg>
+      </span>
+      <span>
+        <span class="path-name">Connect a Git provider</span>
+        <span class="path-note">GitHub is already connected. Connecting more is optional — and always separate from sign-in, so ORBIT never touches a repo without asking.</span>
+        <span class="path-go">Open integrations →</span>
+      </span>
+    </a>
+
+    <a class="path-card" href="/dashboard" role="listitem" data-explore>
+      <span class="path-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.6"/><path d="M15.5 8.5l-2.2 5-5 2.2 2.2-5z"/></svg>
+      </span>
+      <span>
+        <span class="path-name">Explore ORBIT</span>
+        <span class="path-note">Head straight to your dashboard and look around — the tour, projects, agents, and the home chat are all one click away.</span>
+        <span class="path-go">Open the dashboard →</span>
+      </span>
+    </a>
+  </div>
+
+  <div class="onboard-secondary">
+    {% if tour_available %}
+    <a class="btn-ghost" href="/dashboard?tour=1">Take the 60-second tour</a>
+    {% endif %}
+    {% if personalize_pending %}
+    <a class="btn-ghost" href="/onboarding">Personalize your workspace <span class="field-hint">(optional)</span></a>
+    {% endif %}
+  </div>
+
+  <p class="onboard-skip">
+    Rather just start? <a href="/dashboard" class="skip-link">Skip this and take me to my workspace</a> —
+    everything above stays available from the dashboard.
+  </p>
+</main>
+{% endblock %}

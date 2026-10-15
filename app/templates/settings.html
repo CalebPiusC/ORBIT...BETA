@@ -1,0 +1,314 @@
+{% extends "layout.html" %}
+{#
+  Profile & account. Structure notes:
+    * Registration asks for name/email/password only; everything optional lives
+      here or in /onboarding — never in the sign-up wall.
+    * Every control either works or says exactly why it can't yet. Integration
+      rows that aren't built are visible but visibly disabled, same honesty
+      rule as /create's import section.
+    * Privacy text states only what's true of this build.
+#}
+{% block title %}orbit — Profile &amp; settings{% endblock %}
+{% block body_class %}v2{% endblock %}
+{% block body %}
+<div class="screen screen--active" id="screen-settings">
+{% include "_sidebar.html" %}
+
+  <main class="page-main">
+    {% include "_topbar.html" %}
+    <div class="page-wrap settings-wrap">
+
+      <div class="page-topline">
+        <nav class="page-crumb" aria-label="Breadcrumb"><a href="/dashboard">Dashboard</a><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Settings</span></nav>
+        <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
+      </div>
+
+      <header class="page-head-block">
+        <p class="page-eyebrow">Your account</p>
+        <h1 class="page-title">Profile &amp; settings</h1>
+        <p class="page-sub">{{ account.email }} · signed in via {{ provider_label }}{% if account.email_verified %} · verified{% endif %}</p>
+      </header>
+
+      {% if saved_message %}
+      <div class="notice-bar notice-ok" role="status">
+        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 5-5.5"/></svg>
+        <span>{{ saved_message }}</span>
+      </div>
+      {% endif %}
+      {% if error_message %}
+      <div class="notice-bar notice-error" role="alert">
+        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v5M12 16h.01"/></svg>
+        <span>{{ error_message }}</span>
+      </div>
+      {% endif %}
+
+      <div class="settings-grid">
+        <nav class="settings-nav" aria-label="Settings sections">
+          {% for key, label in tabs %}
+          <a href="/settings?tab={{ key }}#{{ key }}" class="settings-nav-link{% if active_tab == key %} active{% endif %}">{{ label }}</a>
+          {% endfor %}
+        </nav>
+
+        <div class="settings-sections">
+
+          {# ============ Profile ============ #}
+          <section class="settings-card" id="profile" aria-labelledby="profileHead">
+            <div class="settings-card-head">
+              <div>
+                <h2 class="settings-card-title" id="profileHead">Profile</h2>
+                <p class="settings-card-sub">Shown across your workspace. Sign-up only ever asked for a name and email — everything else here is optional.</p>
+              </div>
+              <span class="settings-avatar" aria-hidden="true">{{ account.name[:2] | upper }}</span>
+            </div>
+            <form method="post" action="/settings/profile" class="settings-form">
+              <div class="field">
+                <label class="field-label" for="setName">Display name</label>
+                <input class="text-input" id="setName" name="name" type="text" maxlength="60" value="{{ account.name }}" required />
+              </div>
+              <div class="field">
+                <label class="field-label" for="setWorkspace">Workspace name <span class="field-hint">it sits at the top of your sidebar</span></label>
+                <input class="text-input" id="setWorkspace" name="workspace" type="text" maxlength="60" value="{{ account.workspace }}" />
+              </div>
+              <div class="field">
+                <span class="field-label">Email</span>
+                <div class="settings-static-row">
+                  <span>{{ account.email }}</span>
+                  <span class="settings-verified{% if not account.email_verified %} pending{% endif %}">{{ 'Verified' if account.email_verified else 'Pending verification' }}</span>
+                </div>
+                <p class="field-hint" style="margin-top:6px;">The sign-in method for this account: {{ provider_label }}.</p>
+              </div>
+              <div class="settings-actions">
+                <button class="btn-primary" type="submit">Save profile</button>
+              </div>
+            </form>
+          </section>
+
+          {# ============ Preferences (development + AI assistance) ============ #}
+          <section class="settings-card" id="preferences" aria-labelledby="prefsHead">
+            <div class="settings-card-head">
+              <div>
+                <h2 class="settings-card-title" id="prefsHead">Preferences</h2>
+                <p class="settings-card-sub">The same answers the optional onboarding wizard collects — edit them any time. They tune suggestions; they never gate features.</p>
+              </div>
+            </div>
+            <form method="post" action="/settings/preferences" class="settings-form">
+              <div class="field">
+                <span class="field-label">What best describes you?</span>
+                <div class="chip-grid">
+                  {% for role in roles %}
+                  <label class="pick-chip">
+                    <input type="radio" name="role" value="{{ role }}"{% if profile.get('role') == role %} checked{% endif %} />
+                    <span class="chip-face">{{ role }}</span>
+                  </label>
+                  {% endfor %}
+                </div>
+              </div>
+              <div class="field">
+                <span class="field-label">Experience level</span>
+                <div class="chip-grid">
+                  {% for level in experiences %}
+                  <label class="pick-chip">
+                    <input type="radio" name="experience" value="{{ level }}"{% if profile.get('experience') == level %} checked{% endif %} />
+                    <span class="chip-face">{{ level }}</span>
+                  </label>
+                  {% endfor %}
+                </div>
+              </div>
+              <div class="field">
+                <span class="field-label">What do you like building?</span>
+                <div class="chip-grid">
+                  {% for item in interests %}
+                  <label class="pick-chip">
+                    <input type="checkbox" name="interests" value="{{ item }}"{% if item in (profile.get('interests') or []) %} checked{% endif %} />
+                    <span class="chip-face">{{ item }}</span>
+                  </label>
+                  {% endfor %}
+                </div>
+              </div>
+              <div class="field">
+                <span class="field-label">Languages &amp; technologies you reach for</span>
+                <div class="chip-grid">
+                  {% for item in languages %}
+                  <label class="pick-chip">
+                    <input type="checkbox" name="languages" value="{{ item }}"{% if item in (profile.get('languages') or []) %} checked{% endif %} />
+                    <span class="chip-face">{{ item }}</span>
+                  </label>
+                  {% endfor %}
+                </div>
+              </div>
+              <div class="field">
+                <span class="field-label">AI assistance <span class="field-hint">default response depth for new sessions</span></span>
+                <div class="chip-grid">
+                  <label class="pick-chip">
+                    <input type="radio" name="default_depth" value="quick"{% if prefs.get('default_depth', 'quick') == 'quick' %} checked{% endif %} />
+                    <span class="chip-face">Quick — fast, everyday answers</span>
+                  </label>
+                  <label class="pick-chip">
+                    <input type="radio" name="default_depth" value="deep"{% if prefs.get('default_depth') == 'deep' %} checked{% endif %} />
+                    <span class="chip-face">Deep — thinks harder before replying</span>
+                  </label>
+                </div>
+                <p class="field-hint" style="margin-top:6px;">You can still flip Quick/Deep any time from the top of the home screen.</p>
+              </div>
+              <div class="settings-actions">
+                <button class="btn-primary" type="submit">Save preferences</button>
+              </div>
+            </form>
+          </section>
+
+          {# ============ Integrations ============ #}
+          <section class="settings-card" id="integrations" aria-labelledby="integrationsHead">
+            <div class="settings-card-head">
+              <div>
+                <h2 class="settings-card-title" id="integrationsHead">Integrations</h2>
+                <p class="settings-card-sub">What ORBIT can reach. Connected means connected; "not connected" is exactly that — we never fake a live integration.</p>
+              </div>
+            </div>
+            <div class="integration-rows">
+              {% for conn in connections %}
+              <div class="integration-row">
+                <span class="integration-dot {{ 'on' if conn.status == 'connected' else '' }}" aria-hidden="true"></span>
+                <span class="integration-body">
+                  <span class="integration-name">{{ conn.name }}</span>
+                  <span class="integration-note">
+                    {% if conn.status == 'connected' %}Connected to your workspace.{% else %}Not connected — the integration isn't built yet.{% endif %}
+                  </span>
+                </span>
+                <span class="repo-badge{% if conn.status == 'connected' %} live{% endif %}">{{ 'Connected' if conn.status == 'connected' else 'Not connected' }}</span>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="settings-note">
+              <h3 class="settings-note-title">About Git provider sign-in</h3>
+              <p>{{ scope_note_github }}</p>
+              <p style="margin-bottom:0;">Import entry points (GitHub, GitLab, Bitbucket, local folders, ZIP files) live on <a href="/create#import">the import page</a> and stay honestly disabled until the integration is real.</p>
+            </div>
+          </section>
+
+          {# ============ Notifications ============ #}
+          <section class="settings-card" id="notifications" aria-labelledby="notifHead">
+            <div class="settings-card-head">
+              <div>
+                <h2 class="settings-card-title" id="notifHead">Notifications</h2>
+                <p class="settings-card-sub">What taps you on the shoulder. Each control here is real — off means off.</p>
+              </div>
+            </div>
+            <div class="integration-rows" style="margin-bottom:16px;">
+              <div class="integration-row">
+                <span class="integration-body">
+                  <span class="integration-name">Reminders (daily plan &amp; check-ins)</span>
+                  <span class="integration-note">Managed from the sidebar — the switch there pauses or resumes them immediately. Quiet hours 22:00–08:00 (Africa/Lagos) always hold notices back.</span>
+                </span>
+                <span class="repo-badge live">Sidebar control</span>
+              </div>
+            </div>
+            <form method="post" action="/settings/notifications" class="settings-form">
+              <label class="switch-row">
+                <input type="checkbox" name="beta_updates"{% if prefs.get('beta_updates', True) %} checked{% endif %} />
+                <span class="switch-face" aria-hidden="true"></span>
+                <span class="switch-text">
+                  <span class="switch-name">In-product beta notes</span>
+                  <span class="switch-note">The "you're early" card on your dashboard. Turn it off and it stays off — no email marketing exists in this beta to opt out of.</span>
+                </span>
+              </label>
+              <div class="settings-actions">
+                <button class="btn-primary" type="submit">Save notification preferences</button>
+              </div>
+            </form>
+          </section>
+
+          {# ============ Privacy & security ============ #}
+          <section class="settings-card" id="security" aria-labelledby="securityHead">
+            <div class="settings-card-head">
+              <div>
+                <h2 class="settings-card-title" id="securityHead">Privacy &amp; security</h2>
+                <p class="settings-card-sub">What's stored, and the locks on your account.</p>
+              </div>
+            </div>
+
+            <div class="settings-note" style="margin-top:0;">
+              <h3 class="settings-note-title">Your privacy, in plain terms</h3>
+              <ul class="privacy-list">
+                <li>Conversations, projects and feedback live in this workspace's local store — not on an ORBIT server.</li>
+                <li>Voice clips are processed locally for transcription and discarded; they are never stored.</li>
+                <li>When you talk to a model, the request goes to your configured provider (Gemini, or your OpenRouter chain) and nowhere else.</li>
+                <li>Passwords are salted and hashed (PBKDF2); verification codes expire after ten minutes.</li>
+              </ul>
+            </div>
+
+            <h3 class="settings-subhead">Change password</h3>
+            <form method="post" action="/settings/password" class="settings-form">
+              {% if has_password %}
+              <div class="field">
+                <label class="field-label" for="pwCurrent">Current password</label>
+                <input class="text-input" id="pwCurrent" name="current" type="password" autocomplete="current-password" required />
+              </div>
+              {% else %}
+              <p class="field-hint" style="margin:0 0 12px;">You signed up via {{ provider_label }} and don't have a password yet — set one to also enable email sign-in.</p>
+              {% endif %}
+              <div class="settings-2col">
+                <div class="field">
+                  <label class="field-label" for="pwNew">New password</label>
+                  <input class="text-input" id="pwNew" name="new" type="password" autocomplete="new-password" minlength="8" required />
+                </div>
+                <div class="field">
+                  <label class="field-label" for="pwConfirm">Confirm new password</label>
+                  <input class="text-input" id="pwConfirm" name="confirm" type="password" autocomplete="new-password" required />
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button class="btn-primary" type="submit">Update password</button>
+              </div>
+              <p class="field-hint">Changing your password signs every other session out.</p>
+            </form>
+
+            <h3 class="settings-subhead">Sessions</h3>
+            <div class="integration-rows">
+              {% for s in sessions %}
+              <div class="integration-row">
+                <span class="integration-dot {{ 'on' if s.current else '' }}" aria-hidden="true"></span>
+                <span class="integration-body">
+                  <span class="integration-name">{{ s.label }}{% if s.current %} <span class="settings-verified">This device</span>{% endif %}</span>
+                  <span class="integration-note">Signed in {{ s.created_at }}</span>
+                </span>
+              </div>
+              {% endfor %}
+            </div>
+            <form method="post" action="/settings/sessions/revoke-others" class="settings-form">
+              <div class="settings-actions">
+                <button class="btn-ghost" type="submit"{% if sessions|length <= 1 %} disabled title="No other sessions to sign out"{% endif %}>Sign out everywhere else</button>
+              </div>
+            </form>
+          </section>
+
+          {# ============ Account ============ #}
+          <section class="settings-card" id="account" aria-labelledby="accountHead">
+            <div class="settings-card-head">
+              <div>
+                <h2 class="settings-card-title" id="accountHead">Account</h2>
+                <p class="settings-card-sub">The doors in and out.</p>
+              </div>
+            </div>
+            <div class="settings-actions" style="gap:12px;">
+              <a class="btn-ghost" href="/dashboard?tour=1" onclick="return true;">Replay the 60-second tour</a>
+              <a class="btn-ghost" href="/auth/logout">Sign out</a>
+            </div>
+            <div class="settings-note danger">
+              <h3 class="settings-note-title">Delete this account</h3>
+              <p>Removes your sign-in, personalization, preferences and feedback history, immediately. The shared local demo workspace on this machine (conversations and projects) is not tied to your account and stays put.</p>
+              <form method="post" action="/settings/delete" class="settings-form" data-confirm-form>
+                <div class="field">
+                  <label class="field-label" for="deleteConfirm">Type <strong>{{ account.email }}</strong> to confirm</label>
+                  <input class="text-input" id="deleteConfirm" name="confirm" type="text" autocomplete="off" spellcheck="false" data-confirm-match="{{ account.email }}" />
+                </div>
+                <button class="btn-danger" type="submit" disabled data-confirm-button>Delete my account</button>
+              </form>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+{% endblock %}
