@@ -1,0 +1,58 @@
+{% extends "public.html" %}
+{% from "_auth_macros.html" import error_box, off_notice %}
+{% block title %}orbit — Set a new password{% endblock %}
+{% block nav %}{% endblock %}
+{% block body %}
+<main class="auth-shell">
+  <section class="auth-card" aria-labelledby="resetTitle">
+    <img class="card-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+    <p class="auth-eyebrow">Recovery</p>
+    <h1 class="auth-title" id="resetTitle">Set a new password</h1>
+    {% if accounts_off %}
+    {{ off_notice() }}
+    {% else %}
+    <p class="auth-sub">
+      If an account exists for <span class="code-sent-to">{{ email }}</span>, a 6-digit
+      code went out for it. Enter the code with your new password.
+    </p>
+
+    {{ error_box(error) }}
+
+    <form method="post" action="/auth/reset" data-auth-form="reset" novalidate>
+      <div class="field">
+        <label class="field-label" for="code">Reset code</label>
+        <input class="text-input code-input" id="code" name="code" type="text" inputmode="numeric"
+               autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="––––––"
+               required data-code-input />
+        {% if attempts_left is not none and attempts_left <= 3 %}
+        <p class="field-hint" style="margin-top:6px;">{{ attempts_left }} attempt{{ 's' if attempts_left != 1 }} left on this code.</p>
+        {% endif %}
+      </div>
+      <div class="field">
+        <label class="field-label" for="password">New password</label>
+        <input class="text-input" id="password" name="password" type="password" autocomplete="new-password"
+               minlength="8" required data-validate="password" data-strength-meter="pwMeter" data-strength-note="pwNote" />
+        <div class="pw-meter" id="pwMeter" data-score="0" aria-hidden="true"><span></span><span></span><span></span></div>
+        <p class="pw-note" id="pwNote"></p>
+        <p class="field-error" data-error-for="password">Use at least 8 characters, with a letter and a number.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="confirm">Confirm new password</label>
+        <input class="text-input" id="confirm" name="confirm" type="password" autocomplete="new-password"
+               required data-validate="confirm" data-match="password" />
+        <p class="field-error" data-error-for="confirm">The two passwords don't match.</p>
+      </div>
+      <button class="btn-primary btn-block" type="submit" data-busy-label="Updating…">
+        <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Update password</span>
+      </button>
+    </form>
+
+    {% if demo_code %}
+    <div class="demo-chip" role="status">
+      <span><strong>Demo build — no email is sent.</strong><br />Your reset code, shown here instead: <code>{{ demo_code }}</code></span>
+    </div>
+    {% endif %}
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

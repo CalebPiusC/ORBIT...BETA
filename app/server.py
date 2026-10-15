@@ -31,10 +31,38 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from flask import Flask, Response, redirect, render_template, request, stream_with_context, url_for
+from flask import (
+    Flask,
+    Response,
+    g,
+    redirect,
+    render_template,
+    request,
+    session,
+    stream_with_context,
+    url_for,
+)
 from providers.base import ChatMessage as ProvChatMessage, StreamChunk, ToolProposal
 from werkzeug.exceptions import RequestEntityTooLarge
 
+from app.accounts import (
+    EXPERIENCE_LEVELS,
+    FEEDBACK_KINDS,
+    INTERESTS,
+    LANGUAGES,
+    MIN_PASSWORD_CHARS,
+    OAUTH_SCOPE_COPY,
+    PROVIDER_LABELS,
+    ROLES,
+    AccountError,
+    AccountStore,
+    checklist_for,
+    email_issues,
+    password_issues,
+    recommendations_for,
+    session_label,
+    workspace_view,
+)
 from app.actions import PendingActions, ProposalRejected
 from app.age import human_age
 from app.agents import MAIN_AGENT_ID, agent_types, get_agent, search_agents
@@ -270,6 +298,7 @@ def create_app(
     voice_service: Any | None = None,
     model_audit: AuditLog | None = None,
     projects: ProjectStore | None = None,
+    accounts: AccountStore | None = None,
 ) -> Flask:
     """Build the Flask app.
 
@@ -287,12 +316,19 @@ def create_app(
     ``projects`` is the Projects store. The default is in-memory — the app
     factory never writes runtime/projects.json, same as the heartbeat. At boot
     ``run_app`` swaps in the file-backed store so a restart keeps projects.
+
+    ``accounts`` is the onboarding/account store. ``None`` means the launch has
+    no account wall at all: every page behaves exactly as the single-user app
+    always has (that is what the test suite creates). ``run_app`` attaches a
+    file-backed store so the real server gets the full sign-up → verify →
+    welcome → dashboard flow.
     """
     app = Flask(__name__, template_folder="templates")
-    app.secret_key = "orbit-dev-secret"
+    app.secret_key = os.environ.get("ORBIT_SECRET_KEY", "orbit-dev-secret")
     app.config["MAX_CONTENT_LENGTH"] = MAX_VOICE_UPLOAD_BYTES
     app.config["PROVIDER"] = provider
     app.config["STORE"] = store or Store()
+    app.config["ACCOUNTS"] = accounts
     app.config["PROJECTS"] = projects if projects is not None else ProjectStore()
     app.config["FACTS"] = facts if facts is not None else FactStore()
     app.config["HEARTBEAT"] = heartbeat
@@ -411,13 +447,128 @@ def create_app(
             # A failure to write diagnostics must not replace the failure itself.
             log.exception("could not write voice diagnostics to audit.log")
 
+    # ----- onboarding & account state --------------------------------------
+    # The app runs in one of two modes:
+    #   * no AccountStore (the default — every test launch): no sign-in wall,
+    #     no chrome additions — exactly the single-user app it has always been;
+    #   * an AccountStore attached (what run_app does): signed-out visitors
+    #     get the marketing landing page and the auth flow, app pages ask for
+    #     a sign-in first, and registration lands on the onboarding path.
+    ACCOUNTS_PUBLIC_ENDPOINTS = {
+        "home", "landing", "static",
+        "auth_login", "auth_signup", "auth_logout",
+        "auth_verify", "auth_verify_resend",
+        "auth_forgot", "auth_reset", "auth_oauth",
+    }
+    # An unverified account may only reach its verification page (and sign
+    # out). Signing up starts a session immediately so the verify screen knows
+    # whose email it is confirming.
+    ACCOUNTS_PENDING_ENDPOINTS = {
+        "static", "auth_verify", "auth_verify_resend", "auth_logout",
+    }
+
+    def _accounts() -> AccountStore | None:
+        return app.config.get("ACCOUNTS")
+
+    def _signed_in_account() -> dict[str, Any] | None:
+        """The account this request's session names (populated by the guard)."""
+        account: dict[str, Any] | None = getattr(g, "account", None)
+        return account
+
+    @app.before_request
+    def _account_guard() -> Response | None:
+        store = _accounts()
+        if store is None:
+            g.account = None
+            return None
+        account: dict[str, Any] | None = None
+        account_id = session.get("account_id", "")
+        sid = session.get("sid", "")
+        if account_id and sid and store.session_valid(account_id, sid):
+            account = store.by_id(account_id)
+        if account_id and account is None:
+            # The account or session vanished (deleted, password reset, or a
+            # "sign out everywhere"): the cookie alone must not keep working.
+            session.pop("account_id", None)
+            session.pop("sid", None)
+        g.account = account
+        endpoint = request.endpoint or ""
+        if account is None:
+            if endpoint in ACCOUNTS_PUBLIC_ENDPOINTS:
+                return None
+            return redirect(url_for("auth_login", next=request.path))
+        if not account.get("email_verified") and endpoint not in ACCOUNTS_PENDING_ENDPOINTS:
+            return redirect(url_for("auth_verify"))
+        return None
+
+    def _user_view() -> Any:
+        """Who the chrome (sidebar, topbar, greetings) says is here: the
+        signed-in account when accounts are on, the store's user otherwise.
+        Shaped like ``Store.user`` so templates never need to know which."""
+        account = _signed_in_account()
+        if account is not None:
+            return workspace_view(account)
+        return app.config["STORE"].user
+
+    def _greeting() -> str:
+        account = _signed_in_account()
+        if account is None:
+            return app.config["STORE"].greeting()
+        hour = datetime.now().hour
+        part = "morning" if hour < 12 else "afternoon" if hour < 18 else "evening"
+        return f"Good {part}, {account.get('name', '') or 'there'}."
+
+    def _sign_in(account: dict[str, Any]) -> None:
+        """Open a tracked browser session for an account and apply the
+        preferences it saved (the Security settings page lists these sessions;
+        the default response depth follows the account, not the device)."""
+        store = _accounts()
+        if store is None:
+            return
+        store.record_login(account["id"])
+        sid = store.start_session(account["id"], user_agent=request.headers.get("User-Agent", ""))
+        session["account_id"] = account["id"]
+        session["sid"] = sid
+        g.account = store.by_id(account["id"]) or account
+        depth = ((g.account or {}).get("prefs") or {}).get("default_depth", "quick")
+        st: Store = app.config["STORE"]
+        if depth != st.thinking_level:
+            st.set_thinking_level(depth)
+
+    def _sign_out() -> None:
+        store = _accounts()
+        account_id, sid = session.get("account_id", ""), session.get("sid", "")
+        if store is not None and account_id and sid:
+            store.end_session(account_id, sid)
+        session.pop("account_id", None)
+        session.pop("sid", None)
+        g.account = None
+
+    def _safe_next(raw: str, default: str = "/dashboard") -> str:
+        """Keep ?next= targets on this site — a login link must never become
+        an open redirect to somewhere else."""
+        text = (raw or "").strip()
+        if text.startswith("/") and not text.startswith("//"):
+            return text
+        return default
+
+    @app.get("/landing")
+    def landing() -> str:
+        """The marketing page, reachable from inside the app too (footer links).
+        Signed-out visits to `/` render this same page — see ``home``."""
+        return render_template("landing.html")
+
     @app.get("/")
     def home() -> str:
         st: Store = app.config["STORE"]
+        if _accounts() is not None and _signed_in_account() is None:
+            # The product's front door: signed-out visits get the landing page;
+            # the chat home belongs to signed-in sessions.
+            return render_template("landing.html")
         return render_template(
             "home.html",
-            user=st.user,
-            greeting=st.greeting(),
+            user=_user_view(),
+            greeting=_greeting(),
             mode=st.mode,
             thinking_level=st.thinking_level,
             conversations=st.conversations_grouped(),
@@ -446,16 +597,25 @@ def create_app(
 
     @app.context_processor
     def _chrome_defaults() -> dict[str, Any]:
-        """Template defaults every page needs, chiefly the sidebar's RECENT
-        PROJECTS list: the three most recently updated projects, straight
-        from the store. A page can override either value explicitly; the
-        sidebar shows nothing when there is nothing."""
+        """Template defaults every page needs: the sidebar's RECENT
+        PROJECTS list (the three most recently updated, straight from the
+        store), plus the signed-in account and whether this launch has
+        accounts at all — chrome (feedback widget, settings links) keys off
+        those two. A page can override any value explicitly."""
         st: Store | None = app.config.get("STORE")
         project_store: ProjectStore | None = app.config.get("PROJECTS")
+        account = _signed_in_account()
+        prefs = (account or {}).get("prefs") or {}
+        base: dict[str, Any] = {
+            "account": account,
+            "accounts_enabled": _accounts() is not None,
+            "beta_updates_off": bool(account) and not prefs.get("beta_updates", True),
+        }
         if st is None or project_store is None:
-            return {"sidebar_projects": [], "active_project_id": ""}
+            return {**base, "sidebar_projects": [], "active_project_id": ""}
         recent = project_store.list_for(st.user.id)[:3]
         return {
+            **base,
             "sidebar_projects": [{"id": p.id, "name": p.name} for p in recent],
             "active_project_id": "",
         }
@@ -464,7 +624,7 @@ def create_app(
         """What every page that renders the shared sidebar needs."""
         st: Store = app.config["STORE"]
         return {
-            "user": st.user,
+            "user": _user_view(),
             "mode": st.mode,
             "thinking_level": st.thinking_level,
             "conversations": st.conversations_grouped(),
@@ -598,7 +758,12 @@ def create_app(
         st: Store = app.config["STORE"]
         project_store: ProjectStore = app.config["PROJECTS"]
         # Only the idea path creates anything today: source is always "new",
-        # because every import entry point renders disabled on purpose.
+        # because every import entry point renders disabled on purpose. The
+        # four modes are the project's entry story, not different storage:
+        #   blank    — create directly, open the empty workspace;
+        #   guided   — the /create stepper reviewed it; may carry a first task;
+        #   describe — an idea the Main Agent will help plan (composer primed);
+        #   plan     — same landing as describe, from the classic radio choice.
         mode = (request.form.get("mode") or "blank").strip()
         try:
             project = project_store.create(
@@ -610,18 +775,28 @@ def create_app(
         except ValueError:
             _record_event("project_create_rejected", reason="invalid_input")
             return redirect(url_for("create_page", notice="invalid"), code=303)
+        if mode not in ("plan", "blank", "guided", "describe"):
+            mode = "blank"
+        first_task = " ".join((request.form.get("first_task") or "").split())
+        if mode == "guided" and first_task:
+            # The guided flow's suggested first task is real: it lands on the
+            # new project's map before the workspace even opens.
+            st.create_task(request=first_task, project_id=project.id)
         _record_event(
             "project_created",
             project_id=project.id,
             source=project.source,
             status=project.status,
-            mode=mode if mode in ("plan", "blank") else "blank",
+            mode=mode,
         )
-        # "Plan with the Main Agent" lands in the workspace with the composer
-        # primed to brief the agent; "blank" lands on the plain workspace.
+        # "Describe with the Main Agent" lands in the workspace with the
+        # composer primed to brief the agent; the others open the plain
+        # workspace (guided carries its plan hint).
         target = url_for("project_workspace", project_id=project.id)
-        if mode == "plan":
+        if mode in ("plan", "describe"):
             target += "?plan=1#agent"
+        elif mode == "guided":
+            target += "?guided=1"
         return redirect(target, code=303)
 
     @app.get("/agents")
@@ -1849,6 +2024,668 @@ def create_app(
             },
         )
 
+    # ======================================================================
+    # Onboarding, accounts & feedback
+    #
+    # Everything below is dormant until run_app attaches an AccountStore —
+    # with no store the pages render a "not this launch" notice and the guard
+    # above never fires, which is what keeps the whole pre-existing suite
+    # green. The flows themselves are real: real password hashing, real codes
+    # with expiry and attempt limits, real sessions, and a real feedback
+    # registry. The only demo seam is OAuth, and it is labelled on the page.
+    # ======================================================================
+
+    def _accounts_off(template: str, **context: Any) -> str:
+        """An auth page rendered in a no-accounts launch (tests, old demos):
+        the layout is still reviewable, the form is visibly non-functional."""
+        return render_template(template, accounts_off=True, **context)
+
+    def _require_account() -> dict[str, Any] | None:
+        """The verified account for onboarding routes, or None to bail out.
+        With no store there is never an account; with one, the request guard
+        has already handled redirecting guests and unverified sessions."""
+        return _signed_in_account()
+
+    # ----- registration & sign-in ----------------------------------------
+
+    @app.route("/auth/signup", methods=["GET", "POST"])
+    def auth_signup() -> str | Response:
+        store = _accounts()
+        if store is None:
+            return _accounts_off("auth_signup.html")
+        if request.method == "GET":
+            if (_acct := _signed_in_account()) is not None and _acct.get("email_verified"):
+                return redirect(url_for("dashboard"))
+            return render_template(
+                "auth_signup.html",
+                error="", values={}, min_password=MIN_PASSWORD_CHARS, next=_safe_next(request.args.get("next", ""), ""),
+            )
+        name = request.form.get("name", "")
+        email = request.form.get("email", "")
+        password = request.form.get("password", "")
+        confirm = request.form.get("confirm", "")
+        values = {"name": name, "email": email}
+        error = ""
+        if password != confirm:
+            error = "The two passwords don't match. Type them again."
+        else:
+            try:
+                account = store.register_email(name, email, password)
+            except AccountError as exc:
+                error = str(exc)
+            else:
+                _sign_in(account)
+                _record_event("account_registered", account_id=account["id"], provider="email")
+                return redirect(url_for("auth_verify", welcome="1"), code=303)
+        return render_template(
+            "auth_signup.html",
+            error=error, values=values, min_password=MIN_PASSWORD_CHARS,
+            next=_safe_next(request.form.get("next", ""), ""),
+        ), 422
+
+    @app.route("/auth/login", methods=["GET", "POST"])
+    def auth_login() -> str | Response:
+        store = _accounts()
+        if store is None:
+            return _accounts_off("auth_login.html")
+        notice = ""
+        if request.args.get("reset") == "1":
+            notice = "Your password is updated. Sign in with the new one."
+        elif request.args.get("signedout") == "1":
+            notice = "You're signed out. See you soon."
+        elif request.args.get("deleted") == "1":
+            notice = "Your account is deleted. The local demo workspace on this machine is untouched."
+        if request.method == "GET":
+            if (_acct := _signed_in_account()) is not None and _acct.get("email_verified"):
+                return redirect(_safe_next(request.args.get("next", "")))
+            return render_template(
+                "auth_login.html", error="", notice=notice, values={},
+                next=_safe_next(request.args.get("next", ""), ""),
+            )
+        email = request.form.get("email", "")
+        password = request.form.get("password", "")
+        next_target = _safe_next(request.form.get("next", ""), "")
+        account = store.by_email(email)
+        error = ""
+        if account is None:
+            error = "We couldn't find an account for that email. Check the spelling, or create an account below."
+        elif not store.check_password(account["id"], password):
+            error = "That password doesn't match this account. Try again or recover it below."
+        if error:
+            return render_template(
+                "auth_login.html", error=error, notice="",
+                values={"email": email}, next=next_target,
+            ), 422
+        _sign_in(account)
+        _record_event("account_signed_in", account_id=account["id"], provider=account.get("provider", "email"))
+        if not account.get("email_verified"):
+            # Correct credentials, email unconfirmed: into the pending lane.
+            return redirect(url_for("auth_verify"), code=303)
+        return redirect(next_target or url_for("dashboard"), code=303)
+
+    @app.get("/auth/logout")
+    def auth_logout() -> Response:
+        _sign_out()
+        if _accounts() is None:
+            return redirect(url_for("home"), code=303)
+        return redirect(url_for("auth_login", signedout="1"), code=303)
+
+    # ----- email verification ----------------------------------------------
+
+    VERIFY_REASONS = {
+        "wrong": "That code doesn't match. Check the six digits and try again.",
+        "expired": "That code has expired — we've issued a fresh one below.",
+        "locked": "Too many tries on that code. Request a new one below.",
+        "no-code": "There's no active code for this account. Request a new one below.",
+    }
+
+    @app.route("/auth/verify", methods=["GET", "POST"])
+    def auth_verify() -> str | Response:
+        store = _accounts()
+        if store is None:
+            return _accounts_off("auth_verify.html")
+        account = _signed_in_account()
+        if account is None:
+            return redirect(url_for("auth_login"))
+        if account.get("email_verified"):
+            return redirect(url_for("welcome_page"))
+        email = account.get("email", "")
+        context: dict[str, Any] = {
+            "email": email,
+            "demo_code": store.demo_code(email, "verify"),
+            "error": "",
+            "notice": "",
+            "attempts_left": store.attempts_left(email, "verify"),
+        }
+        if request.args.get("resent") == "1":
+            context["notice"] = "A new code is ready below."
+        if request.args.get("welcome") == "1":
+            context["notice"] = "Your account is created — one quick check to confirm this email is yours."
+        if request.method == "GET":
+            return render_template("auth_verify.html", **context)
+        result = store.verify_email(email, request.form.get("code", ""))
+        if result == "ok":
+            _record_event("account_email_verified", account_id=account["id"])
+            _record_event("account_onboarding_started", account_id=account["id"], path="email")
+            return redirect(url_for("welcome_page"), code=303)
+        if result == "expired":
+            store.resend_code(email, "verify")
+        context["error"] = VERIFY_REASONS.get(result, VERIFY_REASONS["wrong"])
+        context["demo_code"] = store.demo_code(email, "verify")
+        context["attempts_left"] = store.attempts_left(email, "verify")
+        return render_template("auth_verify.html", **context), 422
+
+    @app.post("/auth/verify/resend")
+    def auth_verify_resend() -> Response:
+        store = _accounts()
+        if store is None:
+            return redirect(url_for("home"), code=303)
+        account = _signed_in_account()
+        if account is None:
+            return redirect(url_for("auth_login"), code=303)
+        store.resend_code(account.get("email", ""), "verify")
+        _record_event("account_verify_code_resent", account_id=account["id"])
+        return redirect(url_for("auth_verify", resent="1"), code=303)
+
+    # ----- password recovery ---------------------------------------------------
+
+    @app.route("/auth/forgot", methods=["GET", "POST"])
+    def auth_forgot() -> str | Response:
+        store = _accounts()
+        if store is None:
+            return _accounts_off("auth_forgot.html")
+        if request.method == "GET":
+            return render_template("auth_forgot.html", errors=[])
+        email = request.form.get("email", "")
+        if email_issues(email):
+            return render_template("auth_forgot.html", errors=email_issues(email), values={"email": email}), 422
+        session["reset_email"] = email
+        # Silent by design for unknown addresses: the next page says the same
+        # thing either way, so this flow cannot reveal who has an account.
+        store.start_reset(email)
+        _record_event("account_reset_requested")
+        return redirect(url_for("auth_reset"), code=303)
+
+    @app.route("/auth/reset", methods=["GET", "POST"])
+    def auth_reset() -> str | Response:
+        store = _accounts()
+        if store is None:
+            return _accounts_off("auth_reset.html")
+        email = session.get("reset_email", "")
+        if not email:
+            return redirect(url_for("auth_forgot"))
+        context: dict[str, Any] = {
+            "email": email,
+            "demo_code": store.demo_code(email, "reset"),
+            "error": "",
+            "attempts_left": store.attempts_left(email, "reset"),
+        }
+        if request.method == "GET":
+            return render_template("auth_reset.html", **context)
+        error = ""
+        if request.form.get("password", "") != request.form.get("confirm", ""):
+            error = "The two passwords don't match. Type them again."
+        else:
+            result = store.complete_reset(email, request.form.get("code", ""), request.form.get("password", ""))
+            if result == "ok":
+                session.pop("reset_email", None)
+                _record_event("account_password_reset")
+                return redirect(url_for("auth_login", reset="1"), code=303)
+            if result == "weak-password":
+                error = password_issues(request.form.get("password", ""))[0] or "Choose a stronger password."
+            elif result == "expired":
+                store.resend_code(email, "reset")
+                error = "That code has expired — a fresh one is shown below."
+            else:
+                error = VERIFY_REASONS.get(result, VERIFY_REASONS["wrong"])
+        context["error"] = error
+        context["demo_code"] = store.demo_code(email, "reset")
+        context["attempts_left"] = store.attempts_left(email, "reset")
+        return render_template("auth_reset.html", **context), 422
+
+    # ----- provider sign-in (an honest demo flow) ------------------------------
+
+    OAUTH_DEFAULTS = {
+        "google": {"name": "Ada Osei", "email": "ada.osei@example.dev"},
+        "github": {"name": "Ada Osei", "email": "ada-osei@users.demo.orbit.local"},
+    }
+
+    @app.route("/auth/oauth/<provider>", methods=["GET", "POST"])
+    def auth_oauth(provider: str) -> str | Response:
+        store = _accounts()
+        if provider not in OAUTH_DEFAULTS:
+            return render_template("project_not_found.html", project_id=provider), 404
+        if store is None:
+            return _accounts_off("auth_oauth.html", provider=provider, provider_label=PROVIDER_LABELS[provider])
+        if request.method == "GET":
+            return render_template(
+                "auth_oauth.html",
+                provider=provider,
+                provider_label=PROVIDER_LABELS[provider],
+                defaults=OAUTH_DEFAULTS[provider],
+                scope_note=OAUTH_SCOPE_COPY.format(provider=PROVIDER_LABELS[provider]),
+                error="",
+            )
+        name = request.form.get("name", "")
+        email = request.form.get("email", "")
+        try:
+            account, is_new = store.oauth_signin(provider, name, email)
+        except AccountError as exc:
+            return render_template(
+                "auth_oauth.html",
+                provider=provider,
+                provider_label=PROVIDER_LABELS[provider],
+                defaults={"name": name, "email": email},
+                scope_note=OAUTH_SCOPE_COPY.format(provider=PROVIDER_LABELS[provider]),
+                error=str(exc),
+            ), 422
+        _sign_in(account)
+        _record_event("account_signed_in", account_id=account["id"], provider=provider, new_account=is_new)
+        if is_new:
+            _record_event("account_registered", account_id=account["id"], provider=provider)
+            return redirect(url_for("welcome_page"), code=303)
+        return redirect(url_for("dashboard"), code=303)
+
+    # ----- welcome & personalization --------------------------------------------
+
+    @app.get("/welcome")
+    def welcome_page() -> str | Response:
+        """The post-registration front door. Four honest starting options and
+        nothing mandatory — 'Skip' is a first-class citizen here."""
+        account = _require_account()
+        if account is None:
+            return redirect(url_for("home"))
+        onboarding = account.get("onboarding") or {}
+        return render_template(
+            "welcome.html",
+            first_name=(account.get("name", "") or "there").split(" ")[0],
+            tour_available=onboarding.get("tour", "new") == "new",
+            personalize_pending=not onboarding.get("personalized") and not onboarding.get("personalize_skipped"),
+        )
+
+    @app.route("/onboarding", methods=["GET", "POST"])
+    def personalize() -> str | Response:
+        """The optional four-question setup. Skippable by design: a skip is
+        saved as a real answer ('asked, declined') so the checklist can close
+        the item instead of nagging forever."""
+        store = _accounts()
+        account = _require_account()
+        if store is None or account is None:
+            return redirect(url_for("home"))
+        if request.method == "POST":
+            if request.form.get("skip") == "1":
+                store.update_personalization(account["id"], skipped=True)
+                _record_event("account_personalization_skipped", account_id=account["id"])
+                return redirect(url_for("dashboard"), code=303)
+            store.update_personalization(
+                account["id"],
+                role=request.form.get("role", ""),
+                experience=request.form.get("experience", ""),
+                interests=request.form.getlist("interests"),
+                languages=request.form.getlist("languages"),
+            )
+            _record_event("account_personalized", account_id=account["id"])
+            return redirect(url_for("dashboard", personalized="1"), code=303)
+        profile = account.get("profile") or {}
+        return render_template(
+            "personalize.html",
+            roles=ROLES,
+            experiences=EXPERIENCE_LEVELS,
+            interests=INTERESTS,
+            languages=LANGUAGES,
+            profile=profile,
+            standalone=True,  # the wizard shell; /settings edits the same answers inline
+        )
+
+    # ----- the adaptive dashboard ------------------------------------------------
+
+    @app.get("/dashboard")
+    def dashboard() -> str | Response:
+        """One dashboard, three honest states:
+
+        * new — no projects yet: the checklist and the three start paths carry
+          the page; recommendations come from personalization answers only;
+        * active — projects exist: the work itself leads, with the continue
+          strip and per-project cards;
+        * returning — the account has been here before: the greeting and the
+          jump-back-in strip switch to resuming rather than introducing.
+        """
+        st: Store = app.config["STORE"]
+        project_store: ProjectStore = app.config["PROJECTS"]
+        store = _accounts()
+        account = _signed_in_account()
+        projects = project_store.list_for(st.user.id)
+        if account is not None and store is not None:
+            onboarding = account.get("onboarding") or {}
+            returning = bool(onboarding.get("visited_dashboard_at"))
+            store.mark_dashboard_visited(account["id"])
+            checklist = checklist_for(account, len(projects))
+            checklist_done = all(item["done"] for item in checklist)
+            checklist_hidden = bool(onboarding.get("checklist_dismissed"))
+            recommendations = recommendations_for(account)
+            name = account.get("name", "")
+        else:
+            # No account store (plain demo launch): render the generic new-user
+            # state against the store's user so the page is still reviewable.
+            onboarding = {}
+            returning = False
+            checklist = []
+            checklist_done = True
+            checklist_hidden = True
+            recommendations = recommendations_for({"profile": {}})
+            name = st.user.name
+        latest_proj = projects[0] if projects else None
+        continue_strip = None
+        if latest_proj is not None:
+            newest = latest_task(st.tasks_for_project(latest_proj.id, st.user.id))
+            continue_strip = {
+                "id": latest_proj.id,
+                "name": latest_proj.name,
+                "task_title": newest.title if newest is not None else "No tasks yet",
+                "age": human_age(latest_proj.updated_at),
+            }
+        notice = ""
+        if request.args.get("personalized") == "1":
+            notice = "Preferences saved — your suggestions below already reflect them."
+        tour_autostart = (
+            account is not None
+            and (account.get("onboarding") or {}).get("tour", "new") == "new"
+            and request.args.get("tour") == "1"
+        )
+        hour = datetime.now().hour
+        daypart = "morning" if hour < 12 else "afternoon" if hour < 18 else "evening"
+        return render_template(
+            "dashboard.html",
+            first_name=(name or "there").split(" ")[0],
+            daypart=daypart,
+            state="new" if not projects else "active",
+            returning=returning,
+            projects=[_project_card_view(p, st) for p in projects[:6]],
+            project_count=len(projects),
+            checklist=checklist,
+            checklist_done=checklist_done,
+            checklist_hidden=checklist_hidden,
+            show_checklist=(account is not None and not checklist_done and not checklist_hidden),
+            recommendations=recommendations,
+            continue_strip=continue_strip,
+            notice=notice,
+            tour_autostart=tour_autostart,
+            tour_state=(account.get("onboarding") or {}).get("tour", "new") if account else "done",
+            dashboard_active=True,
+            projects_active=False,
+            agents_active=False,
+            **_sidebar_context(),
+        )
+
+    # ----- profile & settings ------------------------------------------------------
+
+    SETTINGS_TABS = (
+        ("profile", "Profile"),
+        ("preferences", "Preferences"),
+        ("integrations", "Integrations"),
+        ("notifications", "Notifications"),
+        ("security", "Privacy & security"),
+        ("account", "Account"),
+    )
+
+    @app.get("/settings")
+    def settings_page() -> str | Response:
+        account = _require_account()
+        if account is None:
+            return redirect(url_for("home"))
+        saved = request.args.get("saved", "").strip()
+        error = request.args.get("error", "").strip()
+        sid = session.get("sid", "")
+        sessions = []
+        for entry in (account.get("sessions") or []):
+            sessions.append(
+                {
+                    "label": session_label(entry.get("agent", "")),
+                    "created_at": (entry.get("created_at") or "")[:10],
+                    "current": bool(sid) and entry.get("sid") == sid,
+                }
+            )
+        saved_labels = {
+            "profile": "Profile saved.",
+            "preferences": "Preferences saved.",
+            "notifications": "Notification preferences saved.",
+            "password": "Password updated — other sessions were signed out.",
+            "sessions": "Everywhere else is signed out.",
+        }
+        error_labels = {
+            "password-current": "That current password doesn't match — nothing was changed.",
+            "password-weak": f"Use at least {MIN_PASSWORD_CHARS} characters, with a letter and a number.",
+            "password-mismatch": "The two new passwords don't match.",
+            "delete-confirm": "Type your email address exactly to confirm deletion.",
+            "name": "A name is required.",
+        }
+        return render_template(
+            "settings.html",
+            tabs=SETTINGS_TABS,
+            active_tab=request.args.get("tab", "profile").strip() or "profile",
+            saved_message=saved_labels.get(saved, ""),
+            error_message=error_labels.get(error, ""),
+            roles=ROLES,
+            experiences=EXPERIENCE_LEVELS,
+            interests=INTERESTS,
+            languages=LANGUAGES,
+            profile=account.get("profile") or {},
+            prefs=account.get("prefs") or {},
+            provider_label=PROVIDER_LABELS.get(account.get("provider", "email"), "Email and password"),
+            has_password=bool(account.get("password_hash")),
+            sessions=sessions,
+            scope_note_github=OAUTH_SCOPE_COPY.format(provider="GitHub"),
+            settings_active=True,
+            projects_active=False,
+            agents_active=False,
+            **_sidebar_context(),
+        )
+
+    def _settings_redirect(saved: str = "", error: str = "", tab: str = "") -> Response:
+        args: dict[str, str] = {}
+        if saved:
+            args["saved"] = saved
+        if error:
+            args["error"] = error
+        if tab:
+            args["tab"] = tab
+        return redirect(url_for("settings_page", **args) + f"#{tab or 'profile'}", code=303)
+
+    @app.post("/settings/profile")
+    def settings_profile() -> Response:
+        store = _accounts()
+        account = _require_account()
+        if store is None or account is None:
+            return redirect(url_for("home"))
+        name = request.form.get("name", "").strip()
+        if not name:
+            return _settings_redirect(error="name", tab="profile")
+        store.update_profile(account["id"], name=name, workspace=request.form.get("workspace", ""))
+        return _settings_redirect(saved="profile", tab="profile")
+
+    @app.post("/settings/preferences")
+    def settings_preferences() -> Response:
+        store = _accounts()
+        account = _require_account()
+        if store is None or account is None:
+            return redirect(url_for("home"))
+        store.update_personalization(
+            account["id"],
+            role=request.form.get("role", ""),
+            experience=request.form.get("experience", ""),
+            interests=request.form.getlist("interests"),
+            languages=request.form.getlist("languages"),
+        )
+        depth = request.form.get("default_depth", "quick")
+        store.set_pref(account["id"], "default_depth", depth)
+        st: Store = app.config["STORE"]
+        if depth in ("quick", "deep") and depth != st.thinking_level:
+            st.set_thinking_level(depth)
+        return _settings_redirect(saved="preferences", tab="preferences")
+
+    @app.post("/settings/notifications")
+    def settings_notifications() -> Response:
+        store = _accounts()
+        account = _require_account()
+        if store is None or account is None:
+            return redirect(url_for("home"))
+        # An unchecked checkbox posts nothing; False is a real answer here.
+        store.set_pref(account["id"], "beta_updates", request.form.get("beta_updates") == "on")
+        return _settings_redirect(saved="notifications", tab="notifications")
+
+    @app.post("/settings/password")
+    def settings_password() -> Response:
+        store = _accounts()
+        account = _require_account()
+        if store is None or account is None:
+            return redirect(url_for("home"))
+        current = request.form.get("current", "")
+        new = request.form.get("new", "")
+        confirm = request.form.get("confirm", "")
+        if new != confirm:
+            return _settings_redirect(error="password-mismatch", tab="security")
+        if account.get("password_hash") and not store.check_password(account["id"], current):
+            return _settings_redirect(error="password-current", tab="security")
+        if store.set_password(account["id"], new) != "ok":
+            return _settings_redirect(error="password-weak", tab="security")
+        # set_password cleared every session; re-open only this browser's.
+        sid = store.start_session(account["id"], user_agent=request.headers.get("User-Agent", ""))
+        session["sid"] = sid
+        _record_event("account_password_changed", account_id=account["id"])
+        return _settings_redirect(saved="password", tab="security")
+
+    @app.post("/settings/sessions/revoke-others")
+    def settings_revoke_sessions() -> Response:
+        store = _accounts()
+        account = _require_account()
+        if store is None or account is None:
+            return redirect(url_for("home"))
+        store.revoke_other_sessions(account["id"], session.get("sid", ""))
+        _record_event("account_sessions_revoked", account_id=account["id"])
+        return _settings_redirect(saved="sessions", tab="security")
+
+    @app.post("/settings/tour-replay")
+    def settings_tour_replay() -> Response:
+        store = _accounts()
+        account = _require_account()
+        if store is None or account is None:
+            return redirect(url_for("home"))
+        store.reset_tour(account["id"])
+        return redirect(url_for("dashboard", tour="1"), code=303)
+
+    @app.post("/settings/delete")
+    def settings_delete() -> Response:
+        store = _accounts()
+        account = _require_account()
+        if store is None or account is None:
+            return redirect(url_for("home"))
+        if request.form.get("confirm", "").strip().lower() != account.get("email", "").lower():
+            return _settings_redirect(error="delete-confirm", tab="account")
+        _record_event("account_deleted", account_id=account["id"])
+        account_id, sid = account["id"], session.get("sid", "")
+        store.delete_account(account_id)
+        session.pop("account_id", None)
+        session.pop("sid", None)
+        g.account = None
+        _ = sid
+        return redirect(url_for("auth_login", deleted="1"), code=303)
+
+    # ----- beta feedback -------------------------------------------------------------
+
+    @app.route("/feedback", methods=["GET", "POST"])
+    def feedback_page() -> str | Response:
+        """The dedicated feedback space. The same form also lives in the
+        floating dialog (``_feedback_widget.html``) so reporting never means
+        leaving the page you're on — submissions from both land here."""
+        store = _accounts()
+        account = _require_account()
+        if store is None or account is None:
+            return redirect(url_for("home"))
+        if request.method == "POST":
+            kind = request.form.get("kind", "")
+            title = request.form.get("title", "")
+            body = request.form.get("body", "")
+            try:
+                entry = store.add_feedback(account["id"], kind, title, body, page=request.form.get("page", "/feedback"))
+            except ValueError as exc:
+                return render_template(
+                    "feedback.html",
+                    kinds=FEEDBACK_KINDS,
+                    error=str(exc),
+                    values={"kind": kind, "title": title, "body": body},
+                    entries=store.feedback_for(account["id"]),
+                    sent=False,
+                    projects_active=False,
+                    agents_active=False,
+                    **_sidebar_context(),
+                ), 422
+            _record_event("beta_feedback_submitted", account_id=account["id"], kind=kind, feedback_id=entry["id"])
+            return redirect(url_for("feedback_page", sent="1"), code=303)
+        return render_template(
+            "feedback.html",
+            kinds=FEEDBACK_KINDS,
+            error="",
+            values={},
+            entries=store.feedback_for(account["id"]),
+            sent=request.args.get("sent") == "1",
+            projects_active=False,
+            agents_active=False,
+            **_sidebar_context(),
+        )
+
+    @app.post("/api/feedback")
+    def api_feedback() -> Response:
+        """The floating dialog's submit path: JSON in, JSON out, no navigation,
+        so a report never costs the work on screen."""
+        store = _accounts()
+        account = _signed_in_account()
+        if store is None:
+            return _json({"error": "Feedback needs an accounts-enabled launch."}, 503)
+        if account is None:
+            return _json({"error": "Sign in to send feedback."}, 401)
+        payload = request.get_json(silent=True) or {}
+        try:
+            entry = store.add_feedback(
+                account["id"],
+                str(payload.get("kind", "")),
+                str(payload.get("title", "")),
+                str(payload.get("body", "")),
+                page=str(payload.get("page", "")),
+            )
+        except ValueError as exc:
+            return _json({"error": str(exc)}, 400)
+        _record_event("beta_feedback_submitted", account_id=account["id"], kind=entry["kind"], feedback_id=entry["id"], via="widget")
+        return _json({"ok": True, "id": entry["id"]})
+
+    @app.post("/api/onboarding/tour")
+    def api_onboarding_tour() -> Response:
+        """How the tour ended, recorded once so it never nags again."""
+        store = _accounts()
+        account = _signed_in_account()
+        if store is None:
+            return _json({"error": "No account store on this launch."}, 503)
+        if account is None:
+            return _json({"error": "Sign in first."}, 401)
+        state = str((request.get_json(silent=True) or {}).get("state", ""))
+        if state not in ("done", "skipped"):
+            return _json({"error": "state must be 'done' or 'skipped'."}, 400)
+        store.mark_tour(account["id"], state)
+        _record_event("account_tour_marked", account_id=account["id"], state=state)
+        return _json({"ok": True, "state": state})
+
+    @app.post("/api/onboarding/checklist")
+    def api_onboarding_checklist() -> Response:
+        """Dismiss (or restore) the new-user checklist — the person's call."""
+        store = _accounts()
+        account = _signed_in_account()
+        if store is None:
+            return _json({"error": "No account store on this launch."}, 503)
+        if account is None:
+            return _json({"error": "Sign in first."}, 401)
+        dismissed = bool((request.get_json(silent=True) or {}).get("dismissed", True))
+        store.dismiss_checklist(account["id"], dismissed)
+        return _json({"ok": True, "dismissed": dismissed})
+
     return app
 
 
@@ -1914,6 +2751,18 @@ def run_app(app: Flask) -> None:
     if project_store is not None and not project_store.persistent:
         app.config["PROJECTS"] = ProjectStore(
             Path(os.environ.get("ORBIT_PROJECTS_PATH", "runtime/projects.json"))
+        )
+
+    # Accounts persist the same way: attaching a store here is what turns the
+    # whole onboarding flow (landing → sign-up → verify → welcome → dashboard)
+    # on for the real server. Tests create the app without one and never see
+    # the sign-in wall.
+    accounts = app.config.get("ACCOUNTS")
+    if accounts is None:
+        from app.accounts import AccountStore
+
+        app.config["ACCOUNTS"] = AccountStore(
+            Path(os.environ.get("ORBIT_ACCOUNTS_PATH", "runtime/accounts.json"))
         )
 
     if app.config.get("ACTIONS") is None:

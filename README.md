@@ -392,3 +392,34 @@ whole of it. The seeded example task (`T1`) keeps its request text and nothing e
 ships with no steps, no file diffs and no activity lines, because those used to be seeded
 with invented numbers that read as progress the agent had made.
 
+## Accounts, signup, and the open-beta layer
+
+`run_demo.py` (and `python -m app.server`) now attach an `AccountStore`
+(`runtime/accounts.json`, override with `ORBIT_ACCOUNTS_PATH`), which turns on the
+product's front door. A signed-out visitor lands on a marketing page and a sign-in
+wall; everything workspace-side asks for sign-in; the chat, projects and agents
+stay exactly as they were once you are inside. **Any `create_app()` call without a
+store — every test launch — is the single-user app it has always been: no guard, no
+wall, no new chrome.** `ORBIT_SECRET_KEY` sets the session secret (the committed
+default is a dev value).
+
+What the layer does, honestly:
+
+- **Signup/sign-in** — email + password (salted PBKDF2, 10-minute 6-attempt codes,
+  per-account sessions you can inspect and revoke in Settings → Security). This
+  demo build sends no email, so the verify/reset pages say so in a labelled chip
+  and show the code there instead.
+- **Provider sign-in is a declared demo.** The OAuth pages pass through a consent
+  screen that says no request leaves the app and that sign-in *never grants access
+  to any repository*; real repo connections remain a separate, still-unbuilt step.
+- **Onboarding** — welcome choices that all lead somewhere real, a four-question
+  personalize wizard (skipping counts as done but answers nothing), a dashboard
+  checklist that closes itself as you genuinely finish things, and a skippable
+  40-second tour recorded server-side so it never nags twice (Settings replays it).
+- **Beta feedback** — a floating button on every signed-in page that reports via
+  fetch and never navigates away, plus the `/feedback` page with your history.
+
+The full contract, the load-bearing honesty copy, and the test layout live in
+`docs/ONBOARDING.md` — read it before touching `app/accounts.py` or any `/auth/*`
+route.
+

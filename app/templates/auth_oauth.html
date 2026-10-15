@@ -1,0 +1,68 @@
+{% extends "public.html" %}
+{% from "_auth_macros.html" import google_glyph, github_glyph, error_box, off_notice %}
+{% block title %}orbit — Continue with {{ provider_label }}{% endblock %}
+{% block nav %}{% endblock %}
+{% block body %}
+<main class="auth-shell">
+  <section class="auth-card" aria-labelledby="oauthTitle">
+    <div class="consent-head">
+      <span class="consent-avatar" aria-hidden="true">
+        {% if provider == "github" %}{{ github_glyph() }}{% else %}{{ google_glyph() }}{% endif %}
+      </span>
+      <div>
+        <div class="consent-name" id="oauthTitle">Continue with {{ provider_label }}</div>
+        <div class="consent-sub">You're signing in to <strong>orbit</strong> · beta</div>
+      </div>
+    </div>
+
+    <div class="demo-chip" role="note" style="margin:0 0 16px;">
+      <span><strong>Demo flow.</strong><br />This beta build runs a local account system — no real request is made to {{ provider_label }}. The screen mirrors the real flow so you can review it end to end.</span>
+    </div>
+
+    {% if accounts_off %}
+    {{ off_notice() }}
+    {% else %}
+    <p class="auth-sub" style="margin-bottom:12px;">ORBIT would receive only:</p>
+    <ul class="consent-scopes">
+      <li>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M4.5 12.5l5 5 10-11"/></svg>
+        <span><strong>Your name and email address</strong> — to create your account and greet you properly. That's the whole list.</span>
+      </li>
+      {% if provider == "github" %}
+      <li class="no">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        <span><strong>Not repository access.</strong> Signing in with GitHub tells ORBIT who you are — it never grants access to any repository. Connecting repos is a separate step that always asks first, and it isn't built yet.</span>
+      </li>
+      {% endif %}
+    </ul>
+
+    {{ error_box(error) }}
+
+    <form method="post" action="/auth/oauth/{{ provider }}" data-auth-form="oauth" novalidate>
+      <div class="field">
+        <label class="field-label" for="name">Name on the account</label>
+        <input class="text-input" id="name" name="name" type="text" maxlength="60" autocomplete="name"
+               value="{{ defaults.get('name', '') }}" required data-validate="name" />
+        <p class="field-error" data-error-for="name">A name is needed to create your account.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="email">Email</label>
+        <input class="text-input" id="email" name="email" type="email" autocomplete="email"
+               value="{{ defaults.get('email', '') }}" required data-validate="email" />
+        <p class="field-error" data-error-for="email">That doesn't look like a valid email address.</p>
+      </div>
+      <button class="btn-primary btn-block" type="submit" data-busy-label="Signing you in…">
+        <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Authorize ORBIT <span style="opacity:.75; font-weight:500;">(demo)</span></span>
+      </button>
+      <div class="auth-foot-row">
+        <a href="/auth/signup" style="color: var(--text-dim); text-decoration: none;">Cancel and go back</a>
+      </div>
+    </form>
+    <p class="field-hint" style="margin:14px 0 0;">
+      Because {{ provider_label }} confirms your identity, accounts created this way
+      are verified on arrival — no email code needed.
+    </p>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

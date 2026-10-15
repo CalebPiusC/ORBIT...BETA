@@ -1,0 +1,176 @@
+{% extends "layout.html" %}
+{#
+  The adaptive dashboard — one page, three honest states.
+    new       → no projects yet: guidance leads (checklist + start paths).
+    active    → projects exist: the work leads (jump-back-in + cards).
+    returning → visited before: the greeting and strip switch to resuming.
+  Every number and row on the page is rendered from the stores; nothing is a
+  decorative placeholder.
+#}
+{% block title %}orbit — Dashboard{% endblock %}
+{% block body_class %}v2{% endblock %}
+{% block body %}
+<div class="screen screen--active" id="screen-dashboard"{% if tour_autostart %} data-tour-autostart="1"{% endif %}>
+{% include "_sidebar.html" %}
+
+  <main class="page-main">
+    {% include "_topbar.html" %}
+    <div class="page-wrap">
+
+      <div class="page-topline">
+        <nav class="page-crumb" aria-label="Breadcrumb"><span class="crumb-workspace">{{ user.workspace }}</span><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Dashboard</span></nav>
+        <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
+      </div>
+
+      {% if notice %}
+      <div class="notice-bar" role="status">
+        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v5M12 16h.01"/></svg>
+        <span>{{ notice }}</span>
+      </div>
+      {% endif %}
+
+      <header class="page-head-block" data-tour="greeting">
+        {% if state == "new" %}
+        <p class="page-eyebrow">Good {{ daypart }}, {{ first_name }}</p>
+        <h1 class="page-title">Let's get your first project off the ground.</h1>
+        <p class="page-sub">Your workspace is ready. Start anywhere below — every path lands somewhere real, and nothing here is required.</p>
+        {% elif returning %}
+        <p class="page-eyebrow">Welcome back, {{ first_name }}</p>
+        <h1 class="page-title">Pick up where you left off.</h1>
+        <p class="page-sub">{{ project_count }} project{{ 's' if project_count != 1 }} in your workspace. Jump back in, or start something new.</p>
+        {% else %}
+        <p class="page-eyebrow">Good {{ daypart }}, {{ first_name }}</p>
+        <h1 class="page-title">Your workspace, moving forward.</h1>
+        <p class="page-sub">{{ project_count }} project{{ 's' if project_count != 1 }} in flight. Open one, or start the next.</p>
+        {% endif %}
+      </header>
+
+      {% if continue_strip %}
+      <a class="continue-strip" href="/projects/{{ continue_strip.id }}" data-tour="resume">
+        <span class="continue-label">{{ 'Jump back in' if returning else 'Most recent' }}</span>
+        <span class="continue-name">{{ continue_strip.name }}</span>
+        <span class="continue-task">{{ continue_strip.task_title }}</span>
+        <span class="continue-age">Updated {{ continue_strip.age }}</span>
+        <span class="continue-go">Open workspace →</span>
+      </a>
+      {% endif %}
+
+      {% if show_checklist %}
+      <section class="checklist-card" aria-label="Getting set up" data-tour="checklist">
+        <div class="checklist-head">
+          <div>
+            <h2 class="checklist-title">Getting set up</h2>
+            <p class="checklist-sub">{{ checklist | selectattr('done') | list | length }} of {{ checklist | length }} done — each takes under a minute, and all but the first are optional.</p>
+          </div>
+          <button type="button" class="checklist-dismiss" data-checklist-dismiss aria-label="Hide the getting-started list" title="Hide this list">✕</button>
+        </div>
+        <ul class="dash-checklist">
+          {% for item in checklist %}
+          <li class="dash-check{% if item.done %} done{% endif %}">
+            <span class="dash-check-ico" aria-hidden="true">{{ '✓' if item.done else '' }}</span>
+            <span class="dash-check-label">{{ item.label }}</span>
+            {% if not item.done and item.href %}<a class="dash-check-go" href="{{ item.href }}">Do it →</a>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+
+      {% if state == "new" %}
+      <section aria-label="Ways to start" data-tour="start-paths">
+        <h2 class="dash-section-title">Three ways to start</h2>
+        <div class="hero-paths start-paths">
+          <a class="hero-card" href="/create">
+            <span class="hero-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
+            <span class="hero-card-name">Create directly</span>
+            <span class="hero-card-text">Name your project and open its workspace. Fastest way in — add the tasks yourself on the project map.</span>
+            <span class="hero-card-go">New project →</span>
+          </a>
+          <a class="hero-card" href="/create?guided=1">
+            <span class="hero-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="15.5" r="2.6"/><path d="M18 14.2v1.3l.9.9"/></svg></span>
+            <span class="hero-card-name">Follow the guided setup</span>
+            <span class="hero-card-text">Three short steps — what it is, what it's for, and the first task — reviewed before anything is created.</span>
+            <span class="hero-card-go">Guided setup →</span>
+          </a>
+          <a class="hero-card" href="/create#describe">
+            <span class="hero-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M4.5 5.5h15v10h-9l-4.5 4v-4H4.5z"/></svg></span>
+            <span class="hero-card-name">Describe it to the Main Agent</span>
+            <span class="hero-card-text">Say what you want in plain words. The Main Agent helps you shape the goal into real first tasks.</span>
+            <span class="hero-card-go">Describe an idea →</span>
+          </a>
+        </div>
+      </section>
+      {% else %}
+      <div class="dash-actions-row" data-tour="start-paths">
+        <a class="btn-primary" href="/create"><svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg> New project</a>
+        <a class="btn-ghost" href="/create#describe">Describe an idea</a>
+        <a class="btn-ghost" href="/agents">Browse specialists</a>
+        <a class="btn-ghost" href="/projects">All projects</a>
+      </div>
+
+      <section aria-label="Your projects">
+        <h2 class="dash-section-title">Your projects</h2>
+        <section class="projects-grid" style="padding: 0 0 14px;">
+          {% for p in projects %}
+          <article class="project-card">
+            <header class="pc-head">
+              <span class="pc-icon" aria-hidden="true">{% for part in p.name.split()[:2] %}{{ part[:1] }}{% endfor %}</span>
+              <span class="status-badge st-{{ p.status }}"><span class="dot"></span>{{ p.status_label }}</span>
+            </header>
+            <h2 class="pc-name"><a href="/projects/{{ p.id }}">{{ p.name }}</a></h2>
+            {% if p.summary %}
+            <p class="pc-desc">{{ p.summary }} <span class="pc-desc-origin">· AI summary</span></p>
+            {% elif p.description %}
+            <p class="pc-desc">{{ p.description }}</p>
+            {% else %}
+            <p class="pc-desc empty">No description yet.</p>
+            {% endif %}
+            <footer class="pc-foot">
+              {% if p.tasks_total %}
+              <p class="pc-taskline">{{ p.task_title }} <span class="pc-taskstate">· {{ p.task_state }}</span></p>
+              <p class="pc-progressline">{{ p.tasks_done }} of {{ p.tasks_total }} tasks complete{% if p.age %} · {{ p.age }}{% endif %}</p>
+              {% else %}
+              <p class="pc-taskline pc-taskline-none">No tasks yet — the map starts when the first one is added.</p>
+              {% endif %}
+              <a class="pc-open" href="/projects/{{ p.id }}" aria-label="Open {{ p.name }}">↗</a>
+            </footer>
+          </article>
+          {% endfor %}
+        </section>
+        {% if project_count > 6 %}<p class="grid-caption"><a href="/projects">View all {{ project_count }} projects →</a></p>{% endif %}
+      </section>
+      {% endif %}
+
+      {% if recommendations %}
+      <section aria-label="For you" data-tour="recommendations">
+        <h2 class="dash-section-title">For you</h2>
+        <div class="rec-grid">
+          {% for card in recommendations %}
+          <article class="rec-card">
+            <h3 class="rec-title">{{ card.title }}</h3>
+            <p class="rec-text">{{ card.text }}</p>
+            <a class="rec-go" href="{{ card.href }}">{{ card.go }} →</a>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+
+      {% if not beta_updates_off %}
+      <aside class="beta-note" aria-label="Beta note" data-tour="beta">
+        <img class="beta-note-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+        <div>
+          <h2 class="beta-note-title">You're early — and that's the point.</h2>
+          <p class="beta-note-text">
+            ORBIT is in open beta: the core loop is real, the unfinished edges are labelled, and the
+            floating <strong>Feedback</strong> button (bottom right, always there) sends notes without
+            leaving your page. Found something rough? Tell us — it goes straight into what ships next.
+          </p>
+        </div>
+        <a class="btn-ghost" href="/feedback">Send feedback</a>
+      </aside>
+      {% endif %}
+    </div>
+  </main>
+</div>
+{% endblock %}

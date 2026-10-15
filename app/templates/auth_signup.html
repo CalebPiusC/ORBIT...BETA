@@ -1,0 +1,69 @@
+{% extends "public.html" %}
+{% from "_auth_macros.html" import provider_buttons, error_box, off_notice %}
+{% block title %}orbit — Create your account{% endblock %}
+{% block nav %}{% endblock %}
+{% block body %}
+<main class="auth-shell">
+  <section class="auth-card" aria-labelledby="signupTitle">
+    <img class="card-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+    <p class="auth-eyebrow">Open beta · free</p>
+    <h1 class="auth-title" id="signupTitle">Create your account</h1>
+    <p class="auth-sub">One minute to your workspace. No credit card, no long setup — you can start building right after this.</p>
+
+    {% if accounts_off %}
+    {{ off_notice() }}
+    <form class="auth-off" aria-disabled="true">
+      {{ provider_buttons() }}
+      <div class="divider">or with email</div>
+      <div class="field"><label class="field-label">What should we call you?</label><input class="text-input" disabled /></div>
+      <div class="field"><label class="field-label">Email</label><input class="text-input" disabled /></div>
+      <div class="field"><label class="field-label">Password</label><input class="text-input" type="password" disabled /></div>
+      <button class="btn-primary btn-block" type="button" disabled>Create account</button>
+    </form>
+    {% else %}
+    {{ provider_buttons(next) }}
+    <div class="divider">or with email</div>
+
+    {{ error_box(error) }}
+
+    <form method="post" action="/auth/signup" data-auth-form="signup" novalidate>
+      <input type="hidden" name="next" value="{{ next }}" />
+      <div class="field">
+        <label class="field-label" for="name">What should we call you?</label>
+        <input class="text-input" id="name" name="name" type="text" maxlength="60" autocomplete="name"
+               placeholder="Ada Osei" value="{{ values.get('name', '') }}" required data-validate="name" />
+        <p class="field-error" data-error-for="name">Tell us what to call you — a name or a nickname both work.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="email">Email</label>
+        <input class="text-input" id="email" name="email" type="email" autocomplete="email"
+               placeholder="you@example.com" value="{{ values.get('email', '') }}" required data-validate="email" />
+        <p class="field-error" data-error-for="email">That doesn't look like a valid email address.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="password">Password <span class="field-hint">at least {{ min_password }} characters</span></label>
+        <input class="text-input" id="password" name="password" type="password" autocomplete="new-password"
+               minlength="{{ min_password }}" required data-validate="password" data-strength-meter="pwMeter" data-strength-note="pwNote" />
+        <div class="pw-meter" id="pwMeter" data-score="0" aria-hidden="true"><span></span><span></span><span></span></div>
+        <p class="pw-note" id="pwNote"></p>
+        <p class="field-error" data-error-for="password">Use at least {{ min_password }} characters, with a letter and a number.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="confirm">Confirm password</label>
+        <input class="text-input" id="confirm" name="confirm" type="password" autocomplete="new-password"
+               required data-validate="confirm" data-match="password" />
+        <p class="field-error" data-error-for="confirm">The two passwords don't match yet.</p>
+      </div>
+      <button class="btn-primary btn-block" type="submit" data-busy-label="Creating your account…">
+        <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Create account</span>
+      </button>
+    </form>
+    <p class="field-hint" style="margin:12px 0 0; text-align:center;">
+      Email sign-up asks you to confirm your address with a code. Google and GitHub confirm it for you.
+    </p>
+    {% endif %}
+
+    <p class="auth-alt">Already have an account? <a href="/auth/login">Sign in</a></p>
+  </section>
+</main>
+{% endblock %}

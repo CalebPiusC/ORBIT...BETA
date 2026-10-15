@@ -1,0 +1,157 @@
+{% extends "public.html" %}
+{# The marketing front door. Two honesty rules from the product carry over
+   here: every capability named below exists in the app today (the one card
+   that doesn't is labelled "coming"), and the beta is presented as what it
+   is — an early, working product with clearly marked edges, not a fake 1.0. #}
+{% block title %}orbit — an AI workspace for building software{% endblock %}
+{% block body %}
+<main>
+  <section class="hero">
+    <div>
+      <div class="hero-eyebrow">
+        <span class="beta-pill">Open beta</span>
+        <span class="note">Free while we build · your feedback shapes what ships</span>
+      </div>
+      <h1>Think it. Plan it with agents. <span class="mark">Build it</span> — with your approval at every step.</h1>
+      <p class="hero-sub">
+        ORBIT is an AI development workspace. Describe what you want in plain words, plan it
+        with the Main Agent and a bench of specialists, and watch the work happen — knowing
+        that nothing is ever committed without your explicit yes.
+      </p>
+      <div class="hero-actions">
+        {% if account %}
+        <a class="btn-primary btn-lg" href="/dashboard">Open your workspace</a>
+        <a class="btn-ghost btn-lg" href="/create">Start a project</a>
+        {% else %}
+        <a class="btn-primary btn-lg" href="/auth/signup">Create your free account</a>
+        <a class="btn-ghost btn-lg" href="/auth/login">Sign in</a>
+        {% endif %}
+      </div>
+      <p class="hero-micro"><span class="dot"></span>Working today: chat, agent tasks, project workspaces, voice, reminders — and a GitHub connection.</p>
+    </div>
+
+    <div class="hero-preview" role="img" aria-label="A preview of the ORBIT home screen: a chat composer, a conversation, and a sidebar of projects.">
+      <div class="hp-topbar">
+        <span class="win" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span>orbit — home</span>
+      </div>
+      <div class="hp-body">
+        <div class="hp-rail" aria-hidden="true">
+          <div class="hp-rail-item hot"></div>
+          <div class="hp-rail-item"></div>
+          <div class="hp-rail-item" style="width:75%"></div>
+          <div class="hp-rail-item" style="width:60%"></div>
+          <div class="hp-rail-item" style="width:80%"></div>
+        </div>
+        <div class="hp-main">
+          <div class="hp-bubble">Good evening. What are we building today?</div>
+          <div class="hp-bubble user">Add order tracking to my WhatsApp ordering bot.</div>
+          <div class="hp-bubble">
+            <span class="thinkline">Reading orders.py and bot.py… I’d add a status field, expose it through the lookup command, and keep everything on your branch.</span>
+            Here’s my plan — review the proposed changes, then approve.
+          </div>
+          <div class="hp-composer">Message Orbit… <span class="hp-send">➤</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="land-section" id="how">
+    <p class="land-eyebrow">How it works</p>
+    <h2 class="land-title">From first question to reviewed change, in three moves.</h2>
+    <p class="land-sub">ORBIT is built around one idea: the AI does the legwork, you keep the decisions. The approval gate isn’t a setting — it’s the product.</p>
+    <div class="step-grid">
+      <div class="step-card">
+        <span class="step-num">1</span>
+        <h3>Describe it</h3>
+        <p>Tell Orbit what you want in the home chat — Quick for fast answers, Deep when you want it to think harder. Attach files, talk by voice, whatever works.</p>
+      </div>
+      <div class="step-card">
+        <span class="step-num">2</span>
+        <h3>Plan it together</h3>
+        <p>Every project gets a workspace: a Main Agent that knows the goal, a task map you organize by stage, and specialists — Coding, Research, Debug, Review, Testing, Documentation — you assign where they fit.</p>
+      </div>
+      <div class="step-card">
+        <span class="step-num">3</span>
+        <h3>Approve, then it ships</h3>
+        <p>Proposed changes stay in draft until you say yes. No commits, no pushes without your explicit approval — that’s a rule the code enforces, not a caption.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="land-section" id="capabilities">
+    <p class="land-eyebrow">What’s inside</p>
+    <h2 class="land-title">A real workspace, not a chat box.</h2>
+    <p class="land-sub">Everything below is live in the beta today — and one thing that isn’t, marked as such, because pretending otherwise is how products lose your trust.</p>
+    <div class="cap-grid">
+      <div class="cap-card">
+        <h3>Chat &amp; Agent modes</h3>
+        <span class="cap-tag live">Working today</span>
+        <p>One toggle switches between conversation and an agent that plans a task, works a checklist, and drafts changes for your review.</p>
+      </div>
+      <div class="cap-card">
+        <h3>Project workspaces</h3>
+        <span class="cap-tag live">Working today</span>
+        <p>Each project has a map of tasks by stage, a detail view, and its own Main Agent thread with the project’s full context.</p>
+      </div>
+      <div class="cap-card">
+        <h3>Agent specialists</h3>
+        <span class="cap-tag live">Working today</span>
+        <p>Six specialties — Coding, Research, Debug, Review, Testing, Documentation — each with its own brief, assignable to any project.</p>
+      </div>
+      <div class="cap-card">
+        <h3>The approval gate</h3>
+        <span class="cap-tag live">Working today</span>
+        <p>Tool calls and proposed changes queue behind an explicit Approve. Every decision, including declines, is written to an audit log.</p>
+      </div>
+      <div class="cap-card">
+        <h3>Voice &amp; reminders</h3>
+        <span class="cap-tag live">Working today</span>
+        <p>Hold-to-talk input and spoken replies, plus daily-plan check-ins with quiet hours. Voice clips are processed locally and never stored.</p>
+      </div>
+      <div class="cap-card">
+        <h3>Git providers &amp; imports</h3>
+        <span class="cap-tag coming">Partly here</span>
+        <p>GitHub is connected today. GitLab, Bitbucket and file/ZIP import entry points are visible in the app — visibly disabled until they’re real.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="land-section" id="beta">
+    <div class="beta-band">
+      <div>
+        <p class="land-eyebrow">The beta promise</p>
+        <h2>Early, honest, and built with you.</h2>
+        <p>ORBIT is in open beta. That means the core loop is real and daily-usable, the edges are clearly marked, and your feedback goes straight into what gets built next. Here’s exactly where things stand:</p>
+        <ul class="beta-lists">
+          <li><span class="ok">✓</span><span><strong>Working daily:</strong> chat and agent modes, project workspaces, specialists, voice, reminders — with a streaming reply that never leaves you guessing.</span></li>
+          <li><span class="soon">◐</span><span><strong>Visibly unfinished:</strong> importing from GitLab/Bitbucket or files. The entry points are there — disabled and labelled, never faked as working.</span></li>
+          <li><span class="ok">✓</span><span><strong>Never unfinished:</strong> the approval gate. No change is applied without your yes, on day one, forever.</span></li>
+        </ul>
+      </div>
+      <div>
+        <p style="margin-top:0">Found a rough edge? Missing something you need? The beta runs on exactly that signal.</p>
+        <div class="hero-actions">
+          {% if account %}
+          <a class="btn-primary" href="/feedback">Send feedback</a>
+          {% else %}
+          <a class="btn-primary" href="/auth/signup">Join the beta</a>
+          {% endif %}
+          <a class="btn-ghost" href="/auth/login">Sign in</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="final-cta">
+    <h2>Your ideas are already orbiting. Bring them in.</h2>
+    {% if account %}
+    <p>You're signed in — your workspace is waiting.</p>
+    <a class="btn-primary btn-lg" href="/dashboard">Open your workspace</a>
+    {% else %}
+    <p>Create an account in under a minute. Free during the beta.</p>
+    <a class="btn-primary btn-lg" href="/auth/signup">Create your free account</a>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

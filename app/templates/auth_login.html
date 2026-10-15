@@ -1,0 +1,55 @@
+{% extends "public.html" %}
+{% from "_auth_macros.html" import provider_buttons, error_box, notice_box, off_notice %}
+{% block title %}orbit — Sign in{% endblock %}
+{% block nav %}{% endblock %}
+{% block body %}
+<main class="auth-shell">
+  <section class="auth-card" aria-labelledby="loginTitle">
+    <img class="card-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+    <p class="auth-eyebrow">Welcome back</p>
+    <h1 class="auth-title" id="loginTitle">Sign in to ORBIT</h1>
+    <p class="auth-sub">Your projects, conversations and agents are where you left them.</p>
+
+    {% if accounts_off %}
+    {{ off_notice() }}
+    <form aria-disabled="true">
+      {{ provider_buttons() }}
+      <div class="divider">or with email</div>
+      <div class="field"><label class="field-label">Email</label><input class="text-input" disabled /></div>
+      <div class="field"><label class="field-label">Password</label><input class="text-input" type="password" disabled /></div>
+      <button class="btn-primary btn-block" type="button" disabled>Sign in</button>
+    </form>
+    {% else %}
+    {{ notice_box(notice, "success" if notice.startswith("Your password") else "") }}
+    {{ provider_buttons(next) }}
+    <div class="divider">or with email</div>
+
+    {{ error_box(error) }}
+
+    <form method="post" action="/auth/login" data-auth-form="login" novalidate>
+      <input type="hidden" name="next" value="{{ next }}" />
+      <div class="field">
+        <label class="field-label" for="email">Email</label>
+        <input class="text-input" id="email" name="email" type="email" autocomplete="email"
+               placeholder="you@example.com" value="{{ values.get('email', '') }}" required data-validate="email" />
+        <p class="field-error" data-error-for="email">Enter the email you signed up with.</p>
+      </div>
+      <div class="field">
+        <div class="auth-foot-row" style="margin:0 0 6px;">
+          <label class="field-label" for="password" style="margin:0;">Password</label>
+          <a href="/auth/forgot">Forgot it?</a>
+        </div>
+        <input class="text-input" id="password" name="password" type="password" autocomplete="current-password"
+               required data-validate="required" />
+        <p class="field-error" data-error-for="password">Enter your password.</p>
+      </div>
+      <button class="btn-primary btn-block" type="submit" data-busy-label="Signing you in…">
+        <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Sign in</span>
+      </button>
+    </form>
+    {% endif %}
+
+    <p class="auth-alt">New to ORBIT? <a href="/auth/signup">Create your account</a></p>
+  </section>
+</main>
+{% endblock %}

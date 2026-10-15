@@ -1,0 +1,54 @@
+{# Shared pieces for the auth screens. The provider glyphs are simple,
+   recognizable outlines; the buttons always say "Continue with", never
+   "Sign in with repo access" — GitHub sign-in is identity only. #}
+
+{% macro google_glyph() -%}
+<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <path fill="#EA4335" d="M12 10.2v3.9h5.4c-.24 1.26-.97 2.33-2.06 3.04l3.33 2.58c1.94-1.79 3.06-4.43 3.06-7.56 0-.73-.07-1.44-.19-2.13H12z"/>
+  <path fill="#4285F4" d="M12 22c2.97 0 5.46-.98 7.28-2.66l-3.33-2.58c-.92.62-2.1.99-3.95.99-3.04 0-5.61-2.05-6.53-4.81l-3.44 2.66C3.84 19.48 7.61 22 12 22z"/>
+  <path fill="#FBBC05" d="M5.47 12.94a7.25 7.25 0 0 1 0-4.62L2.03 5.66a11.05 11.05 0 0 0 0 9.94l3.44-2.66z"/>
+  <path fill="#EA4335" d="M12 5.75c1.56 0 2.95.54 4.05 1.59l3.03-3.03C17.23 2.44 14.83 1.5 12 1.5a10.6 10.6 0 0 0-9.42 5.79l3.31 2.56C6.7 7 8.93 5.75 12 5.75z" transform="translate(0 0)"/>
+</svg>
+{%- endmacro %}
+
+{% macro github_glyph() -%}
+<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <path fill="currentColor" d="M12 .8C5.65.8.5 5.95.5 12.3c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55 0-.27-.01-1.17-.02-2.12-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.75 2.69 1.25 3.34.95.1-.74.4-1.25.72-1.53-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.1 11.1 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.12 3.05.74.81 1.18 1.83 1.18 3.09 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.06.78 2.14 0 1.54-.02 2.79-.02 3.17 0 .31.21.67.8.55a11.51 11.51 0 0 0 7.86-10.92C23.5 5.95 18.35.8 12 .8z"/>
+</svg>
+{%- endmacro %}
+
+{% macro provider_buttons(next="") -%}
+<div class="oauth-stack">
+  <a class="oauth-btn" href="/auth/oauth/google{% if next %}?next={{ next }}{% endif %}" data-provider="google">
+    {{ google_glyph() }}<span>Continue with Google</span>
+  </a>
+  <a class="oauth-btn" href="/auth/oauth/github{% if next %}?next={{ next }}{% endif %}" data-provider="github">
+    {{ github_glyph() }}<span>Continue with GitHub</span>
+  </a>
+</div>
+{%- endmacro %}
+
+{% macro error_box(error) -%}
+{% if error %}
+<div class="auth-error" role="alert">
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="flex:0 0 15px; margin-top:1px"><circle cx="12" cy="12" r="9.2"/><path d="M12 7.5v5.5M12 16.4h.01"/></svg>
+  <span>{{ error }}</span>
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro notice_box(notice, kind="") -%}
+{% if notice %}
+<div class="auth-notice {{ kind }}" role="status">
+  <span>{{ notice }}</span>
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro off_notice() -%}
+{# Rendered when this launch has no account store (test/demo modes): the page
+   stays reviewable but honestly non-functional. #}
+<div class="demo-chip" role="status">
+  <span><strong>This launch has accounts off.</strong><br />You’re looking at the local single-user build of ORBIT. Sign-up and sign-in light up on the full server — start it with <code style="letter-spacing:0">python -m app.server</code> (or the demo launcher).</span>
+</div>
+{%- endmacro %}

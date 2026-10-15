@@ -1,0 +1,108 @@
+{% extends "public.html" %}
+{#
+  The optional personalization pass: four questions, each skippable, the whole
+  thing skippable. Two rules make it honest:
+    * "Skip for now" POSTs a real skip (saved as a decision, not a wipe), so
+      the checklist stops asking instead of nagging.
+    * Answers are re-editable later in Settings → Preferences; nothing here is
+      a one-way door.
+#}
+{% block title %}orbit — Personalize your workspace{% endblock %}
+{% block nav %}{% endblock %}
+{% block body %}
+<main class="onboard-shell" style="max-width: 720px;">
+  <header class="onboard-head">
+    <p class="auth-eyebrow">Optional · four questions · about 30 seconds</p>
+    <h1 class="onboard-title" id="wizTitle">Help ORBIT suggest the right things.</h1>
+    <p class="onboard-sub">
+      Your answers shape the recommendations on your dashboard — which specialists to
+      suggest, what to build first. Skip anything; change it later in Settings.
+    </p>
+  </header>
+
+  <div class="stepper-progress" aria-hidden="true" id="wizDots">
+    <span class="stepper-dot active" data-dot="0"></span>
+    <span class="stepper-dot" data-dot="1"></span>
+    <span class="stepper-dot" data-dot="2"></span>
+    <span class="stepper-dot" data-dot="3"></span>
+  </div>
+
+  <form method="post" action="/onboarding" id="wizForm" data-wizard>
+    <div class="options-panel">
+      <fieldset class="options-step active" data-step="0">
+        <legend class="visually-hidden">Your background</legend>
+        <h2>What best describes you?</h2>
+        <p class="q-sub">So examples and suggestions speak your language. Pick the closest fit.</p>
+        <div class="chip-grid">
+          {% for role in roles %}
+          <label class="pick-chip">
+            <input type="radio" name="role" value="{{ role }}"{% if profile.get('role') == role %} checked{% endif %} />
+            <span class="chip-face">{{ role }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="options-step" data-step="1">
+        <legend class="visually-hidden">Your experience</legend>
+        <h2>How long have you been coding?</h2>
+        <p class="q-sub">This only tunes how much explanation ORBIT leans toward — never a gate on features.</p>
+        <div class="chip-grid">
+          {% for level in experiences %}
+          <label class="pick-chip">
+            <input type="radio" name="experience" value="{{ level }}"{% if profile.get('experience') == level %} checked{% endif %} />
+            <span class="chip-face">{{ level }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="options-step" data-step="2">
+        <legend class="visually-hidden">What you build</legend>
+        <h2>What do you like building?</h2>
+        <p class="q-sub">Pick any that apply. We'll suggest the agent specialists that fit.</p>
+        <div class="chip-grid">
+          {% for item in interests %}
+          <label class="pick-chip">
+            <input type="checkbox" name="interests" value="{{ item }}"{% if item in (profile.get('interests') or []) %} checked{% endif %} />
+            <span class="chip-face">{{ item }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="options-step" data-step="3">
+        <legend class="visually-hidden">Your tools</legend>
+        <h2>Which languages or technologies do you reach for?</h2>
+        <p class="q-sub">Pick any. They tune how projects and examples get described to you.</p>
+        <div class="chip-grid">
+          {% for item in languages %}
+          <label class="pick-chip">
+            <input type="checkbox" name="languages" value="{{ item }}"{% if item in (profile.get('languages') or []) %} checked{% endif %} />
+            <span class="chip-face">{{ item }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <div class="stepper-actions">
+        <button type="button" class="btn-ghost" id="wizBack" disabled>Back</button>
+        <span class="stepper-count" id="wizCount">1 of 4</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn-primary" id="wizNext">Next</button>
+        <button type="submit" class="btn-primary" id="wizFinish" data-busy-label="Saving…" style="display:none;">
+          <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Save and continue</span>
+        </button>
+      </div>
+    </div>
+  </form>
+
+  <div class="onboard-skip">
+    <form method="post" action="/onboarding" class="skip-form">
+      <input type="hidden" name="skip" value="1" />
+      Not now — <button type="submit" class="skip-link">skip this setup and take me to my workspace</button>.
+      We'll remember you asked not to be asked.
+    </form>
+  </div>
+</main>
+{% endblock %}

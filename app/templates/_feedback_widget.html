@@ -1,0 +1,53 @@
+{# The persistent beta feedback entry point: a quiet button bottom-right on
+   every app page, opening a dialog that submits without navigating away — so
+   reporting a bug never costs the conversation or task on screen. Rendered
+   only when this launch has accounts (see layout.html); the store behind it
+   is the same one /feedback uses. #}
+<button type="button" class="feedback-fab" id="feedbackFab" aria-haspopup="dialog" aria-controls="feedbackDialog" title="Send beta feedback">
+  <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.5h15v10h-9l-4.5 4v-4H4.5z"/></svg>
+  <span>Feedback</span>
+</button>
+
+<dialog class="feedback-dialog" id="feedbackDialog" aria-labelledby="feedbackDialogTitle">
+  <form method="dialog" class="feedback-dialog-form" data-feedback-widget-form>
+    <div class="settings-dialog-head">
+      <div>
+        <span class="topbar-eyebrow">Beta feedback</span>
+        <h2 id="feedbackDialogTitle">Tell us what's on your mind</h2>
+      </div>
+      <button type="submit" class="settings-dialog-close" aria-label="Close feedback">×</button>
+    </div>
+
+    <div class="feedback-widget-error" data-feedback-error role="alert" hidden></div>
+
+    <div class="field">
+      <span class="field-label">Kind</span>
+      <div class="chip-grid">
+        <label class="pick-chip"><input type="radio" name="kind" value="feature" checked /><span class="chip-face">Feature idea</span></label>
+        <label class="pick-chip"><input type="radio" name="kind" value="bug" /><span class="chip-face">Bug</span></label>
+        <label class="pick-chip"><input type="radio" name="kind" value="general" /><span class="chip-face">General</span></label>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label" for="fbwTitle">Short title</label>
+      <input class="text-input" id="fbwTitle" name="title" type="text" maxlength="120" placeholder="In a sentence — what is it?" required />
+    </div>
+    <div class="field">
+      <label class="field-label" for="fbwBody">Details</label>
+      <textarea class="text-area" id="fbwBody" name="body" rows="4" maxlength="2000" placeholder="What happened, or what do you wish happened?"></textarea>
+    </div>
+    <label class="feedback-context-row">
+      <input type="checkbox" name="include_page" checked />
+      <span>Include this page (<code data-feedback-page-label></code>) so we know where you were</span>
+    </label>
+
+    <div class="feedback-widget-actions">
+      <a href="/feedback" class="feedback-open-full">Open the full feedback page</a>
+      <button type="button" class="btn-primary" data-feedback-send data-busy-label="Sending…">
+        <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Send</span>
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<div class="feedback-toast" id="feedbackToast" role="status" aria-live="polite" hidden>Thank you — your feedback is in.</div>
