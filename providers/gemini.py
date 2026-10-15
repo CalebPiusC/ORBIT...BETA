@@ -22,7 +22,9 @@ from config import (
     load_settings,
 )
 from providers.base import (
+    SUMMARY_SYSTEM_PROMPT,
     TITLE_SYSTEM_PROMPT,
+    summary_request,
     ChatMessage,
     ChatProvider,
     StreamChunk,
@@ -716,6 +718,24 @@ class GeminiProvider(ChatProvider):
             types.Content(role="user", parts=[types.Part.from_text(text=title_request(user_text, answer))])
         ]
         config = types.GenerateContentConfig(system_instruction=TITLE_SYSTEM_PROMPT)
+        response, _model = self._generate(contents, config, model=self.model, allow_fallback=True)
+        text = getattr(response, "text", None)
+        return text if isinstance(text, str) else ""
+
+    def summarize(self, project_name: str, description: str, user_text: str, answer: str) -> str:
+        """One no-tools call that summarizes the project.
+
+        Same shape as ``title()``: no tool declarations, so a summary request
+        can never propose an action. Fallback and audit apply as for any call.
+        """
+        self.last_attempts = []
+        contents = [
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=summary_request(project_name, description, user_text, answer))],
+            )
+        ]
+        config = types.GenerateContentConfig(system_instruction=SUMMARY_SYSTEM_PROMPT)
         response, _model = self._generate(contents, config, model=self.model, allow_fallback=True)
         text = getattr(response, "text", None)
         return text if isinstance(text, str) else ""
