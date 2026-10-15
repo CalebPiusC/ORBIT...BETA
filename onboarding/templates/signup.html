@@ -1,0 +1,132 @@
+{% extends "_base.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Create your ORBIT account{% endblock %}
+{% block nav %}<a href="{{ url_for('onboarding.landing') }}">← Back to ORBIT</a>{% endblock %}
+
+{% block content %}
+<div class="ob-auth">
+  <div>
+    <div class="ob-panel">
+      <div class="ob-panel-head">
+        <span class="ob-beta">{{ content.BETA_LABEL }}</span>
+        <h1>Create your account</h1>
+        <p>One click with Google or GitHub, or an email and a password. Either way you land in the workspace, not in a setup wizard.</p>
+      </div>
+
+      {# An error summary, because a form that fails silently at the top and
+         explains itself 300px lower is a form people abandon. #}
+      {% if errors %}
+      <div class="ob-alert ob-alert--error" role="alert" tabindex="-1" data-error-summary>
+        <span class="glyph" aria-hidden="true">⚠</span>
+        <div class="ob-alert-body">
+          <strong>That didn’t work yet.</strong>
+          <ul style="margin:8px 0 0;padding-left:18px">
+            {% for key, message in errors.items() %}<li>{{ message }}</li>{% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endif %}
+
+      {{ m.social_buttons('signup', next_url or '/') }}
+
+      <div class="ob-divider">or with your email</div>
+
+      <form method="post" action="{{ url_for('onboarding.signup') }}" novalidate data-validate-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}" />{% endif %}
+
+        {{ m.field('name', 'What should ORBIT call you?', values.name, error=errors.get('name', ''),
+                   autocomplete='name', placeholder='Ada Lovelace', required=True, autofocus=True) }}
+        {{ m.field('email', 'Email address', values.email, type='email', error=errors.get('email', ''),
+                   autocomplete='email', inputmode='email', placeholder='you@example.com', required=True,
+                   hint='We confirm this address before the workspace opens. One click, once.') }}
+        {{ m.password_field('password', 'Password', error=errors.get('password', ''),
+                            autocomplete='new-password', meter=True) }}
+        {{ m.password_field('confirm', 'Password again', error=errors.get('confirm', ''),
+                            autocomplete='new-password', meter=False) }}
+
+        <div class="ob-field">
+          <label for="workspace">Workspace name <span class="ob-faint">— optional</span></label>
+          <input class="ob-input" id="workspace" name="workspace" type="text"
+                 value="{{ values.workspace or '' }}" placeholder="Personal workspace" autocomplete="organization" />
+          <span class="ob-hint">Only a label. If you skip it, this is “Personal workspace”.</span>
+        </div>
+
+        <div class="ob-field">
+          <label class="ob-check{% if errors.get('terms') %} ob-check--bad{% endif %}">
+            <input type="checkbox" name="terms" {% if request.form.get('terms') == 'on' %}checked{% endif %}
+                   aria-describedby="terms-note" />
+            <span>
+              <strong>I’m happy to use ORBIT as a beta.</strong>
+              That means features move, model names change, and I’ll say so when something breaks.
+            </span>
+          </label>
+          {% if errors.get('terms') %}<span class="ob-error" role="alert">{{ errors.get('terms') }}</span>{% endif %}
+          <span class="ob-hint" id="terms-note">
+            Your work stays yours. You can export everything, or delete the account and its
+            projects, from Settings → Privacy.
+          </span>
+        </div>
+
+        <button class="ob-btn ob-btn--primary ob-btn--wide" type="submit" data-loading-label="Creating your account…">
+          <span class="ob-spinner" aria-hidden="true"></span>
+          <span class="ob-btn-label">Create account</span>
+        </button>
+      </form>
+    </div>
+
+    <p class="ob-small ob-muted" style="margin-top:16px">
+      Already have an account? <a href="{{ url_for('onboarding.login') }}">Sign in</a>.
+    </p>
+  </div>
+
+  {# Trust rail: what happens next, and exactly which fields are optional. #}
+  <aside class="ob-trust" aria-label="What happens after you sign up">
+    <div class="ob-trust-card">
+      <h2>What happens next</h2>
+      <ol class="ob-timeline">
+        <li>
+          <span class="n" aria-hidden="true">1</span>
+          <span class="t"><strong>Your account exists</strong>Name, email, password. Nothing else is asked for.</span>
+        </li>
+        <li>
+          <span class="n" aria-hidden="true">2</span>
+          <span class="t">
+            <strong>You confirm the email</strong>
+            Google and GitHub sign-ups skip this — the provider already vouched for the address.
+          </span>
+        </li>
+        <li>
+          <span class="n" aria-hidden="true">3</span>
+          <span class="t">
+            <strong>You choose a starting point</strong>
+            New project, import, connect Git, or just talk to it. Skippable, all four.
+          </span>
+        </li>
+      </ol>
+    </div>
+
+    <div class="ob-trust-card">
+      <h3>What we ask for, and why</h3>
+      <ul>
+        <li><strong>Required:</strong> a name to greet you by, an email to reach you at, a password.</li>
+        <li><strong>Optional:</strong> the workspace name, and every personalization question later — all of it skippable, all of it editable.</li>
+        <li><strong>Never:</strong> a card. ORBIT is free while it is in beta and there is no payment form anywhere in the product.</li>
+      </ul>
+    </div>
+
+    <div class="ob-trust-card">
+      <h3>About the provider buttons</h3>
+      <p>
+        Google sign-in asks for <span class="ob-mono">openid email profile</span>.
+        GitHub asks for <span class="ob-mono">read:user user:email</span>.
+        Neither asks for your repositories, and neither can read your code because of it.
+      </p>
+      <p style="margin-top:12px">
+        Google and GitHub accounts skip the confirmation step — the provider has already
+        verified the address. Email accounts confirm it before the workspace opens.
+      </p>
+    </div>
+  </aside>
+</div>
+{% endblock %}

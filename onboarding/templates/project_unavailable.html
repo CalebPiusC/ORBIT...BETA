@@ -1,0 +1,35 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}{{ point.title }} — not built yet{% endblock %}
+
+{% block page %}
+<div class="ob-page-head">
+  <div>
+    <div class="ob-crumbs"><a href="/projects/new">New project</a><span aria-hidden="true">/</span><span>{{ point.title }}</span></div>
+    <h1>{{ point.title }} is not built yet</h1>
+    <p class="lede">{{ point.body }}</p>
+  </div>
+</div>
+
+{# A planned integration says it is planned. This screen exists so the tile can be
+   honest instead of opening a dead end. #}
+<div class="ob-card-block" style="max-width:760px">
+  <h2>Why it is not here</h2>
+  <p class="desc">
+    GitHub is the integration ORBIT has actually built — sign-in, plus an optional
+    read-only grant. Adding another provider means OAuth flows, token storage, and a
+    permissions screen that says exactly what it reads. Until that exists, {{ point.title }}
+    shows up in the product as <em>planned</em>, not as a switch that does nothing.
+  </p>
+  <p class="desc" style="margin-bottom:0">
+    What you can do today: download the repository as an archive from {{ point.title }},
+    or point ORBIT at the folder on your machine. Both produce a real project with a real
+    file listing.
+  </p>
+  <div class="ob-form-actions">
+    {% for alternative in alternatives %}
+    <a class="ob-btn {{ 'ob-btn--primary' if loop.first else 'ob-btn--ghost' }}" href="{{ alternative.href }}">{{ alternative.title }}</a>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

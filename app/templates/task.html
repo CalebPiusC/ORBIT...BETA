@@ -1,129 +1,164 @@
 {% extends "layout.html" %}
-{% block title %}orbit — {{ task.title }}{% endblock %}
+{% block title %}ORBIT — {{ task.title }}{% endblock %}
 {% block body %}
 <div class="screen screen--active" id="screen-task">
 {% include "_sidebar.html" %}
 
   <div class="task-main">
-    <div class="task-topbar app-topbar">
-      <div class="topbar-title task-topbar-left" title="{{ task.breadcrumb }}">
-        <span class="topbar-eyebrow">{{ task.breadcrumb }}</span>
-        <span class="topbar-name">{{ task.title }}</span>
-      </div>
-      <div class="topbar-controls task-topbar-controls">
-        <div class="mode-toggle" aria-label="Workspace mode">
-          <button type="button" class="{% if mode == 'chat' %}active{% endif %}" data-arena="mode-chat" data-mode="chat" aria-pressed="{{ 'true' if mode == 'chat' else 'false' }}">Chat</button>
-          <button type="button" class="{% if mode == 'agent' %}active{% endif %}" data-arena="mode-agent" data-mode="agent" aria-pressed="{{ 'true' if mode == 'agent' else 'false' }}">Agent</button>
-        </div>
-        <div class="mode-toggle thinking-toggle" role="group" aria-label="Response depth">
-          <button type="button" class="{% if thinking_level == 'quick' %}active{% endif %}" data-thinking-level="quick" aria-pressed="{{ 'true' if thinking_level == 'quick' else 'false' }}">Quick</button>
-          <button type="button" class="{% if thinking_level == 'deep' %}active{% endif %}" data-thinking-level="deep" aria-pressed="{{ 'true' if thinking_level == 'deep' else 'false' }}">Deep</button>
-        </div>
-      </div>
-      <div class="topbar-actions task-topbar-actions">
+    <div class="app-topbar">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <span>{{ (account.workspace if account and account.workspace else user.workspace) }}</span>
+        <span class="sep" aria-hidden="true">/</span>
+        <a href="/projects">Projects</a>
+        <span class="sep" aria-hidden="true">/</span>
+        <span class="here">{{ task.title }}</span>
+      </nav>
+      <div class="topbar-controls">
         {# Shown only while a run is actually in flight, and it says what that run
            is doing. A standing "Orbit is working" would be a status that is not
            true the moment Orbit is idle. #}
         <div class="working-indicator" id="workingIndicator"{% if not panel or not panel.running %} hidden{% endif %}><span class="dot"></span><span id="workingIndicatorText">{% if panel %}{{ panel.operation }}{% endif %}</span></div>
-        <button type="button" class="topbar-icon-button" data-open-settings aria-label="Settings" title="Settings">⚙</button>
+      </div>
+      <div class="topbar-actions">
+        <button type="button" class="topbar-quiet" data-appearance-toggle
+                aria-label="Appearance: system. Switch theme.">
+          <span aria-hidden="true">◐</span> Appearance <span data-appearance-label>System</span>
+        </button>
         <button type="button" class="topbar-account" data-open-settings title="{{ user.name }} · {{ user.workspace }}" aria-label="Account and settings for {{ user.name }}">
-          <span class="topbar-avatar">{{ user.name[:2]|upper }}</span>
-          <span class="topbar-account-name">{{ user.name }}</span>
+          <span class="topbar-avatar">{{ (account.initials if account else user.name[:2]|upper) }}</span>
+          <span class="topbar-name">{{ user.name }}</span>
         </button>
       </div>
     </div>
 
-    <div class="task-status-bar">
-      <span>{{ task.breadcrumb }} · <span id="statusBarFiles">{% if panel %}{{ panel.files|length }} file(s) named{% else %}not started{% endif %}</span></span>
-      <span class="no-push-note">No pushes without approval</span>
-    </div>
+    <header class="page-head">
+      <div>
+        <div class="title-row">
+          <h1>{{ task.title }}</h1>
+          <span class="badge badge--progress"><span id="taskRunState">{% if not panel or not panel.started %}NOT STARTED{% elif panel.status == 'running' %}IN PROGRESS{% elif panel.status == 'failed' %}STOPPED{% else %}WAITING FOR YOU{% endif %}</span></span>
+        </div>
+        <p class="page-sub">{{ task.description }}</p>
+      </div>
+      <div class="page-head-meta">
+        {% if panel and panel.steps %}
+        <div class="progress">
+          <div class="line"><span style="width: {{ (100 * (panel.steps | selectattr('status', 'equalto', 'done') | list | length) / (panel.steps | length)) | round(0, 'floor') }}%"></span></div>
+          <div class="legend">{{ panel.steps | selectattr('status', 'equalto', 'done') | list | length }} of {{ panel.steps | length }} steps complete</div>
+        </div>
+        {% endif %}
+        <span class="faint small task-breadcrumb">{{ task.breadcrumb }}</span>
+      </div>
+    </header>
 
     <div class="task-body">
+      {# Column one — the map: what this work is made of, and how far along it is. #}
       <div class="task-work">
         <div class="task-work-head">
-          <div class="task-work-eyebrow">CODING AGENT · <span id="taskRunState">{% if not panel or not panel.started %}NOT STARTED{% elif panel.status == 'running' %}IN PROGRESS{% elif panel.status == 'failed' %}STOPPED{% else %}WAITING FOR YOU{% endif %}</span></div>
-          <button type="button" class="new-task-btn" id="newTaskBtn">+ New task</button>
+          <div class="task-work-eyebrow">Coding agent</div>
+          <button type="button" class="add-row" id="newTaskBtn">+ Add a task</button>
         </div>
         <h2>{{ task.title }}</h2>
         <p class="desc">{{ task.description }}</p>
 
-        {# Not started: there is no plan, no files and no operation to report, so
-           the panel is not drawn at all — just the request and how to start it. #}
-        <div class="task-start" id="taskStart"{% if panel %} hidden{% endif %}>
-          <div id="taskStartExisting">
-            <p class="task-start-note">This task has not run yet. When it does, the panel fills in from your request: the steps it plans, the files that get named, and what it is doing right now.</p>
-            <button type="button" class="start-task-btn" id="startTaskBtn">Start this task</button>
-          </div>
-          <div id="taskStartCompose" hidden>
-            <label class="task-start-label" for="newTaskInput">What should Orbit work on?</label>
-            <textarea id="newTaskInput" class="task-start-input" rows="4" placeholder="Add a status field to each order in orders.py and expose it through the order-lookup command. Do not push anything."></textarea>
-            <div class="task-start-actions">
-              <button type="button" class="start-task-btn" id="createTaskBtn">Start task</button>
-              <button type="button" class="task-start-cancel" id="cancelTaskBtn">Cancel</button>
-              <span class="task-start-error" id="newTaskError" role="status" aria-live="polite"></span>
-            </div>
-            <p class="task-start-note">Orbit works in draft: nothing is committed or pushed without your explicit approval.</p>
-          </div>
+        <div class="map-group">
+          <div class="map-group-head">Plan<span class="count">{% if panel %}{{ panel.steps | selectattr('status', 'equalto', 'done') | list | length }} / {{ panel.steps | length }} complete{% else %}nothing yet{% endif %}</span></div>
+          <ol class="checklist" id="stepChecklist">
+            {% if panel %}{% for step in panel.steps %}
+            <li class="checklist-step {{ step.status }}">
+              <span class="check-icon" aria-hidden="true">{% if step.status == 'done' %}✓{% elif step.status == 'active' %}◐{% else %}○{% endif %}</span>
+              <span class="check-body">
+                <span class="check-title">{{ step.title }}</span>
+                <span class="check-detail">{% if step.evidence %}Orbit: “{{ step.evidence }}”{% else %}Not started{% endif %}</span>
+              </span>
+            </li>
+            {% endfor %}{% endif %}
+          </ol>
+          <p class="panel-note">Planned from your request. A step only moves when Orbit’s own narration gives evidence for it — that line is shown beneath it.</p>
         </div>
 
-        {# The panel. Every line in it is either planned from the request text or
-           taken from what the stream actually produced — no seeded numbers. #}
-        <section class="task-panel" id="taskPanel" aria-live="polite"{% if not panel %} hidden{% endif %}>
-          <div class="panel-section">
-            <h3>Steps from your request</h3>
-            <ol class="checklist" id="stepChecklist">
-              {% if panel %}{% for step in panel.steps %}
-              <li class="checklist-step {{ step.status }}">
-                <span class="check-icon" aria-hidden="true">{% if step.status == 'done' %}✓{% elif step.status == 'active' %}◐{% else %}○{% endif %}</span>
-                <span class="check-body">
-                  <span class="check-title">{{ step.title }}</span>
-                  <span class="check-detail">{% if step.evidence %}Orbit: “{{ step.evidence }}”{% else %}Not started{% endif %}</span>
-                </span>
-              </li>
-              {% endfor %}{% endif %}
-            </ol>
-            <p class="panel-note">Planned from your request. A step only moves when Orbit’s own narration gives evidence for it — that line is shown beneath it.</p>
+        <div class="map-group">
+          <div class="map-group-head">Files named<span class="count">{{ panel.files|length if panel else 0 }}</span></div>
+          <div class="file-chips" id="fileChips">
+            {% if panel %}{% for item in panel.files %}<span class="file-chip">{{ item.name }}<em>{% if item.source == 'request' %}your request{% else %}Orbit{% endif %}</em></span>{% endfor %}{% endif %}
           </div>
+          <p class="panel-note" id="filesEmpty"{% if panel and panel.files %} hidden{% endif %}>None named yet. Files appear here when your request names them or Orbit mentions them — never guessed.</p>
+        </div>
+      </div>
 
-          <div class="panel-section">
-            <h3>Files touched</h3>
-            <div class="file-chips" id="fileChips">
-              {% if panel %}{% for item in panel.files %}<span class="file-chip">{{ item.name }}<em>{% if item.source == 'request' %}your request{% else %}Orbit{% endif %}</em></span>{% endfor %}{% endif %}
-            </div>
-            <p class="panel-note" id="filesEmpty"{% if panel and panel.files %} hidden{% endif %}>None named yet. Files appear here when your request names them or Orbit mentions them — never guessed.</p>
+      {# Not started: there is no plan, no files and no operation to report, so
+         the detail panel is not drawn at all — just the request and how to
+         start it. It spans the two right-hand columns in that state. #}
+      <div class="task-start" id="taskStart"{% if panel %} hidden{% endif %}>
+        <div id="taskStartExisting">
+          <p class="task-start-note">This task has not run yet. When it does, the map fills in from your request: the steps it plans, the files that get named, and what it is doing right now.</p>
+          <div class="task-start-actions"><button type="button" class="start-task-btn" id="startTaskBtn">Start this task</button></div>
+        </div>
+        <div id="taskStartCompose" hidden>
+          <label class="task-start-label" for="newTaskInput">What should Orbit work on?</label>
+          <textarea id="newTaskInput" class="task-start-input" rows="4" placeholder="Add a status field to each order in orders.py and expose it through the order-lookup command. Do not push anything."></textarea>
+          <div class="task-start-actions">
+            <button type="button" class="start-task-btn" id="createTaskBtn">Start task</button>
+            <button type="button" class="task-start-cancel" id="cancelTaskBtn">Cancel</button>
+            <span class="task-start-error" id="newTaskError" role="status" aria-live="polite"></span>
           </div>
+          <p class="task-start-note">Orbit works in draft: nothing is committed or pushed without your explicit approval.</p>
+        </div>
+      </div>
 
-          <div class="panel-section">
-            <h3>What it’s doing now</h3>
-            <div class="operation" id="currentOperation">{% if panel %}{{ panel.operation }}{% else %}Not running{% endif %}</div>
-          </div>
+      {# Column two — the task itself: what it is, what is happening, and what
+         is waiting on you. The first child is the panel section the layout and
+         the tests expect. #}
+      <section class="task-panel" id="taskPanel" aria-live="polite"{% if not panel %} hidden{% endif %}>
+        <div class="panel-section">
+          <span class="eyebrow">Agent · {{ task.id }}</span>
+          <div class="operation" id="currentOperation">{% if panel %}{{ panel.operation }}{% else %}Not running{% endif %}</div>
+          <p class="panel-note">This line is the agent’s own current narration, not a summary written afterwards.</p>
+        </div>
 
-          <div class="panel-section">
-            <h3>Needs your approval</h3>
-            <p class="approval-note">🔒 No commits will be pushed without your explicit approval.</p>
-            <p class="approval-state-line" id="approvalStateLine">{% if panel and panel.applied %}✓ Changes applied.{% elif panel and panel.approved %}✓ You approved — safe to apply.{% else %}Nothing is waiting on your approval.{% endif %}</p>
-          </div>
-        </section>
+        <div class="panel-section">
+          <h3>Needs your approval</h3>
+          <p class="approval-note">🔒 No commits will be pushed without your explicit approval.</p>
+          <p class="approval-state-line" id="approvalStateLine">{% if panel and panel.applied %}✓ Changes applied.{% elif panel and panel.approved %}✓ You approved — safe to apply.{% else %}Nothing is waiting on your approval.{% endif %}</p>
+        </div>
 
         <div class="thinking-block" id="thinkingBlock">
           <img class="orbit-icon" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-          <span class="thinking-label" id="thinkingLabel" hidden></span>
-          <span class="thinking-text" id="thinkingText"></span>
+          <span class="grow">
+            <span class="thinking-label" id="thinkingLabel" hidden></span>
+            <span class="thinking-text" id="thinkingText"></span>
+          </span>
         </div>
 
         <div class="activity-section" id="taskActivity"{% if not panel or not panel.activity %} hidden{% endif %}>
-          <h4><span>Live activity</span></h4>
+          <h4 class="activity-title">Live activity</h4>
           {% if panel %}{% for act in panel.activity %}
           <div class="activity-row"><span>{{ act.text }}</span><span class="time">{{ act.time }}</span></div>
           {% endfor %}{% endif %}
         </div>
-      </div>
 
+        <div class="card-foot">
+          <span class="small faint">No pushes without approval · <span id="statusBarFiles">{% if panel %}{{ panel.files|length }} file(s) named{% else %}not started{% endif %}</span></span>
+          <span class="spacer grow"></span>
+          <span class="small faint">{{ task.breadcrumb }}</span>
+        </div>
+      </section>
+
+      {# Column three — the agent rail: it talks to you here, it does not take
+         over the other two columns to do it. #}
       <div class="task-chat">
-        <div class="task-chat-head">With you, as I work</div>
+        <div class="task-chat-head">
+          <span class="card-icon" aria-hidden="true"><img class="orbit-icon" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" /></span>
+          <span class="grow">
+            <strong>Main Agent</strong>
+            <span class="card-sub">Task-aware · {{ task.title }}</span>
+          </span>
+          <button type="button" class="icon-button" data-open-settings aria-label="Agent settings" title="Agent settings">⋯</button>
+        </div>
+
         <div class="task-chat-log" id="taskChatLog">
           {% for msg in task.chat %}
           <div class="chat-row {% if msg.is_orbit %}orbit{% else %}user{% endif %}"{% if msg.id %} data-message-id="{{ msg.id }}"{% endif %}>
+            {% if not msg.is_orbit %}<div class="chat-who">{{ user.name }}</div>{% endif %}
             <div class="chat-bubble {% if msg.is_orbit %}orbit{% else %}user{% endif %}">
               <div class="body">{% if msg.is_orbit %}<img class="orbit-icon" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" /><span class="reply">{{ msg.body }}</span>{% else %}{{ msg.body }}{% endif %}</div>
               {% if msg.is_orbit %}
@@ -140,22 +175,42 @@
           {% endfor %}
         </div>
         {# While a turn is generating: what is actually happening, in words. #}
-        <div class="task-turn-status" id="taskTurnStatus" role="status" aria-live="polite" hidden>
+        <div class="turn-status-bar" id="taskTurnStatus" role="status" aria-live="polite" hidden>
           <div class="turn-rings rings-fast" aria-hidden="true">
             <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" />
           </div>
           <span class="turn-status-text" id="taskTurnStatusText"></span>
         </div>
         <div class="voice-feedback" id="taskVoiceStatus" role="status" aria-live="polite" hidden></div>
+
         <div class="task-chat-input">
-          <button type="button" class="task-attach" id="taskAttach" aria-label="Attach a file" title="Attach a file">＋</button>
-          <input type="file" id="taskAttachmentInput" class="visually-hidden" multiple />
-          <a class="task-github-shortcut" href="https://github.com" target="_blank" rel="noopener noreferrer" aria-label="Open GitHub" title="GitHub">●</a>
-          <input type="text" id="taskInput" placeholder="Add a thought or steer Orbit…" autocomplete="off" />
-          <button type="button" class="icon-btn-round voice-btn" id="taskVoice" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
-          <button type="button" class="send-btn-round" id="taskSend" aria-label="Send message" title="Send message">➤</button>
+          <div class="task-chat-input-row">
+            <div class="composer-task-head">
+              <span class="glyph" aria-hidden="true">◍</span>
+              <span class="grow">Task · {{ task.title }}</span>
+            </div>
+            <input type="text" id="taskInput" placeholder="Add a thought or steer Orbit…" autocomplete="off" aria-label="Message Orbit about this task" />
+            <div class="composer-controls">
+              <div class="mode-toggle" aria-label="Workspace mode">
+                <button type="button" class="{% if mode == 'chat' %}active{% endif %}" data-arena="mode-chat" data-mode="chat" aria-pressed="{{ 'true' if mode == 'chat' else 'false' }}">Chat</button>
+                <button type="button" class="{% if mode == 'agent' %}active{% endif %}" data-arena="mode-agent" data-mode="agent" aria-pressed="{{ 'true' if mode == 'agent' else 'false' }}">Agent</button>
+              </div>
+              <div class="mode-toggle thinking-toggle" role="group" aria-label="Response depth">
+                <button type="button" class="{% if thinking_level == 'quick' %}active{% endif %}" data-thinking-level="quick" aria-pressed="{{ 'true' if thinking_level == 'quick' else 'false' }}">Quick</button>
+                <button type="button" class="{% if thinking_level == 'deep' %}active{% endif %}" data-thinking-level="deep" aria-pressed="{{ 'true' if thinking_level == 'deep' else 'false' }}">Deep</button>
+              </div>
+              <div class="composer-right-tools">
+                <button type="button" class="icon-btn-round attach-tool" id="taskAttach" aria-label="Attach a file" title="Attach a file">＋</button>
+                <input type="file" id="taskAttachmentInput" class="visually-hidden" multiple />
+                <a class="icon-btn-round github-shortcut" href="https://github.com" target="_blank" rel="noopener noreferrer" aria-label="Open GitHub" title="GitHub">◧</a>
+                <button type="button" class="icon-btn-round voice-btn" id="taskVoice" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
+                <button type="button" class="send-btn-round" id="taskSend" aria-label="Send message" title="Send message">↑</button>
+              </div>
+            </div>
+          </div>
+          <div class="attachment-note" id="taskAttachmentNote" aria-live="polite" hidden></div>
+          <p class="composer-hint">Review suggested changes before applying. Nothing is committed or pushed on its own.</p>
         </div>
-        <div class="attachment-note task-attachment-note" id="taskAttachmentNote" aria-live="polite" hidden></div>
       </div>
     </div>
   </div>
@@ -163,7 +218,7 @@
 <dialog class="settings-dialog" id="settingsDialog" aria-labelledby="settingsDialogTitle">
   <form method="dialog">
     <div class="settings-dialog-head">
-      <div><span class="topbar-eyebrow">Workspace</span><h2 id="settingsDialogTitle">Account &amp; settings</h2></div>
+      <div class="grow"><span class="topbar-eyebrow">Workspace</span><h2 id="settingsDialogTitle">Account &amp; settings</h2></div>
       <button type="submit" class="settings-dialog-close" aria-label="Close settings">×</button>
     </div>
     <div class="settings-dialog-details">
@@ -171,6 +226,11 @@
       <div><span>Workspace</span><strong>{{ user.workspace }}</strong></div>
       <div><span>Connected apps</span><strong>{{ connected_count }} active</strong></div>
     </div>
+    {% if account %}
+    <div class="row">
+      <a class="btn btn--soft btn--block" href="/settings/profile">Open full settings</a>
+    </div>
+    {% endif %}
     <p class="settings-dialog-note">Reminder timing follows Africa/Lagos local time. Use the Reminders control in the sidebar to pause or resume check-ins.</p>
   </form>
 </dialog>

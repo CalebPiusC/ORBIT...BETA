@@ -1,0 +1,105 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Welcome to ORBIT{% endblock %}
+
+{% block page %}
+<div style="max-width:940px;margin:0 auto">
+  {% if fresh %}
+  {{ m.alert('success', 'You are in. This is the whole setup — one screen with four doors and a “skip”.') }}
+  {% endif %}
+
+  <div class="ob-page-head">
+    <div>
+      <span class="ob-eyebrow">Welcome</span>
+      <h1>Good to have you here, {{ account.first_name }}.</h1>
+      <p class="lede">
+        Pick whichever door looks right. Every one of them is optional, none of them
+        blocks the workspace, and you can change your mind later without losing anything.
+      </p>
+    </div>
+    <div class="ob-page-head-actions">
+      <a class="ob-btn ob-btn--ghost ob-btn--sm" href="/?tour=off">Skip to the workspace</a>
+    </div>
+  </div>
+
+  <div class="ob-welcome-options" style="margin-bottom:var(--ob-s5)">
+    {% for option in options %}
+    <a class="ob-option" href="{{ option.href }}" data-primary="{{ option.primary }}">
+      <span class="ico" aria-hidden="true">{{ option.icon }}</span>
+      <span>
+        <strong>{{ option.title }}</strong>
+        <p>{{ option.body }}</p>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+
+  {# Honest state, said once: how you signed in and what it did or did not grant. #}
+  <div class="ob-card-block">
+    <h2>How this account was created</h2>
+    <div class="ob-kv">
+      <div><span class="k">Signed up with</span><span class="v">{{ provider_label }}</span></div>
+      <div>
+        <span class="k">Email confirmed</span>
+        <span class="v">
+          {% if account.verified %}
+            {% if provider in ('google', 'github') %}Yes — {{ provider_label }} vouched for it{% else %}Yes{% endif %}
+          {% else %}Not yet{% endif %}
+        </span>
+      </div>
+      {% if provider == 'github' %}
+      <div>
+        <span class="k">Repository access</span>
+        <span class="v">
+          {% if repo_access %}
+          Granted — listed in Settings → Integrations, revocable there
+          {% else %}
+          Not granted. GitHub sign-in never includes it.
+          {% endif %}
+        </span>
+      </div>
+      {% endif %}
+      <div><span class="k">Workspace</span><span class="v">{{ account.workspace }}</span></div>
+    </div>
+    <p class="ob-small ob-faint" style="margin:16px 0 0">
+      {% if provider == 'github' and not repo_access %}
+      To work on a repository, ORBIT needs repository access you grant on purpose —
+      <a href="/settings/integrations">Settings → Integrations</a>. Importing a ZIP or a
+      folder works without it.
+      {% else %}
+      Nothing else was asked for, and nothing else was assumed.
+      {% endif %}
+    </p>
+  </div>
+
+  {# Personalization: offered, never imposed. #}
+  <div class="ob-card-block" style="display:flex;gap:var(--ob-s5);align-items:center;justify-content:space-between;flex-wrap:wrap">
+    <div style="max-width:60ch">
+      <h2 style="margin-bottom:6px">{{ content.PERSONALIZATION_HEADLINE }}</h2>
+      <p class="desc" style="margin:0">{{ content.PERSONALIZATION_PROMISE }}</p>
+    </div>
+    <div class="ob-inline-actions">
+      <a class="ob-btn ob-btn--ghost" href="{{ url_for('onboarding.personalize') }}">Answer three questions</a>
+      <form method="post" action="{{ url_for('onboarding.welcome_skip') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button class="ob-btn ob-btn--quiet" type="submit">Not now</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="ob-card-block">
+    <h2>The 60-second tour, if you want it</h2>
+    <p class="desc" style="margin-bottom:18px">
+      Five stops: the two modes, reply depth, the composer, the approval gate, and the
+      sidebar. It skips nothing that exists and invents nothing that doesn’t — and
+      “Don’t show again” on any step ends it for good.
+    </p>
+    <div class="ob-inline-actions">
+      <a class="ob-btn ob-btn--primary ob-btn--sm" href="/?tour=1">Start the tour in the workspace</a>
+      {% if demo_exists %}
+      <a class="ob-btn ob-btn--quiet ob-btn--sm" href="{{ url_for('onboarding.demo_enter') }}">Or look at the demo workspace first</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

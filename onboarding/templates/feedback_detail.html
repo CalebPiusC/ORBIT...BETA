@@ -1,0 +1,44 @@
+{% extends "_workspace_page.html" %}
+{% block title %}{{ entry.subject }} — ORBIT feedback{% endblock %}
+
+{% block page %}
+<div class="ob-page-head">
+  <div>
+    <div class="ob-crumbs"><a href="/feedback#history">Feedback</a><span aria-hidden="true">/</span><span>{{ entry.reference }}</span></div>
+    <h1>{{ entry.subject }}</h1>
+    <p class="lede">Sent {{ entry.created_human }} · {{ entry.kind_label }} · {{ entry.status_label }}</p>
+  </div>
+  <div class="ob-page-head-actions">
+    <a class="ob-btn ob-btn--ghost ob-btn--sm" href="/feedback">Send another</a>
+  </div>
+</div>
+
+<section class="ob-card-block">
+  <h2>What you wrote</h2>
+  <p style="white-space:pre-wrap;margin:0;color:var(--text-dim)">{{ entry.body | striptags }}</p>
+</section>
+
+<section class="ob-card-block">
+  <h2>Context that was attached</h2>
+  {% if entry.context_lines %}
+  <div class="ob-context" style="margin-top:0">
+    <ul>
+      {% for line in entry.context_lines %}
+      <li><b>{{ line.split(':')[0] }}</b> <span>{{ line.split(':', 1)[1].strip() if ':' in line else '' }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% else %}
+  <p class="desc" style="margin-bottom:0">No context was attached to this report.</p>
+  {% endif %}
+</section>
+
+<section class="ob-card-block">
+  <h2>Status</h2>
+  <p class="desc" style="margin-bottom:0">
+    <strong>Received.</strong> Status changes are not automated in this beta build, so this
+    page will not invent a progress bar. If a reply is warranted, it comes to your email
+    {% if not account.preferences.get('feedback_replies', True) %}(which you have turned off — the report is still read){% endif %}.
+  </p>
+</section>
+{% endblock %}

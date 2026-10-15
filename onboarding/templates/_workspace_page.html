@@ -1,0 +1,90 @@
+{#- The shell for onboarding's own workspace pages: projects, settings, feedback.
+
+    It extends the app's layout.html on purpose. These screens are part of the
+    product, not a separate site, so they get the same sidebar, the same tokens and
+    the same collapse behavior. What they add is onboarding.js instead of app.js —
+    the chat engine has nothing to do on a settings page — plus a two-line shim for
+    the two sidebar controls that app.js normally owns. -#}
+{% extends "layout.html" %}
+
+{% block head_extra %}{% endblock %}
+
+{% block body %}
+<div class="screen screen--active">
+  {% include "_sidebar.html" %}
+  <main class="ob-page-main ob-scroll" id="obPageMain">
+    <div class="ob-page-body">
+      {% include "onboarding/_flash.html" %}
+      {% block page %}{% endblock %}
+    </div>
+  </main>
+</div>
+
+{% include "onboarding/_feedback_panel.html" %}
+{% include "onboarding/_tour.html" %}
+
+<script src="{{ url_for('onboarding.static', filename='onboarding.js') }}" defer></script>
+<script>
+  // app.js normally owns these two controls. On this page it is not loaded, so the
+  // sidebar gets the smallest possible stand-in: collapse toggling with the same
+  // storage key and the same class app.js uses, and the gear opening Settings.
+  (function () {
+    var sidebar = document.getElementById("sidebar");
+    var toggle = document.getElementById("sidebarToggle");
+    var KEY = "orbit.sidebar.collapsed";
+    function remember(collapsed) {
+      try { window.localStorage.setItem(KEY, collapsed ? "1" : "0"); } catch (e) {}
+    }
+    function apply(collapsed) {
+      if (!sidebar) return;
+      sidebar.classList.toggle("sidebar--collapsed", collapsed);
+      document.documentElement.classList.remove("sidebar-collapsed-pending");
+      if (toggle) {
+        toggle.setAttribute("aria-pressed", collapsed ? "true" : "false");
+        toggle.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+        toggle.title = collapsed ? "Expand sidebar" : "Collapse sidebar";
+        toggle.firstElementChild.textContent = collapsed ? "»" : "«";
+      }
+    }
+    if (toggle) {
+      toggle.addEventListener("click", function () {
+        var collapsed = !sidebar.classList.contains("sidebar--collapsed");
+        apply(collapsed);
+        remember(collapsed);
+      });
+    }
+    // The collapsed state is applied before first paint by layout.html's inline
+    // script; this turns the pending marker into the real class.
+    if (document.documentElement.classList.contains("sidebar-collapsed-pending")) {
+      apply(true);
+    }
+    var settingsButtons = document.querySelectorAll("[data-open-settings]");
+    for (var i = 0; i < settingsButtons.length; i += 1) {
+      settingsButtons[i].addEventListener("click", function (event) {
+        event.preventDefault();
+        window.location.href = "/settings/profile";
+      });
+    }
+    // The conversation rows are rendered by the sidebar on every page; on these
+    // pages they navigate rather than switching state in place.
+    var conversationRows = document.querySelectorAll(".history-item[data-conv-id]");
+    for (var j = 0; j < conversationRows.length; j += 1) {
+      conversationRows[j].addEventListener("click", function () {
+        window.location.href = "/?conversation=" + this.getAttribute("data-conv-id");
+      });
+    }
+    var search = document.getElementById("conversationSearch");
+    if (search) {
+      search.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" && this.value.trim()) {
+          window.location.href = "/?q=" + encodeURIComponent(this.value.trim());
+        }
+      });
+    }
+    var newConvo = document.getElementById("newConvo");
+    if (newConvo) {
+      newConvo.addEventListener("click", function () { window.location.href = "/"; });
+    }
+  })();
+</script>
+{% endblock %}

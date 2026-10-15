@@ -1,5 +1,5 @@
 {% extends "layout.html" %}
-{% block title %}orbit — Analytics{% endblock %}
+{% block title %}ORBIT — Analytics{% endblock %}
 {% block body %}
 {# Counts read back out of audit.log. Descriptive only: what happened, in
    numbers, with no streaks, comparisons or targets. #}
@@ -7,12 +7,12 @@
 {% include "_sidebar.html" %}
 
   <div class="analytics-main">
-    <div class="home-topbar app-topbar">
+    <div class="app-topbar">
       <div class="topbar-title" id="currentConversationTitle" title="Analytics">
         <span class="topbar-eyebrow">Weekly</span>
         <span class="topbar-name">Analytics</span>
       </div>
-      <div class="home-topbar-controls topbar-controls">
+      <div class="topbar-controls">
         <div class="mode-toggle" aria-label="Workspace mode">
           <a class="topbar-icon-button" href="/" aria-label="Back to chat" title="Back to chat">←</a>
         </div>
@@ -21,7 +21,7 @@
         <button type="button" class="topbar-icon-button" data-open-settings aria-label="Settings" title="Settings">⚙</button>
         <button type="button" class="topbar-account" data-open-settings title="{{ user.name }} · {{ user.workspace }}" aria-label="Account and settings for {{ user.name }}">
           <span class="topbar-avatar">{{ user.name[:2]|upper }}</span>
-          <span class="topbar-account-name">{{ user.name }}</span>
+          <span class="topbar-name">{{ user.name }}</span>
         </button>
       </div>
     </div>

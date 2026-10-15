@@ -1,0 +1,123 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Describe an idea — ORBIT{% endblock %}
+
+{% block page %}
+<div class="ob-page-head">
+  <div>
+    <div class="ob-crumbs"><a href="/projects/new">New project</a><span aria-hidden="true">/</span><span>Describe an idea</span></div>
+    <h1>Describe an idea</h1>
+    <p class="lede">
+      Two or three sentences is enough. ORBIT turns them into goals, milestones, and a
+      first task list you can react to — then you decide whether it becomes a project.
+    </p>
+  </div>
+</div>
+
+<div class="ob-card-block">
+  <form method="post" action="{{ url_for('onboarding.project_idea') }}" novalidate data-validate-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <div class="ob-field">
+      <label for="idea">What do you want to build?</label>
+      <textarea class="ob-textarea" id="idea" name="idea" rows="6" autofocus
+                placeholder="A tool that reads my WhatsApp export and tells me which customers stopped replying, so I can follow up before they churn."
+                {% if errors.get('idea') %}aria-invalid="true" aria-describedby="idea-error"{% else %}aria-describedby="idea-hint"{% endif %}>{{ idea }}</textarea>
+      {% if errors.get('idea') %}<span class="ob-error" id="idea-error" role="alert">{{ errors.get('idea') }}</span>
+      {% else %}<span class="ob-hint" id="idea-hint">Skip the buzzwords. Say who it is for and what it does first.</span>{% endif %}
+    </div>
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--primary" type="submit" name="stage" value="plan" data-loading-label="Thinking it through…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Plan this idea</span>
+      </button>
+      <span class="ob-small ob-faint">
+        {% if can_model %}
+        Uses the model configured on this deployment.
+        {% else %}
+        No model is configured here, so the local planner will be used — and it will say so.
+        {% endif %}
+      </span>
+    </div>
+  </form>
+</div>
+
+{% if plan %}
+{# The source of the plan is named every single time. A local outline dressed up as
+   model output is the failure mode this screen refuses to have. #}
+<div class="ob-plan" style="margin-top:24px">
+  <div class="ob-plan-head">
+    <h2>{{ plan.headline }}</h2>
+    <p>{{ plan.summary }}</p>
+    <div class="ob-source-note" data-source="{{ 'model' if plan.generated_by == 'model' else 'local' }}">
+      <span class="flag">{{ 'Model' if plan.generated_by == 'model' else 'Local planner' }}</span>
+      <span>{{ source_note }}</span>
+    </div>
+  </div>
+
+  <div class="ob-plan-cols">
+    {% if plan.goals %}
+    <div class="ob-plan-col">
+      <h3>Goals</h3>
+      <ul>{% for item in plan.goals %}<li>{{ item }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if plan.milestones %}
+    <div class="ob-plan-col">
+      <h3>Milestones</h3>
+      {% for item in plan.milestones %}
+      <div class="ob-milestone">
+        <span class="name">{{ item.name }}</span>
+        {% if item.detail %}<span class="detail">{{ item.detail }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if plan.first_tasks %}
+    <div class="ob-plan-col">
+      <h3>First tasks</h3>
+      <ul>{% for item in plan.first_tasks %}<li>{{ item }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    {% if plan.risks %}
+    <div class="ob-plan-col">
+      <h3>What usually goes wrong</h3>
+      <ul>{% for item in plan.risks %}<li>{{ item }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="ob-card-block">
+    <h2>Keep this plan?</h2>
+    <p class="desc">
+      Creating the project stores the plan you are reading — no second model call, so
+      nothing can change between what you approved and what gets saved.
+    </p>
+    <form method="post" action="{{ url_for('onboarding.project_idea') }}" data-validate-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <input type="hidden" name="stage" value="create" />
+      <input type="hidden" name="idea" value="{{ idea }}" />
+      <input type="hidden" name="plan_source" value="{{ plan.generated_by }}" />
+      <input type="hidden" name="plan_headline" value="{{ plan.headline }}" />
+      <input type="hidden" name="plan_summary" value="{{ plan.summary }}" />
+      {% for item in plan.goals %}<input type="hidden" name="plan_goal" value="{{ item }}" />{% endfor %}
+      {% for item in plan.milestones %}
+      <input type="hidden" name="plan_milestone" value="{{ item.name }}" />
+      <input type="hidden" name="plan_milestone_detail" value="{{ item.detail }}" />
+      {% endfor %}
+      {% for item in plan.first_tasks %}<input type="hidden" name="plan_task" value="{{ item }}" />{% endfor %}
+      {% for item in plan.risks %}<input type="hidden" name="plan_risk" value="{{ item }}" />{% endfor %}
+      <div class="ob-form-row">
+        {{ m.field('project_name', 'Name for the project', suggested_name, hint='Editable after this step.') }}
+      </div>
+      <div class="ob-form-actions">
+        <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Creating…">
+          <span class="ob-spinner" aria-hidden="true"></span>
+          <span class="ob-btn-label">Create the project</span>
+        </button>
+        <a class="ob-btn ob-btn--ghost" href="/projects/new">Start over</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

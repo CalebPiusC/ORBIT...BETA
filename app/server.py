@@ -269,6 +269,7 @@ def create_app(
     actions: PendingActions | None = None,
     voice_service: Any | None = None,
     model_audit: AuditLog | None = None,
+    onboarding: Any | None = None,
     projects: ProjectStore | None = None,
 ) -> Flask:
     """Build the Flask app.
@@ -287,6 +288,14 @@ def create_app(
     ``projects`` is the Projects store. The default is in-memory — the app
     factory never writes runtime/projects.json, same as the heartbeat. At boot
     ``run_app`` swaps in the file-backed store so a restart keeps projects.
+
+    ``onboarding`` is the optional onboarding layer (accounts, landing, welcome,
+    projects, settings, feedback). When it is omitted — which is how the offline
+    suite builds every app — no gate is installed and ``/`` renders exactly as it
+    always has. When it is present, ``onboarding.attach`` registers the blueprint,
+    requires a verified account for every non-public route, and installs a resolver
+    so each account gets its own workspace Store.
+
     """
     app = Flask(__name__, template_folder="templates")
     app.secret_key = "orbit-dev-secret"
@@ -307,6 +316,20 @@ def create_app(
     # The queue of tool calls the home chat proposed. Without it, Chat mode is
     # plain text, as before. run_app builds it with the real tools.
     app.config["ACTIONS"] = actions
+
+    def current_store() -> Store:
+        """The signed-in account's workspace, or the single seeded one.
+
+        Without the onboarding layer there is exactly one Store, which is what the
+        tests and the demo have always used. With it, each account gets its own so
+        a new sign-up never opens on somebody else's conversations.
+        """
+        resolver = app.config.get("STORE_RESOLVER")
+        if resolver is not None:
+            resolved = resolver()
+            if resolved is not None:
+                return resolved
+        return app.config["STORE"]
 
     @app.errorhandler(RequestEntityTooLarge)
     def request_too_large(_error: RequestEntityTooLarge) -> Response:
@@ -413,7 +436,15 @@ def create_app(
 
     @app.get("/")
     def home() -> str:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
+        # The onboarding layer adds the adaptive dashboard and the first-use
+        # guidance to this screen. Without it (the demo provider and the tests)
+        # this returns {} and the home screen renders exactly as before.
+        onboarding_context: dict[str, Any] = {}
+        if app.config.get("ONBOARDING") is not None:
+            from onboarding.blueprint import home_context_for_store
+
+            onboarding_context = home_context_for_store(st)
         return render_template(
             "home.html",
             user=st.user,
@@ -440,6 +471,7 @@ def create_app(
             starters=WELCOME_STARTERS,
             followups=followups_for(st.home_thread),
             heartbeat=_heartbeat_view(),
+            **onboarding_context,
         )
 
     # ----- Projects and Agents (the ORBIT Projects product) -----
@@ -450,7 +482,12 @@ def create_app(
         PROJECTS list: the three most recently updated projects, straight
         from the store. A page can override either value explicitly; the
         sidebar shows nothing when there is nothing."""
-        st: Store | None = app.config.get("STORE")
+        # The signed-in account's workspace, not the process default: a rail that
+        # listed somebody else's projects would be worse than an empty one.
+        try:
+            st: Store | None = current_store()
+        except Exception:  # a build without a store at all
+            st = app.config.get("STORE")
         project_store: ProjectStore | None = app.config.get("PROJECTS")
         if st is None or project_store is None:
             return {"sidebar_projects": [], "active_project_id": ""}
@@ -460,10 +497,15 @@ def create_app(
             "active_project_id": "",
         }
 
-    def _sidebar_context() -> dict[str, Any]:
-        """What every page that renders the shared sidebar needs."""
-        st: Store = app.config["STORE"]
-        return {
+    def _sidebar_context(**overrides: Any) -> dict[str, Any]:
+        """What every page that renders the shared rail needs.
+
+        The rail's RECENT PROJECTS list and the active row come from the
+        ``_chrome_defaults`` context processor; a route adds only what is local
+        to it (which destination is current) through ``overrides``.
+        """
+        st: Store = current_store()
+        context = {
             "user": st.user,
             "mode": st.mode,
             "thinking_level": st.thinking_level,
@@ -473,7 +515,10 @@ def create_app(
             "connections": st.connections,
             "connected_count": st.connected_count(),
             "heartbeat": _heartbeat_view(),
+            "analytics_active": False,
         }
+        context.update(overrides)
+        return context
 
     def _date_label(iso: str) -> str:
         """"15 Oct 2026" from the store's UTC timestamp, for card footers."""
@@ -512,7 +557,7 @@ def create_app(
 
     @app.get("/projects")
     def projects_page() -> str:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         project_store: ProjectStore = app.config["PROJECTS"]
         query = request.args.get("q", "").strip()
         status = request.args.get("status", "").strip() or None
@@ -562,7 +607,7 @@ def create_app(
         disabled because no repository provider is connected and file import
         is not built — the row says so instead of silently failing later.
         """
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         project_store: ProjectStore = app.config["PROJECTS"]
         notice = None
         if request.args.get("notice", "").strip() == "invalid":
@@ -595,7 +640,7 @@ def create_app(
 
     @app.post("/projects")
     def create_project() -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         project_store: ProjectStore = app.config["PROJECTS"]
         # Only the idea path creates anything today: source is always "new",
         # because every import entry point renders disabled on purpose.
@@ -626,7 +671,7 @@ def create_app(
 
     @app.get("/agents")
     def agents_page() -> str:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         project_store: ProjectStore = app.config["PROJECTS"]
         query = request.args.get("q", "").strip()
         selected = None
@@ -653,7 +698,7 @@ def create_app(
     @app.post("/agents/<agent_id>/select")
     def select_agent(agent_id: str) -> Response:
         """Mark a specialty as picked — the selection bar follows."""
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         try:
             get_agent(agent_id)
         except KeyError:
@@ -664,7 +709,7 @@ def create_app(
 
     @app.post("/agents/deselect")
     def deselect_agent() -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         st.selected_agent = None
         return redirect(url_for("agents_page"), code=303)
 
@@ -672,7 +717,7 @@ def create_app(
     def assign_agent(agent_id: str) -> Response:
         """Assign the selected specialty to a project: the conversation is
         created and the workspace opens with that specialist's panel."""
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         project_store: ProjectStore = app.config["PROJECTS"]
         try:
             agent = get_agent(agent_id)
@@ -695,7 +740,7 @@ def create_app(
 
     @app.get("/projects/<project_id>")
     def project_workspace(project_id: str) -> str:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         project_store: ProjectStore = app.config["PROJECTS"]
         project = project_store.get_for(project_id, st.user.id)
         if project is None:
@@ -796,7 +841,7 @@ def create_app(
 
     @app.post("/projects/<project_id>/status")
     def project_set_status(project_id: str) -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         project_store: ProjectStore = app.config["PROJECTS"]
         project = project_store.get_for(project_id, st.user.id)
         if project is None:
@@ -817,7 +862,7 @@ def create_app(
 
     @app.post("/projects/<project_id>/tasks")
     def project_new_task(project_id: str) -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         project_store: ProjectStore = app.config["PROJECTS"]
         if project_store.get_for(project_id, st.user.id) is None:
             return _json({"error": "unknown project"}, 404)
@@ -845,7 +890,7 @@ def create_app(
     @app.post("/projects/<project_id>/tasks/<task_id>/complete")
     def project_task_complete(project_id: str, task_id: str) -> Response:
         """Toggle completion on a map task. The person's assertion, audited."""
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         project_store: ProjectStore = app.config["PROJECTS"]
         if project_store.get_for(project_id, st.user.id) is None:
             return _json({"error": "unknown project"}, 404)
@@ -887,7 +932,7 @@ def create_app(
         the home chat is where the six gated tools live, and a project
         conversation is not where a note/heartbeat card belongs.
         """
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         project_store: ProjectStore = app.config["PROJECTS"]
         project = project_store.get_for(project_id, st.user.id)
         if project is None:
@@ -1022,7 +1067,7 @@ def create_app(
 
     @app.get("/task/<task_id>")
     def task(task_id: str) -> str:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         task_obj = st.get_task(task_id)
         if task_obj is None:
             return render_template("task_not_found.html", task_id=task_id), 404
@@ -1054,7 +1099,7 @@ def create_app(
     @app.post("/api/tasks")
     def api_new_task() -> Response:
         """Create an Agent task from a request the person typed."""
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         payload = request.get_json(silent=True) or {}
         request_text = payload.get("request")
         request_text = request_text.strip() if isinstance(request_text, str) else ""
@@ -1065,7 +1110,7 @@ def create_app(
 
     @app.post("/api/mode")
     def set_mode() -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         payload = request.get_json(silent=True) or {}
         mode = payload.get("mode")
         try:
@@ -1076,7 +1121,7 @@ def create_app(
 
     @app.post("/api/thinking-level")
     def set_thinking_level() -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         payload = request.get_json(silent=True) or {}
         try:
             st.set_thinking_level(payload.get("thinking_level"))
@@ -1198,13 +1243,13 @@ def create_app(
 
     @app.post("/api/conversations/new")
     def api_new_conversation() -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         st.new_conversation()
         return Response(json.dumps({"active_conversation_id": None}), mimetype="application/json")
 
     @app.post("/api/chat")
     def api_chat() -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         payload = request.get_json(silent=True) or {}
         regenerate = payload.get("regenerate") is True
         message = payload.get("message")
@@ -1460,7 +1505,7 @@ def create_app(
     @app.post("/api/actions/<action_id>/<decision>")
     def api_action_decide(action_id: str, decision: str) -> Response:
         """Approve or decline one proposed tool call. Both outcomes are audited by the registry."""
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         queue: PendingActions | None = app.config["ACTIONS"]
         if queue is None:
             return _json({"error": "tools are not enabled"}, 503)
@@ -1486,7 +1531,7 @@ def create_app(
         the log's own timestamp. The client does not re-send the rating that is
         already showing, so switching from up to down leaves one line for each.
         """
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         payload = request.get_json(silent=True) or {}
         rating = payload.get("rating")
         if rating not in RATING_LABELS:
@@ -1510,7 +1555,7 @@ def create_app(
     @app.get("/analytics")
     def analytics() -> str:
         """The Analytics view: audit.log read back, nothing tracked separately."""
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         audit: AuditLog | None = app.config["MODEL_AUDIT"]
         # The same file the rest of the app logs to, so the view cannot drift
         # onto a different path from the records it counts.
@@ -1519,20 +1564,12 @@ def create_app(
         return render_template(
             "analytics.html",
             report=report,
-            user=st.user,
-            mode=st.mode,
-            thinking_level=st.thinking_level,
-            conversations=st.conversations_grouped(),
-            active_conversation_id=st.active_conversation_id,
-            active_conversation_title=PLACEHOLDER_TITLE,
-            connections=st.connections,
-            connected_count=st.connected_count(),
-            heartbeat=_heartbeat_view(),
+            **_sidebar_context(analytics_active=True),
         )
 
     @app.post("/api/task/<task_id>/stream")
     def api_task_stream(task_id: str) -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         task_obj = st.get_task(task_id)
         if task_obj is None:
             return Response(json.dumps({"error": "unknown task"}), status=404, mimetype="application/json")
@@ -1712,7 +1749,7 @@ def create_app(
 
     @app.post("/api/task/<task_id>/approve")
     def api_approve(task_id: str) -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         if st.get_task(task_id) is None:
             return Response(json.dumps({"error": "unknown task"}), status=404, mimetype="application/json")
         payload = request.get_json(silent=True) or {}
@@ -1731,7 +1768,7 @@ def create_app(
 
     @app.post("/api/task/<task_id>/apply")
     def api_apply(task_id: str) -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         if st.get_task(task_id) is None:
             return Response(json.dumps({"error": "unknown task"}), status=404, mimetype="application/json")
         try:
@@ -1849,6 +1886,13 @@ def create_app(
             },
         )
 
+    if onboarding is not None:
+        # Registered last on purpose: every route above already exists, so the
+        # gate cannot accidentally be the thing that makes one of them 404.
+        from onboarding import attach as attach_onboarding
+
+        attach_onboarding(app, onboarding)
+
     return app
 
 
@@ -1885,6 +1929,32 @@ def run_app(app: Flask) -> None:
 
     configure_logging()
 
+    # Attach the onboarding layer unless the app was built without it and cannot
+    # take it. ``hasattr`` is not defensive noise here: ``run_app`` is used by the
+    # launcher tests with a minimal app-shaped double, and a test double has no
+    # blueprint registry to register into.
+    wants_onboarding = (
+        app.config.get("ONBOARDING") is None
+        and app.config.get("ONBOARDING_DISABLED") is not True
+        and hasattr(app, "register_blueprint")
+    )
+    if wants_onboarding:
+        # Accounts, projects, feedback, email and OAuth. Built here rather than in
+        # create_app so importing or testing the app never touches runtime/.
+        from onboarding import attach as attach_onboarding, build_onboarding
+
+        onboarding_config = build_onboarding(
+            runtime_dir=os.environ.get("ORBIT_RUNTIME_DIR", "runtime"),
+            audit=AuditLog(),
+        )
+        attach_onboarding(app, onboarding_config)
+        log.info(
+            "onboarding enabled: mailbox=%s oauth_google=%s oauth_github=%s",
+            onboarding_config.mailer.name,
+            onboarding_config.oauth.status_line("google"),
+            onboarding_config.oauth.status_line("github"),
+        )
+
     voice_service = app.config.get("VOICE_SERVICE")
     voice_report = _voice_dependency_dict(voice_service) if voice_service is not None else {}
     if voice_report:
@@ -1915,6 +1985,14 @@ def run_app(app: Flask) -> None:
         app.config["PROJECTS"] = ProjectStore(
             Path(os.environ.get("ORBIT_PROJECTS_PATH", "runtime/projects.json"))
         )
+    if app.config.get("ONBOARDING") is not None:
+        # The onboarding layer's imports become projects on this store too, and
+        # anything it recorded before this boot is published now. One list.
+        from onboarding import sync_workspace_projects
+
+        published = sync_workspace_projects(app)
+        if published:
+            app.logger.info("workspace projects published from the onboarding ledger: %s", published)
 
     if app.config.get("ACTIONS") is None:
         # Browser tools: the same six tools as the terminal, but the decision

@@ -201,20 +201,26 @@ class HistoryTitleTests(unittest.TestCase):
 
 
 class TemplateSyncTests(unittest.TestCase):
-    """The mockup is the spec: it must carry the same composer structure and rules."""
+    """The markup and the stylesheet have to agree about the composer and the rail.
 
-    def test_mockup_has_the_composer_dock_and_the_docked_rules(self) -> None:
-        mock = (ROOT / "design" / "orbit_mockup.html").read_text(encoding="utf-8")
-        app_css = (ROOT / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
-        self.assertIn('class="composer-dock"', mock)
+    The stylesheet is app/static/orbit.css — the one sheet every page loads. The
+    rail itself is projects-centred, so the conversation control lives in the home
+    topbar and there is no chat-history list to keep in sync.
+    """
+
+    def test_composer_dock_and_the_docked_rules_exist(self) -> None:
+        home = (ROOT / "app" / "templates" / "home.html").read_text(encoding="utf-8")
+        app_css = (ROOT / "app" / "static" / "orbit.css").read_text(encoding="utf-8")
+        self.assertIn('class="composer-dock"', home)
         for selector in (".composer-dock", ".home-main.is-docked .composer-dock", ".home-main.is-docked .home-center"):
-            self.assertIn(selector, mock)
             self.assertIn(selector, app_css)
 
-    def test_new_conversation_and_history_markup_match_the_app(self) -> None:
-        mock = (ROOT / "design" / "orbit_mockup.html").read_text(encoding="utf-8")
-        self.assertIn("+ New conversation", mock)
-        self.assertRegex(mock, r'class="history-item active"')
+    def test_the_conversation_control_and_the_projects_rail_match_the_app(self) -> None:
+        home = (ROOT / "app" / "templates" / "home.html").read_text(encoding="utf-8")
+        sidebar = (ROOT / "app" / "templates" / "_sidebar.html").read_text(encoding="utf-8")
+        self.assertIn('id="newConvo"', home)
+        for needle in ('id="projectsLink"', 'id="agentsLink"', 'id="analyticsLink"', 'class="sidebar-project'):
+            self.assertIn(needle, sidebar)
 
 
 if __name__ == "__main__":

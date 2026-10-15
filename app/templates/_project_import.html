@@ -1,0 +1,26 @@
+{#- What an imported project was read from, and what was copied. Nothing here
+    claims access that was never granted: a repository import is a reference, and
+    the listing is what was seen, not what was taken. Rendered on both the
+    overview and the empty map, so it never depends on which tab is open. -#}
+{% if project_obj.remote or project_obj.files %}
+{% if project_obj.notes %}<p class="ws-import-note">{{ project_obj.notes }}</p>{% endif %}
+<div class="ws-ov-block">
+  <h3 class="ws-ov-label">Where it came from</h3>
+  <div class="ws-ov-grid">
+    {% if project_obj.remote.reference %}<div class="ws-ov-block"><h3 class="ws-ov-label">Reference</h3><p class="mono">{{ project_obj.remote.reference }}</p></div>{% endif %}
+    {% if project_obj.remote.branch %}<div class="ws-ov-block"><h3 class="ws-ov-label">Branch</h3><p>{{ project_obj.remote.branch }}</p></div>{% endif %}
+    <div class="ws-ov-block"><h3 class="ws-ov-label">Contents copied</h3><p>{{ 'Yes' if project_obj.remote.contents_copied else 'No' }}</p></div>
+  </div>
+</div>
+{% if project_obj.files %}
+<div class="ws-ov-block">
+  <h3 class="ws-ov-label">Files listed ({{ project_obj.files | length }})</h3>
+  <ul class="ws-file-list">
+    {% for item in project_obj.files[:24] %}
+    <li><span class="mono">{{ item.path }}</span><span class="faint small">{{ item.kind }}{% if item.size %} · {{ item.size }} bytes{% endif %}</span></li>
+    {% endfor %}
+  </ul>
+  {% if project_obj.files | length > 24 %}<p class="faint small">…and {{ project_obj.files | length - 24 }} more.</p>{% endif %}
+</div>
+{% endif %}
+{% endif %}

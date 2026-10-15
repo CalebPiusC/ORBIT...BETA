@@ -1,0 +1,17 @@
+{#- Flash messages, rendered where the page has room for them. The live region is
+    role="status" so a screen reader announces a confirmation without stealing focus
+    from whatever the person was doing. -#}
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="ob-flashes" aria-live="polite">
+  {% for category, message in messages %}
+  <div class="ob-alert ob-alert--{{ 'error' if category == 'error' else ('warning' if category == 'warning' else ('success' if category == 'success' else 'info')) }}"
+       role="{{ 'alert' if category in ('error', 'warning') else 'status' }}">
+    <span class="glyph" aria-hidden="true">{{ {'error': '⚠', 'warning': '!', 'success': '✓', 'info': 'i'}.get(category, 'i') }}</span>
+    <div class="ob-alert-body">{{ message }}</div>
+    <button type="button" class="ob-hint-close" data-dismiss-flash aria-label="Dismiss this message">✕</button>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endwith %}

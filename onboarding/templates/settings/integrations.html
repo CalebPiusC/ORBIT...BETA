@@ -1,0 +1,121 @@
+{% extends "settings/_shell.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Integrations — ORBIT{% endblock %}
+
+{% block section %}
+<section class="ob-card-block">
+  <h2>GitHub</h2>
+  <p class="desc">
+    Two separate permissions, deliberately not bundled. Signing in proves who you are, and
+    gives ORBIT no repository access at all. Reading repositories is something you grant
+    afterwards, on its own, and can take back without touching your ORBIT account.
+  </p>
+  {# The state of both permissions at a glance, before the detail below. #}
+  <div class="ob-inline-actions" style="margin:14px 0 6px">
+    <span class="ob-chip" data-state="connected">Identity connected</span>
+    <span class="ob-chip" data-state="{{ 'connected' if account.github_repository_access() else 'off' }}">
+      {{ 'Repository access granted' if account.github_repository_access() else 'No repository access' }}
+    </span>
+  </div>
+
+  <div class="ob-list">
+    <div class="ob-list-row{% if integrations.github_connected %} ob-list-row--current{% endif %}">
+      <div class="main">
+        <strong>Sign-in (identity){% if integrations.github_connected %} · connected{% endif %}</strong>
+        <span>
+          {% if integrations.github_connected %}
+          {{ integrations.github_login or 'Connected' }} · scopes: <span class="ob-mono">{{ integrations.github_scope or scope_identity }}</span>
+          {% else %}
+          Not connected. Use “Continue with GitHub” on the sign-in screen, or connect from here.
+          {% endif %}
+        </span>
+      </div>
+      {% if integrations.github_connected %}
+      <form method="post" action="{{ url_for('onboarding.settings_integrations') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="action" value="revoke-all" />
+        <button class="ob-btn ob-btn--quiet ob-btn--sm" type="submit">Disconnect</button>
+      </form>
+      {% elif github_oauth.available %}
+      <form method="post" action="{{ url_for('onboarding.oauth_start', slug='github') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="next" value="/settings/integrations" />
+        <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit">Connect GitHub</button>
+      </form>
+      {% else %}
+      <span class="ob-chip ob-chip--off">{{ github_oauth.status }}</span>
+      {% endif %}
+    </div>
+
+    <div class="ob-list-row{% if integrations.github_repo_access %} ob-list-row--current{% endif %}">
+      <div class="main">
+        <strong>Repository access{% if integrations.github_repo_access %} · granted{% endif %}</strong>
+        <span>
+          {% if integrations.github_repo_access %}
+          Read-only listing and file reads, when you ask for them. Scope:
+          <span class="ob-mono">{{ integrations.github_scope or scope_repo }}</span>
+          {% else %}
+          Not granted. {{ not_granted }}
+          {% endif %}
+        </span>
+      </div>
+      {% if integrations.github_repo_access %}
+      <form method="post" action="{{ url_for('onboarding.settings_integrations') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="action" value="revoke-repo" />
+        <button class="ob-btn ob-btn--quiet ob-btn--sm" type="submit">Revoke repository access</button>
+      </form>
+      {% else %}
+      <form method="post" action="{{ url_for('onboarding.settings_integrations') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="action" value="grant-repo" />
+        <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit">Grant read-only access</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <div style="margin-top:18px">
+    <h3 class="ob-h4" style="margin-bottom:10px">What each scope means</h3>
+    <ul class="ob-consent-scopes">
+      {% for scope, meaning in scope_explanation %}
+      <li><span class="scope">{{ scope }}</span><span>{{ meaning }}</span></li>
+      {% endfor %}
+      <li><span class="scope">{{ scope_repo }}</span><span>{{ repository_explanation }}</span></li>
+    </ul>
+  </div>
+
+  {% if github_oauth.simulated %}
+  <p class="ob-small" style="color:var(--warn);margin:16px 0 0">
+    This build has no GitHub client credentials, so connecting runs through ORBIT's
+    simulated consent screen. Nothing is sent to GitHub, and the screens say so.
+  </p>
+  {% endif %}
+</section>
+
+<section class="ob-card-block">
+  <h2>Other providers</h2>
+  <p class="desc">
+    Listed as planned, with the workaround that actually functions today. A switch that
+    does nothing would be worse than this sentence.
+  </p>
+  <div class="ob-list">
+    {% for card in integration_cards if card.slug != 'github' %}
+    <div class="ob-list-row">
+      <div class="main">
+        <strong>{{ card.name }}</strong>
+        <span>{{ card.summary }}</span>
+      </div>
+      <span class="ob-chip ob-chip--note">Planned</span>
+    </div>
+    {% endfor %}
+    <div class="ob-list-row">
+      <div class="main">
+        <strong>Linear · Vercel</strong>
+        <span>Not integrated. They appear in the workspace footer of the chat screen as not connected, and stay that way until they are real.</span>
+      </div>
+      <span class="ob-chip ob-chip--off">Not connected</span>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -88,6 +88,12 @@ class Project:
     summary: str = ""  # AI-generated; empty until the Main Agent writes one
     created_at: str = ""
     updated_at: str = ""
+    # An imported project keeps the reference it came from, the listing that was
+    # read, and the note about what access it had. All optional: a project
+    # started here has none of them.
+    remote: dict[str, Any] = field(default_factory=dict)
+    files: list[dict[str, Any]] = field(default_factory=list)
+    notes: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -101,6 +107,9 @@ class Project:
             "summary": self.summary,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "remote": dict(self.remote),
+            "files": [dict(item) for item in self.files],
+            "notes": self.notes,
         }
 
     @staticmethod
@@ -119,6 +128,9 @@ class Project:
             summary=str(data.get("summary") or ""),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
+            remote=dict(data.get("remote") or {}),
+            files=[dict(item) for item in (data.get("files") or [])],
+            notes=str(data.get("notes") or ""),
         )
 
     def card(self) -> dict[str, Any]:
@@ -185,11 +197,16 @@ class ProjectStore:
         silently stops filtering reads as data loss). ``query`` matches name,
         description, summary and language names, case-insensitively.
         """
-        projects = [
-            Project.from_dict(raw)
-            for raw in self._read().get("projects", [])
-            if raw.get("user_id") == user_id
-        ]
+        projects = []
+        for raw in self._read().get("projects", []):
+            if not isinstance(raw, dict) or raw.get("user_id") != user_id:
+                continue
+            try:
+                projects.append(Project.from_dict(raw))
+            except (KeyError, TypeError, ValueError):
+                # A row written by a different store (or a newer build) is
+                # skipped rather than taking the page down with it.
+                continue
         if status is not None:
             projects = [p for p in projects if p.status == status]
         needle = " ".join((query or "").split()).lower()
@@ -215,7 +232,10 @@ class ProjectStore:
     def get_for(self, project_id: str, user_id: str) -> Project | None:
         for raw in self._read().get("projects", []):
             if raw.get("id") == project_id and raw.get("user_id") == user_id:
-                return Project.from_dict(raw)
+                try:
+                    return Project.from_dict(raw)
+                except (KeyError, TypeError, ValueError):
+                    return None
         return None
 
     # ----- mutations -----
@@ -262,6 +282,86 @@ class ProjectStore:
             return project
 
         return self._update(_add)
+
+    def adopt(
+        self,
+        *,
+        project_id: str,
+        user_id: str,
+        name: str,
+        description: str = "",
+        source: str = "github",
+        status: str = "building",
+        languages: list[str] | None = None,
+        remote: dict[str, Any] | None = None,
+        files: list[dict[str, Any]] | None = None,
+        notes: str = "",
+    ) -> Project | None:
+        """Register a project whose id and facts were decided elsewhere.
+
+        The onboarding layer reads the import (a repository reference, a ZIP
+        listing, a folder) and keeps the fuller record. This brings the same
+        project into the workspace under the same id, so the Projects overview,
+        the rail and the project page all open it. Idempotent: an id already
+        here is left exactly as it is, so a second call cannot overwrite edits.
+
+        Unlike ``create`` this is not an entry point somebody clicked — the
+        entry point already answered for its source — so it does not raise
+        ``SourceUnavailable``.
+        """
+        if source not in SOURCE_LABELS:
+            raise ValueError(f"unknown project source: {source!r}")
+        if status not in STATUS_LABELS:
+            raise ValueError(f"unknown project status: {status!r}")
+        if self.get_for(project_id, user_id) is not None:
+            return None
+        stamp = _utcnow_iso()
+        project = Project(
+            id=project_id,
+            user_id=user_id,
+            name=" ".join((name or "").split()) or "Untitled project",
+            description=" ".join((description or "").split())[:MAX_DESCRIPTION_CHARS],
+            status=status,
+            source=source,
+            languages=list(languages or []),
+            created_at=stamp,
+            updated_at=stamp,
+            remote=dict(remote or {}),
+            files=[dict(item) for item in (files or [])],
+            notes=(notes or "").strip(),
+        )
+
+        def _add(data: dict[str, Any]) -> Project:
+            data.setdefault("projects", []).append(project.as_dict())
+            return project
+
+        return self._update(_add)
+
+    def refresh_import(
+        self,
+        project_id: str,
+        user_id: str,
+        *,
+        remote: dict[str, Any] | None = None,
+        files: list[dict[str, Any]] | None = None,
+        notes: str | None = None,
+    ) -> Project | None:
+        """Keep the mirrored import facts current when the ledger's record changes.
+
+        ``adopt`` writes a project once, and the import screens sometimes finish
+        describing it a moment later (whether repository access was granted, what
+        the walk found). This updates only those facts, so an edit made in the
+        workspace — the name, the status, the tasks — is never overwritten.
+        """
+        def apply(raw: dict[str, Any]) -> None:
+            if remote is not None:
+                raw["remote"] = dict(remote)
+            if files is not None:
+                raw["files"] = [dict(item) for item in files]
+            if notes is not None:
+                raw["notes"] = notes
+
+        return self._mutate(project_id, user_id, apply)
 
     def _mutate(self, project_id: str, user_id: str, mutate) -> Project | None:
         """Apply ``mutate`` to one stored project dict; touch updated_at."""

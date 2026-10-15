@@ -1,0 +1,248 @@
+{% extends "_base.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}ORBIT — a workspace where your ideas stay in orbit{% endblock %}
+
+{% block content %}
+{# Deep links survive the whole funnel: /landing?next=/projects/new #}
+{% set carry = ('?next=' ~ next_url) if next_url else '' %}
+{# ---------------------------------------------------------------------------
+   Hero.
+   Two columns: the promise on the left, the product on the right. The right
+   column is not a stock image — it is ORBIT's own workspace structure and
+   palette, rendered statically and labeled as a preview, because a fake
+   screenshot of a real product is the fastest way to lose someone's trust.
+   --------------------------------------------------------------------------- #}
+<section class="ob-hero">
+  <div class="ob-hero-inner">
+    <div>
+      <span class="ob-beta">{{ content.HERO.eyebrow }}</span>
+      <h1 class="ob-h1">{{ content.HERO.title }}</h1>
+      <p class="ob-lede">{{ content.HERO.subtitle }}</p>
+
+      <div class="ob-hero-cta">
+        <a class="ob-btn ob-btn--primary" href="{{ url_for('onboarding.signup') }}{{ carry }}">{{ content.HERO.primary_cta }}</a>
+        {% if signed_in %}
+        <a class="ob-btn ob-btn--ghost" href="/">Back to your workspace</a>
+        {% else %}
+        <a class="ob-btn ob-btn--ghost" href="{{ url_for('onboarding.demo_enter') }}">{{ content.HERO.secondary_cta }}</a>
+        {% endif %}
+      </div>
+
+      <ul class="ob-assurances">
+        {% for item in content.HERO.assurances %}<li>{{ item }}</li>{% endfor %}
+      </ul>
+
+      {% if simulated_oauth %}
+      <p class="ob-hero-note ob-hero-note--simulated">
+        <span class="ob-chip">Simulated</span>
+        This build has no Google or GitHub credentials, so provider sign-in opens
+        ORBIT's own consent screen and is labelled as simulated. A deployment with
+        the provider keys set sends you to Google or GitHub instead.
+      </p>
+      {% endif %}
+
+      <p class="ob-hero-note">
+        Already have an account? <a href="{{ url_for('onboarding.login') }}{{ carry }}">Sign in</a>.
+        Prefer to look around first? <a href="{{ url_for('onboarding.demo_enter') }}">Open the demo workspace</a>
+        — sample projects, no account, nothing saved.
+      </p>
+    </div>
+
+    <div>
+      <p class="ob-preview-label">
+        <span class="ob-dot" aria-hidden="true"></span> {{ content.PREVIEW_LABEL }}
+      </p>
+      <div class="ob-preview" role="img"
+           aria-label="A preview of the ORBIT workspace: a sidebar of conversations, a Chat and Agent mode switch, an Orbit reply proposing a change that waits for approval, and a message composer.">
+        <div class="ob-preview-bar">
+          <span class="ob-preview-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span class="ob-preview-url">orbit / workspace</span>
+        </div>
+        <div class="ob-preview-body">
+          <div class="ob-preview-side" aria-hidden="true">
+            <div class="row on" style="width:78%"></div>
+            <div class="row" style="width:64%"></div>
+            <div class="row" style="width:84%"></div>
+            <div class="row" style="width:52%"></div>
+            <div class="row" style="width:70%;margin-top:auto"></div>
+            <div class="row" style="width:44%"></div>
+          </div>
+          <div class="ob-preview-main">
+            <div class="ob-preview-toggle"><span class="on">Chat</span><span>Agent</span></div>
+            <div class="ob-preview-msg user">Add status tracking to orders and don’t push anything — I want to review the diff.</div>
+            <div class="ob-preview-msg orbit">
+              <strong>Orbit</strong>
+              Here’s what I’d change in <span class="ob-mono">orders.py</span>: add a status field, default it to
+              <span class="ob-mono">new</span>, and expose it on lookup.
+            </div>
+            <div class="ob-preview-gate">
+              <span>
+                Proposed tool call · nothing runs until you approve
+                <em>write_note(“add status field to orders.py”)</em>
+              </span>
+              <span class="btns"><span class="primary">Approve</span><span>Decline</span></span>
+            </div>
+            <div class="ob-preview-tools" aria-hidden="true">
+              <span class="on"><i class="ob-dot"></i>GitHub</span>
+              <span><i class="ob-dot ob-dot--off"></i>Linear</span>
+              <span><i class="ob-dot ob-dot--off"></i>Vercel</span>
+            </div>
+            <div class="ob-preview-composer" aria-hidden="true">
+              <span style="flex:1">Message Orbit…</span>
+              <span>＋</span><span>🎙</span><span class="send">➤</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="ob-small ob-faint" style="margin-top:12px">
+        Linear and Vercel show as not connected because they are not: ORBIT is built so a
+        placeholder can never be mistaken for an integration.
+      </p>
+    </div>
+  </div>
+</section>
+
+{# ---------------------------------------------------------------------------
+   Capabilities. Six cards, each one traceable to something the product does
+   today — see onboarding/content.py, where these strings live.
+   --------------------------------------------------------------------------- #}
+<section class="ob-section" id="product">
+  <div class="ob-section-head">
+    <span class="ob-eyebrow">What ORBIT does</span>
+    <h2 class="ob-h2">A workspace that shows its work</h2>
+    <p>
+      Most AI tools ask you to trust a black box. ORBIT is built the other way around:
+      you can see the plan, the files, the wait, and the exact action that is about to
+      happen — before it happens.
+    </p>
+  </div>
+  <div class="ob-grid ob-grid--3">
+    {% for capability in content.CAPABILITIES %}
+    <article class="ob-card">
+      <span class="ob-card-tag">{{ capability.tag }}</span>
+      <h3 class="ob-h3">{{ capability.title }}</h3>
+      <p>{{ capability.body }}</p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+{# ---------------------------------------------------------------------------
+   How it works.
+   --------------------------------------------------------------------------- #}
+<section class="ob-section" id="how">
+  <div class="ob-section-head">
+    <span class="ob-eyebrow">Getting started</span>
+    <h2 class="ob-h2">Three steps, and only the first one is required</h2>
+    <p>The workspace opens the moment your account is confirmed. Nothing else is mandatory.</p>
+  </div>
+  <div class="ob-steps">
+    {% for step in content.HOW_IT_WORKS %}
+    <div class="ob-step">
+      <span class="n" aria-hidden="true">{{ step.step }}</span>
+      <h3 class="ob-h3">{{ step.title }}</h3>
+      <p>{{ step.body }}</p>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+{# ---------------------------------------------------------------------------
+   Integrations: the honest table. Available, planned, and the alternative route.
+   --------------------------------------------------------------------------- #}
+<section class="ob-section" id="integrations">
+  <div class="ob-section-head">
+    <span class="ob-eyebrow">Bring your own work</span>
+    <h2 class="ob-h2">GitHub today, everything else importable</h2>
+    <p>
+      External integrations are optional by design. A project can live entirely inside
+      ORBIT, arrive as a ZIP, or come from a folder on your machine.
+    </p>
+  </div>
+  <div class="ob-integration-row">
+    {% for integration in content.INTEGRATIONS %}
+    <div class="ob-integration">
+      <div class="ob-integration-head">
+        <strong>{{ integration.name }}</strong>
+        {% if integration.state == 'available' %}
+        <span class="ob-chip ob-chip--ok"><span class="ob-dot"></span>Live</span>
+        {% else %}
+        <span class="ob-chip"><span class="ob-dot ob-dot--off"></span>Planned</span>
+        {% endif %}
+      </div>
+      <p>{{ integration.summary }}</p>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+{# ---------------------------------------------------------------------------
+   Beta, said plainly.
+   --------------------------------------------------------------------------- #}
+<section class="ob-section" id="beta">
+  <div class="ob-section-head">
+    <span class="ob-eyebrow">{{ content.BETA_LABEL }}</span>
+    <h2 class="ob-h2">{{ content.BETA_SECTION.title }}</h2>
+    <p>{{ content.BETA_SECTION.intro }}</p>
+  </div>
+  <div class="ob-beta-split">
+    {% for column in content.BETA_SECTION.columns %}
+    <div class="ob-beta-col" data-tone="{{ column.tone }}">
+      <h3>{{ column.label }}</h3>
+      <ul>{% for point in column.points %}<li>{{ point }}</li>{% endfor %}</ul>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="ob-beta-postscript">
+    <span>{{ content.BETA_SECTION.postscript }}</span>
+    <a class="ob-btn ob-btn--ghost ob-btn--sm" href="{{ url_for('onboarding.demo_enter') }}">Open the demo and try it</a>
+  </div>
+</section>
+
+{# ---------------------------------------------------------------------------
+   FAQ.
+   --------------------------------------------------------------------------- #}
+<section class="ob-section" id="faq">
+  <div class="ob-section-head">
+    <span class="ob-eyebrow">Straight answers</span>
+    <h2 class="ob-h2">Questions people ask before signing up</h2>
+  </div>
+  <div class="ob-faq">
+    {% for item in content.FAQ %}
+    <details{% if loop.first %} open{% endif %}>
+      <summary>{{ item.q }}</summary>
+      <p>{{ item.a }}</p>
+    </details>
+    {% endfor %}
+  </div>
+</section>
+
+{# ---------------------------------------------------------------------------
+   Closing call to action.
+   --------------------------------------------------------------------------- #}
+<section class="ob-cta-band">
+  <div>
+    <h2 class="ob-h2" style="font-size:clamp(1.35rem,2.6vw,1.8rem)">Start where you are</h2>
+    <p>
+      Create an account and you land in a workspace with four ways in: a new project,
+      an existing one, a Git connection, or nothing at all. No setup wizard stands
+      between you and the first sentence you type.
+    </p>
+  </div>
+  <div class="ob-inline-actions">
+    <a class="ob-btn ob-btn--primary" href="{{ url_for('onboarding.signup') }}{{ carry }}">Create your account</a>
+    <a class="ob-btn ob-btn--ghost" href="{{ url_for('onboarding.login') }}{{ carry }}">Sign in</a>
+  </div>
+</section>
+
+{# A last honest line about what this build is. #}
+<p class="ob-small ob-faint" style="margin:32px 0 0">
+  {% if account_count > 1 %}
+  {{ account_count }} accounts exist on this deployment.
+  {% else %}
+  This deployment is new — you would be among the first accounts on it.
+  {% endif %}
+  Model ids, the Agent panel's layout, and the copy on this page will change while the
+  beta runs; the approval gate will not.
+</p>
+{% endblock %}

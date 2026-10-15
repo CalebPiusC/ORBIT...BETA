@@ -1,0 +1,149 @@
+{#- Shared pieces. Macros rather than copies, so a field, an alert or a tile behaves
+    the same on every screen. This file lives in the app's template folder because
+    both shells use it: the marketing/auth pages in onboarding/templates/ and the
+    workspace partials in app/templates/onboarding/. -#}
+
+{% macro alert(category, message, actions=None) %}
+<div class="ob-alert ob-alert--{{ 'error' if category == 'error' else ('warning' if category == 'warning' else ('success' if category == 'success' else 'info')) }}"
+     role="{{ 'alert' if category in ('error', 'warning') else 'status' }}">
+  <span class="glyph" aria-hidden="true">{{ {'error': '⚠', 'warning': '!', 'success': '✓', 'info': 'i'}.get(category, 'i') }}</span>
+  <div class="ob-alert-body">{{ message }}</div>
+</div>
+{% endmacro %}
+
+{% macro field(name, label, value='', type='text', error='', hint='', autocomplete='', placeholder='', required=False, autofocus=False, inputmode='', maxlength='', extra='') %}
+<div class="ob-field">
+  <label for="{{ name }}">{{ label }}{% if required %} <span class="ob-faint" aria-hidden="true">*</span>{% endif %}</label>
+  <input
+    class="ob-input"
+    id="{{ name }}"
+    name="{{ name }}"
+    type="{{ type }}"
+    value="{{ value }}"
+    {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+    {% if autocomplete %}autocomplete="{{ autocomplete }}"{% endif %}
+    {% if inputmode %}inputmode="{{ inputmode }}"{% endif %}
+    {% if maxlength %}maxlength="{{ maxlength }}"{% endif %}
+    {% if required %}required aria-required="true"{% endif %}
+    {% if autofocus %}autofocus data-autofocus="true"{% endif %}
+    {% if error %}aria-invalid="true" aria-describedby="{{ name }}-error"{% elif hint %}aria-describedby="{{ name }}-hint"{% endif %}
+    {{ extra|safe }}
+  />
+  {% if error %}<span class="ob-error" id="{{ name }}-error" role="alert">{{ error }}</span>
+  {% elif hint %}<span class="ob-hint" id="{{ name }}-hint">{{ hint }}</span>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro password_field(name, label, error='', hint='', autocomplete='new-password', meter=True, value='') %}
+<div class="ob-field">
+  <label for="{{ name }}">{{ label }}</label>
+  <input class="ob-input" id="{{ name }}" name="{{ name }}" type="password"
+         {% if value %}value="{{ value }}"{% endif %}
+         autocomplete="{{ autocomplete }}"
+         {% if meter %}data-password-meter="{{ name }}"{% endif %}
+         {% if error %}aria-invalid="true" aria-describedby="{{ name }}-error"{% else %}aria-describedby="{{ name }}-rules"{% endif %} />
+  {% if error %}<span class="ob-error" id="{{ name }}-error" role="alert">{{ error }}</span>{% endif %}
+  {% if meter %}
+  <div class="ob-meter" data-meter-for="{{ name }}" data-score="0">
+    <div class="ob-meter-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <span class="ob-meter-label" id="{{ name }}-strength" aria-live="polite">Strength: not yet rated</span>
+  </div>
+  <ul class="ob-rules" id="{{ name }}-rules">
+    <li data-rule="length">At least 10 characters</li>
+    <li data-rule="common">Not one of the passwords attackers try first</li>
+    <li data-rule="personal">Not built from your name or email</li>
+  </ul>
+  {% endif %}
+  {% if hint %}<span class="ob-hint">{{ hint }}</span>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro social_buttons(mode='signup', next_url='/') %}
+{% set registry = oauth_registry %}
+<div class="ob-social">
+  {% for slug, label, glyph in [('google', 'Google', 'G'), ('github', 'GitHub', 'GH')] %}
+  {% set ready = registry.available(slug) %}
+  {% set simulated = registry.simulated(slug) %}
+  <form method="post" action="{{ url_for('onboarding.oauth_start', slug=slug) }}" data-loading-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="next" value="{{ next_url }}" />
+    <button class="ob-social-btn" type="submit" data-simulated="{{ 'true' if simulated else 'false' }}"
+            aria-describedby="github-scope-note">
+      <span class="glyph glyph--{{ slug }}" aria-hidden="true">{{ glyph }}</span>
+      <span class="ob-who">Continue with {{ label }}</span>
+      <span class="state">{% if simulated %}Simulated{% elif ready %}Ready{% else %}Not configured here{% endif %}</span>
+      <span class="ob-spinner" aria-hidden="true"></span>
+    </button>
+  </form>
+  {% endfor %}
+</div>
+<p class="ob-social-note" id="github-scope-note">
+  <span class="lock" aria-hidden="true">🔒</span>
+  <span>
+    <strong>Signing in with GitHub does not grant access to your repositories.</strong>
+    It reads your public profile and verified email only — ORBIT asks for
+    <span class="ob-mono">read:user user:email</span> and stops there. Repository access is a
+    separate, optional grant you make later, from Settings → Integrations.
+  </span>
+</p>
+{% if registry.any_simulated() %}
+<p class="ob-small ob-faint" style="margin-top:10px">
+  This build has no provider credentials, so the buttons above open ORBIT's own consent
+  screen, marked <em>simulated</em>. A deployment with
+  <span class="ob-mono">ORBIT_GOOGLE_CLIENT_ID</span> /
+  <span class="ob-mono">ORBIT_GITHUB_CLIENT_ID</span> set sends you to the provider instead.
+</p>
+{% endif %}
+{% endmacro %}
+
+{% macro tile(point, primary=False) %}
+<a class="ob-tile{% if primary %} ob-tile--primary{% endif %}" href="{{ point.href }}"
+   {% if not point.available %}data-unavailable="true" aria-describedby="tile-{{ point.slug }}-note"{% endif %}>
+  {% if point.badge %}<span class="flag flag--ai">{{ point.badge }}</span>
+  {% elif not point.available %}<span class="flag flag--soon">{{ point.note or 'Coming later' }}</span>{% endif %}
+  <span class="ico" aria-hidden="true">{{ point.icon }}</span>
+  <strong>{{ point.title }}</strong>
+  <p{% if not point.available %} id="tile-{{ point.slug }}-note"{% endif %}>{{ point.body }}</p>
+</a>
+{% endmacro %}
+
+{% macro empty_state(icon, title, body, actions=None) %}
+<div class="ob-empty">
+  <div class="ico" aria-hidden="true">{{ icon }}</div>
+  <h3>{{ title }}</h3>
+  <p>{{ body }}</p>
+  {% if actions %}
+  <div class="actions">
+    {% for action in actions %}
+    <a class="ob-btn {{ action.style or 'ob-btn--ghost' }}" href="{{ action.href }}">{{ action.label }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro chip_toggle(name, value, label, checked=False, group='') %}
+<label class="ob-chip-toggle">
+  <input type="checkbox" name="{{ name }}" value="{{ value }}" {% if checked %}checked{% endif %}
+         {% if group %}data-chip-group="{{ group }}"{% endif %} />
+  <span>{{ label }}</span>
+</label>
+{% endmacro %}
+
+{% macro file_list(files, limit=14) %}
+{% if files %}
+<div class="ob-file-list" role="list">
+  {% for item in files[:limit] %}
+  <div class="ob-file" role="listitem" data-kind="{{ item.kind or 'file' }}">
+    <span class="path">{{ item.path }}</span>
+    <span class="size">{% if item.size %}{{ (item.size / 1024) | round(1) }} KB{% else %}—{% endif %}</span>
+  </div>
+  {% endfor %}
+</div>
+{% if files | length > limit %}
+<p class="ob-faint ob-small" style="margin:8px 0 0">Showing {{ limit }} of {{ files | length }} listed files.</p>
+{% endif %}
+{% else %}
+<p class="ob-faint ob-small" style="margin:0">No files listed.</p>
+{% endif %}
+{% endmacro %}

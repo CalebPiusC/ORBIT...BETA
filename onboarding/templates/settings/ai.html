@@ -1,0 +1,99 @@
+{% extends "settings/_shell.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}AI assistance — ORBIT{% endblock %}
+
+{% block section %}
+<form method="post" action="{{ url_for('onboarding.settings_ai') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+  <section class="ob-card-block">
+    <h2>How ORBIT starts a conversation</h2>
+    <p class="desc">
+      These are defaults for new turns. The switchers in the workspace still win for any
+      single reply.
+    </p>
+    <fieldset class="ob-field-group">
+      <legend>Default mode</legend>
+      <div class="ob-choices">
+        <label class="ob-choice">
+          <input type="radio" name="default_mode" value="chat" {% if preferences.default_mode == 'chat' %}checked{% endif %} />
+          <span><strong>Chat</strong><span class="hint">Questions, explanations, and tool calls you approve.</span></span>
+        </label>
+        <label class="ob-choice">
+          <input type="radio" name="default_mode" value="agent" {% if preferences.default_mode == 'agent' %}checked{% endif %} />
+          <span><strong>Agent</strong><span class="hint">Tasks with a checklist, planned from your request.</span></span>
+        </label>
+      </div>
+    </fieldset>
+    <fieldset class="ob-field-group" style="margin-top:20px">
+      <legend>Default depth</legend>
+      <div class="ob-choices">
+        <label class="ob-choice">
+          <input type="radio" name="default_depth" value="quick" {% if preferences.default_depth == 'quick' %}checked{% endif %} />
+          <span><strong>Quick</strong><span class="hint">Short replies, fastest path, small output cap.</span></span>
+        </label>
+        <label class="ob-choice">
+          <input type="radio" name="default_depth" value="deep" {% if preferences.default_depth == 'deep' %}checked{% endif %} />
+          <span><strong>Deep</strong><span class="hint">More thinking and a longer allowance, routed across the model chain.</span></span>
+        </label>
+      </div>
+    </fieldset>
+    <p class="ob-small ob-faint" style="margin:16px 0 0">
+      Currently applied in your workspace: <strong>{{ store_mode }}</strong> mode,
+      <strong>{{ store_depth }}</strong> depth.
+    </p>
+  </section>
+
+  <section class="ob-card-block">
+    <h2>What ORBIT may do on its own</h2>
+    <div class="ob-toggle-row">
+      <div class="text">
+        <strong>Use a tool without asking</strong>
+        <span>
+          Not available, by design. Every tool call and every proposed change waits for your
+          explicit approval, and applying changes without it is refused by the store itself.
+        </span>
+      </div>
+      <span class="ob-locked"><span aria-hidden="true">🔒</span> Always asks</span>
+    </div>
+    <div class="ob-toggle-row">
+      <div class="text">
+        <strong>Speak replies to voice turns</strong>
+        <span>When you hold the mic, ORBIT reads its answer back. Typed turns stay text.</span>
+      </div>
+      <label class="ob-switch">
+        <input type="checkbox" name="voice_replies" {% if preferences.voice_replies %}checked{% endif %} />
+        <span class="track" aria-hidden="true"></span>
+        <span class="ob-sr">Speak replies to voice turns</span>
+      </label>
+    </div>
+    <div class="ob-toggle-row">
+      <div class="text">
+        <strong>Show the model's name when it answers</strong>
+        <span>Deep mode already names each model it tries. A switch to hide it is not built yet.</span>
+      </div>
+      <span class="ob-chip">Not built yet</span>
+    </div>
+  </section>
+
+  <section class="ob-card-block">
+    <h2>Which model answers</h2>
+    <p class="desc" style="margin-bottom:0">
+      This deployment sets its own model access, and the name is shown when it answers.
+      There is no key field in ORBIT because keys belong in the server's environment, not in
+      a form — and model names change too often to hard-code into a screen.
+      {% if not provider_ready %}
+      <br /><br /><strong>No model is configured in this run.</strong> Replies will come from
+      the demo stub and will say so; nothing is being pretended.
+      {% endif %}
+    </p>
+  </section>
+
+  <div class="ob-form-actions">
+    <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Saving…">
+      <span class="ob-spinner" aria-hidden="true"></span>
+      <span class="ob-btn-label">Save AI preferences</span>
+    </button>
+  </div>
+</form>
+{% endblock %}

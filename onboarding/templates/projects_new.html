@@ -1,0 +1,57 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}New project — ORBIT{% endblock %}
+
+{% block page %}
+<div class="ob-page-head">
+  <div>
+    <div class="ob-crumbs"><a href="/projects">Projects</a><span aria-hidden="true">/</span><span>New</span></div>
+    <h1>Start a project</h1>
+    <p class="lede">
+      Nine ways in. Nothing is uploaded, cloned, or written to your machine by picking one —
+      a project here is a name, a place to think, and a listing of what it came from.
+    </p>
+  </div>
+</div>
+
+{# Grouped by intent, because "describe an idea" and "import a ZIP" are different moods. #}
+<section class="ob-section-block" aria-labelledby="start-fresh">
+  <div class="ob-section-title">
+    <h2 id="start-fresh">Start something new</h2>
+    <p>Nothing exists on disk until you ask ORBIT to write it.</p>
+  </div>
+  <div class="ob-tiles">
+    {% for point in entry_points if point.group == 'start' %}
+    {{ m.tile(point, primary=(point.slug == 'idea')) }}
+    {% endfor %}
+  </div>
+</section>
+
+<section class="ob-section-block" aria-labelledby="bring-work">
+  <div class="ob-section-title">
+    <h2 id="bring-work">Bring work you already have</h2>
+    <p>
+      {% if github_connected %}
+      GitHub is connected to this account.
+      {% else %}
+      GitHub is the live integration; the others are honestly marked as not built yet.
+      {% endif %}
+    </p>
+  </div>
+  <div class="ob-tiles">
+    {% for point in entry_points if point.group == 'import' %}
+    {{ m.tile(point) }}
+    {% endfor %}
+  </div>
+</section>
+
+<div class="ob-card-block" style="margin-top:32px">
+  <h2>How ORBIT treats imported code</h2>
+  <p class="desc" style="margin-bottom:0">
+    Every import path in this beta keeps the <em>listing</em> — file names, sizes, and where
+    they came from. Contents are not copied into your workspace, not uploaded to a model,
+    and not indexed. When you want ORBIT to look at a file, you attach it to a conversation
+    and it says plainly whether it could read it.
+  </p>
+</div>
+{% endblock %}

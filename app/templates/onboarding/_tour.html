@@ -1,0 +1,35 @@
+{#- The first-use tour. Five steps, all of them anchored to elements that exist on
+    this screen, all of them describing something the product actually does.
+
+    Behavior, in order of who is in charge:
+      * it never starts by itself unless the person asked for it (?tour=1, the
+        dashboard's "Take the tour" button, or Settings → Help → Replay);
+      * Skip and Esc both end it immediately and count as seen;
+      * "Don't show again" is a separate, explicit choice that stops the offer;
+      * the engine lives in onboarding.js, which is also what marks progress. #}
+{% if account and tour_offered %}
+<div class="ob-tour" id="obTour" hidden
+     data-steps='{{ tour_steps | tojson }}'
+     data-start="{% if tour_requested %}1{% else %}0{% endif %}"
+     role="dialog" aria-modal="true" aria-labelledby="obTourTitle">
+  <div class="ob-tour-spot" id="obTourSpot" aria-hidden="true"></div>
+  <div class="ob-tour-card" id="obTourCard">
+    <div class="ob-tour-top">
+      <span class="ob-tour-count" id="obTourCount" aria-live="polite">Step 1 of 5</span>
+      <span class="ob-tour-progress" id="obTourProgress" aria-hidden="true"></span>
+    </div>
+    <h2 id="obTourTitle">Welcome to ORBIT</h2>
+    <p id="obTourBody"></p>
+    <div class="ob-tour-actions">
+      <div class="right">
+        <button class="ob-btn ob-btn--quiet ob-btn--sm" type="button" data-tour-dismiss>Don’t show again</button>
+        <button class="ob-btn ob-btn--quiet ob-btn--sm" type="button" data-tour-skip>Skip tour</button>
+      </div>
+      <div class="right">
+        <button class="ob-btn ob-btn--ghost ob-btn--sm" type="button" data-tour-prev hidden>Back</button>
+        <button class="ob-btn ob-btn--primary ob-btn--sm" type="button" data-tour-next>Next</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}

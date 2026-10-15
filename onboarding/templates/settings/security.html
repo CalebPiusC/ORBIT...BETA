@@ -1,0 +1,75 @@
+{% extends "settings/_shell.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Security — ORBIT{% endblock %}
+
+{% block section %}
+<section class="ob-card-block">
+  <h2>Password</h2>
+  {% if account.has_password %}
+  <p class="desc">
+    Changing your password signs out every other device and keeps this one. Two-factor
+    authentication is not built yet — it is listed here rather than shipped as a switch that
+    does nothing.
+  </p>
+  {% if errors.get('password') %}{{ m.alert('error', errors.get('password')) }}{% endif %}
+  <form method="post" action="{{ url_for('onboarding.settings_security') }}" novalidate data-validate-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="action" value="change-password" />
+    {{ m.password_field('current_password', 'Current password', autocomplete='current-password', meter=False) }}
+    {{ m.password_field('new_password', 'New password', autocomplete='new-password', meter=True) }}
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Changing…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Change password</span>
+      </button>
+    </div>
+  </form>
+  {% else %}
+  <p class="desc" style="margin-bottom:0">
+    This account signs in with {{ account.provider_label }}. Passwords are not part of it,
+    and ORBIT will not show a form whose Save button cannot do anything.
+  </p>
+  {% endif %}
+</section>
+
+<section class="ob-card-block">
+  <h2>Active sessions</h2>
+  <p class="desc">Sessions are per device. Revoking one signs that device out on its next request.</p>
+  <div class="ob-list">
+    {% for item in sessions %}
+    <div class="ob-list-row{% if item.id == current_session_id %} ob-list-row--current{% endif %}">
+      <div class="main">
+        {% if item.id == current_session_id %}<strong>This browser</strong> · {{ item.label }}{% else %}<strong>{{ item.label }}</strong>{% endif %}
+        <span>{{ item.created_at[:16].replace('T', ' ') }} → {{ item.last_seen[:16].replace('T', ' ') }} UTC</span>
+      </div>
+      {% if item.id == current_session_id %}
+      <span class="ob-chip ob-chip--ok"><span class="ob-dot"></span>In use now</span>
+      {% else %}
+      <form method="post" action="{{ url_for('onboarding.settings_security') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="action" value="revoke" />
+        <input type="hidden" name="session_id" value="{{ item.id }}" />
+        <button class="ob-btn ob-btn--quiet ob-btn--sm" type="submit">Sign out</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <form method="post" action="{{ url_for('onboarding.settings_security') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="action" value="sign-out-others" />
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit">Sign out all other sessions</button>
+    </div>
+  </form>
+</section>
+
+<section class="ob-card-block">
+  <h2>What is not built yet</h2>
+  <p class="desc" style="margin-bottom:0">
+    Two-factor authentication, passkeys, and recovery codes. Until they exist, the practical
+    protections are a long password, a confirmed email address, and the session list above.
+    If you sign in with Google or GitHub, their own two-factor protection does the work.
+  </p>
+</section>
+{% endblock %}

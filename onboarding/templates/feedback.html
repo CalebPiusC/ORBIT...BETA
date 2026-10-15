@@ -1,0 +1,134 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Feedback — ORBIT{% endblock %}
+
+{% block page %}
+<div class="ob-page-head">
+  <div>
+    <span class="ob-eyebrow">{{ content.BETA_LABEL }}</span>
+    <h1>Tell us what to fix next</h1>
+    <p class="lede">{{ promise }}</p>
+  </div>
+  <div class="ob-page-head-actions">
+    <a class="ob-btn ob-btn--quiet ob-btn--sm" href="#history">Your feedback ({{ entries | length }})</a>
+  </div>
+</div>
+
+{% if sent %}
+{{ m.alert('success', 'Received. A reference number is in the list below — quote it if we follow up. Nothing in your workspace changed.') }}
+{% endif %}
+
+{% if errors %}
+{{ m.alert('error', errors | join(' ')) }}
+{% endif %}
+
+<div class="ob-form-row" style="align-items:start">
+  <form method="post" action="{{ url_for('onboarding.feedback') }}" class="ob-card-block" style="margin:0">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <h2>What kind of feedback is this?</h2>
+    <p class="desc">Each one asks for slightly different detail, because the useful answer differs.</p>
+
+    <div class="ob-seg ob-seg--stack" style="margin-bottom:24px">
+      {% for type in types %}
+      <label>
+        <input type="radio" name="kind" value="{{ type.value }}" {% if drafted.kind == type.value %}checked{% endif %} required />
+        <span>{{ type.label }}<span class="blurb">{{ type.blurb }} {{ type.prompt }}</span></span>
+      </label>
+      {% endfor %}
+    </div>
+
+    <div class="ob-field">
+      <label for="body">In your words</label>
+      <textarea class="ob-textarea" id="body" name="body" rows="8" required
+                placeholder="What happened, what you expected, and what you were doing at the time. Bullet points are fine.">{{ drafted.body }}</textarea>
+      <span class="ob-hint" id="body-hint">
+        Your draft is kept in this tab until it is sent, so an accidental reload does not lose it.
+      </span>
+    </div>
+
+    <div class="ob-field">
+      <label for="subject">Short title <span class="ob-faint">— optional</span></label>
+      <input class="ob-input" id="subject" name="subject" type="text" maxlength="140"
+             value="{{ drafted.subject }}" placeholder="One line, so you can find it later" />
+    </div>
+
+    {# The context block: complete, visible, and removable before sending. #}
+    <div class="ob-context" data-context-block>
+      <div class="ob-context-head">
+        <span>Context attached to this report</span>
+        <label class="keep"><input type="checkbox" checked data-context-toggle /> include</label>
+      </div>
+      <ul>
+        {% for key, value in context_default.items() %}
+        {% if value %}<li><b>{{ {'surface': 'Screen', 'route': 'Route', 'project': 'Project', 'viewport': 'Window', 'browser': 'Browser', 'build': 'Build', 'account': 'Account'}.get(key, key) }}</b> <span>{{ value }}</span></li>{% endif %}
+        {% endfor %}
+      </ul>
+      <input type="hidden" name="context" value="{{ context_default | tojson | forceescape }}" data-context-input />
+    </div>
+
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Sending…" data-draft-key="orbit.feedback.draft.page">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Send feedback</span>
+      </button>
+      <a class="ob-btn ob-btn--ghost" href="/">Back to the workspace</a>
+    </div>
+  </form>
+
+  <div>
+    <section class="ob-card-block">
+      <h2>What happens to this</h2>
+      <p class="desc">
+        A person building ORBIT reads it. During beta there is no tracker behind the scenes,
+        which is why every entry below says <strong>Received</strong> and no entry climbs a
+        ladder of statuses it cannot actually reach.
+      </p>
+      <p class="desc" style="margin-bottom:0">
+        If you turned replies off in Settings → Notifications, your feedback is still read —
+        you just will not hear back.
+      </p>
+    </section>
+    <section class="ob-card-block">
+      <h2>The fast route</h2>
+      <p class="desc">
+        The ✦ button in the corner of the workspace opens this same form as a drawer, without
+        leaving the page you are on — useful when the thing you are reporting about is still
+        on screen.
+      </p>
+    </section>
+  </div>
+</div>
+
+<section class="ob-section-block" id="history">
+  <div class="ob-section-title">
+    <h2>Your feedback</h2>
+    <p>{{ entries | length }} sent from this account.</p>
+  </div>
+  {% if entries %}
+  <div class="ob-history">
+    {% for entry in entries %}
+    <article class="ob-history-item" id="{{ entry.id }}">
+      <div class="top">
+        <strong>{{ entry.subject }}</strong>
+        <span class="when">{{ entry.created_human }}</span>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span class="ob-chip">{{ entry.kind_label }}</span>
+        <span class="status">{{ entry.status_label }}</span>
+        <span class="ref">{{ entry.reference }}</span>
+      </div>
+      <p>{{ entry.body | striptags | truncate(240) }}</p>
+      <div><a class="ob-small" href="/feedback/{{ entry.id }}">Open this report</a></div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  {{ m.empty_state(
+    '✦',
+    'No feedback sent yet',
+    'If something surprised you, broke, or is missing, that is exactly the report we want. It takes one field.',
+    [{'label': 'Write the first one', 'href': '#body', 'style': 'ob-btn--primary'}]
+  ) }}
+  {% endif %}
+</section>
+{% endblock %}

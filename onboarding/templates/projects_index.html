@@ -1,0 +1,78 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Projects — ORBIT{% endblock %}
+
+{% block page %}
+<div class="ob-page-head">
+  <div>
+    <span class="ob-eyebrow">Workspace</span>
+    <h1>Projects</h1>
+    <p class="lede">
+      A project is where a conversation gets a home: a name, what it came from, and the plan
+      you approved. Nothing here is a clone — no code has been copied off your machine.
+    </p>
+  </div>
+  <div class="ob-page-head-actions">
+    <a class="ob-btn ob-btn--primary ob-btn--sm" href="/projects/new">New project</a>
+  </div>
+</div>
+
+{% if projects %}
+<section class="ob-section-block">
+  <div class="ob-section-title">
+    <h2>{{ projects | length }} project{{ '' if projects | length == 1 else 's' }}</h2>
+    <p>Sorted by the last time you opened each one.</p>
+  </div>
+  <div class="ob-project-grid">
+    {% for project in projects %}
+    <a class="ob-project" href="/projects/{{ project.id }}">
+      <span class="ob-project-head">
+        <strong>{{ project.name }}</strong>
+        <span class="ob-kind" data-kind="{{ project.kind_slug }}">{{ project.kind_label }}</span>
+      </span>
+      <span class="origin">{{ project.origin_line }}</span>
+      <span class="foot">
+        <span>{{ project.file_summary }}</span>
+        <span>{{ project.last_opened_human }}</span>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="ob-section-block">
+  <div class="ob-section-title">
+    <h2>Start another</h2>
+    <p>Same nine doors as the first time.</p>
+  </div>
+  <div class="ob-tiles">
+    {% for point in entry_points if point.group == 'start' %}
+    {{ m.tile(point) }}
+    {% endfor %}
+  </div>
+</section>
+
+{% else %}
+{# The empty state is the first-run experience, so it does the same job the welcome
+   screen does: name the ways in, and never dead-end. #}
+{{ m.empty_state(
+  '◎',
+  'No projects yet — and that is a fine place to start',
+  'A project can begin as a sentence, a repository, a folder, or nothing at all. Pick whichever is closest to what is in front of you.',
+  [
+    {'label': 'Describe an idea', 'href': '/projects/idea', 'style': 'ob-btn--primary'},
+    {'label': 'Import an existing project', 'href': '/projects/new?group=import'},
+    {'label': 'Just open the chat', 'href': '/'}
+  ]
+) }}
+
+<section class="ob-section-block">
+  <div class="ob-section-title"><h2>Every way in</h2></div>
+  <div class="ob-tiles">
+    {% for point in entry_points %}
+    {{ m.tile(point) }}
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

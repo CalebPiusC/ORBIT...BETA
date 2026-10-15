@@ -203,6 +203,30 @@ def _seed_task() -> Task:
 class Store:
     """Holds the live state the ORBIT UI renders and mutates."""
 
+
+    @classmethod
+    def blank(cls, *, user: User | None = None) -> "Store":
+        """A workspace with nothing in it, for an account that just signed up.
+
+        ``Store()`` keeps its seeded sample data because the demo workspace and the
+        offline suite both depend on it. A real new account must not open on
+        somebody else's conversations, so the onboarding layer builds one of these
+        instead: no conversations, no tasks, and GitHub genuinely *not* connected
+        until the person connects it. Faking an active connection for a brand-new
+        account would break the same rule Linear and Vercel are held to.
+        """
+        store = cls()
+        store.user = user or User(name="You", workspace="Personal workspace")
+        store.connections = [
+            Connection(name="GitHub", status="not_connected"),
+            Connection(name="Linear", status="not_connected"),
+            Connection(name="Vercel", status="not_connected"),
+        ]
+        store.conversations = []
+        store.tasks = {}
+        store.threads = {}
+        store.active_conversation_id = None
+        return store
     def __init__(self) -> None:
         self.user = _SEED_USER
         self.connections: list[Connection] = list(_SEED_CONNECTIONS)

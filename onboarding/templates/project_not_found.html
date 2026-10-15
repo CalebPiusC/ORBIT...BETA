@@ -1,0 +1,15 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Project not found — ORBIT{% endblock %}
+
+{% block page %}
+{{ m.empty_state(
+  '◎',
+  'That project is not in your workspace',
+  'Either it was deleted, or the link belongs to a different account. Nothing else was affected.',
+  [
+    {'label': 'See your projects', 'href': '/projects', 'style': 'ob-btn--primary'},
+    {'label': 'Start a new one', 'href': '/projects/new'}
+  ]
+) }}
+{% endblock %}

@@ -138,6 +138,7 @@
             <div class="ws-ov-block"><h3 class="ws-ov-label">Technology</h3><p>{{ project.languages|join(' · ') if project.languages else 'No technology chosen yet.' }}</p></div>
             <div class="ws-ov-block"><h3 class="ws-ov-label">Tasks</h3><p>{{ done_tasks }} of {{ total_tasks }} complete — the count is what you marked, on the map.</p></div>
           </div>
+          {% include "_project_import.html" %}
         </div>
         {% elif selected %}
         <div class="ws-panel-head">
@@ -218,6 +219,7 @@
           {% else %}
           <h3>The map is empty.</h3>
           <p>Add the first task on the left, or talk it through with the {{ speaker }} on the right — the plan becomes tasks on your map.</p>
+          {% include "_project_import.html" %}
           {% endif %}
         </div>
         {% endif %}

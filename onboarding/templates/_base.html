@@ -1,0 +1,88 @@
+{#- The marketing and auth shell. Owns its own <head>, header and footer, and is
+    deliberately separate from the workspace's layout.html: a person deciding
+    whether to sign up should not be looking at an app sidebar. -#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>{% block title %}ORBIT — your ideas, in orbit{% endblock %}</title>
+<meta name="description" content="{% block description %}ORBIT is a workspace where you plan, build, and ship with an AI that shows its reasoning and asks before it changes anything.{% endblock %}" />
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='orbit-mark.svg') }}" />
+{#- The design system first, so the marketing and auth screens are literally the
+    same tokens, type and components as the workspace; then this layer's own
+    ob- prefixed additions. -#}
+<link rel="stylesheet" href="{{ url_for('static', filename='orbit.css') }}" />
+<link rel="stylesheet" href="{{ url_for('onboarding.static', filename='onboarding.css') }}" />
+{% block head_extra %}{% endblock %}
+</head>
+<body class="ob-page">
+<a class="ob-skip" href="#main">Skip to content</a>
+
+<header class="ob-header">
+  <div class="ob-wrap ob-header-inner">
+    <a class="ob-brand" href="{{ url_for('onboarding.landing') }}">
+      <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+      <span>orbit</span>
+    </a>
+    <nav class="ob-nav" aria-label="Page sections">
+      {% block nav %}
+      <a href="#product">What it does</a>
+      <a href="#how">How it works</a>
+      <a href="#beta">Beta notes</a>
+      <a href="#faq">Questions</a>
+      {% endblock %}
+    </nav>
+    <div class="ob-header-actions">
+      <span class="ob-beta" title="ORBIT is in private beta">{{ build_label|upper }} {{ '· beta' if build_label != 'beta' else '' }}</span>
+      {% if account %}
+      <a class="ob-btn ob-btn--primary ob-btn--sm" href="/">Open workspace</a>
+      {% else %}
+      <a class="ob-btn ob-btn--quiet" href="{{ url_for('onboarding.login') }}">Sign in</a>
+      <a class="ob-btn ob-btn--primary ob-btn--sm" href="{{ url_for('onboarding.signup') }}">Create account</a>
+      {% endif %}
+    </div>
+  </div>
+</header>
+
+<main id="main" class="ob-wrap{% block main_class %}{% endblock %}">
+  <div style="height:24px"></div>
+  {% include "onboarding/_flash.html" %}
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="ob-footer">
+  <div class="ob-wrap">
+    <div class="ob-footer-grid">
+      <div class="ob-footer-brand">
+        <a class="ob-brand" href="{{ url_for('onboarding.landing') }}">
+          <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+          <span>orbit</span>
+        </a>
+        <p>A workspace for thinking and building, with an approval gate between the AI and your code.</p>
+        <p class="ob-small ob-faint" style="margin-top:12px">
+          <span class="ob-chip">{{ content.BETA_LABEL }}</span>
+        </p>
+      </div>
+      {% for column in content.FOOTER_COLUMNS %}
+      <div>
+        <h4>{{ column.label }}</h4>
+        <ul>
+          {% for link in column.links %}
+          <li><a href="{{ link.href }}">{{ link.label }}</a></li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="ob-footer-base">
+      <span>Built for the beta. Model access, model names, and integrations change while it runs.</span>
+      <span>Africa/Lagos reminders · Nothing runs without your approval</span>
+    </div>
+  </div>
+</footer>
+
+<script src="{{ url_for('onboarding.static', filename='onboarding.js') }}" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,94 @@
+{% extends "settings/_shell.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Account — ORBIT{% endblock %}
+
+{% block section %}
+<section class="ob-card-block">
+  <h2>Email address</h2>
+  <p class="desc">
+    Changing this sends a confirmation to the new address. Until it is confirmed the
+    workspace stays closed — a new address is a new inbox, and ORBIT confirms it exactly
+    the way it confirmed the first one.
+  </p>
+  {% if errors.get('email') %}{{ m.alert('error', errors.get('email')) }}{% endif %}
+  {% if notice %}{{ m.alert('success', notice) }}{% endif %}
+  <form method="post" action="{{ url_for('onboarding.settings_account') }}" novalidate data-validate-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="action" value="email" />
+    <div class="ob-form-row" style="grid-template-columns:minmax(0,1fr)">
+      {{ m.field('email', 'Email address', account.email, type='email', inputmode='email', required=True) }}
+    </div>
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit" data-loading-label="Updating…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Update email</span>
+      </button>
+      <span class="ob-small ob-faint">
+        {% if account.provider in ('google', 'github') %}
+        You sign in with {{ account.provider_label }}; this address is where ORBIT reaches you.
+        {% else %}
+        This is also the address you sign in with.
+        {% endif %}
+      </span>
+    </div>
+  </form>
+</section>
+
+<section class="ob-card-block">
+  <h2>Password</h2>
+  {% if account.has_password %}
+  <p class="desc">Changing it signs out every other device and keeps this one signed in.</p>
+  {% if errors.get('password') %}{{ m.alert('error', errors.get('password')) }}{% endif %}
+  <form method="post" action="{{ url_for('onboarding.settings_account') }}" novalidate data-validate-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="action" value="password" />
+    {{ m.password_field('current_password', 'Current password', autocomplete='current-password', meter=False) }}
+    {{ m.password_field('new_password', 'New password', autocomplete='new-password', meter=True) }}
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit" data-loading-label="Changing…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Change password</span>
+      </button>
+    </div>
+  </form>
+  {% else %}
+  <p class="desc" style="margin-bottom:0">
+    You sign in with {{ account.provider_label }}, so there is no password on this account —
+    and ORBIT will not show a password form whose Save button cannot do anything. Adding a
+    password to a provider account is not built yet.
+  </p>
+  {% endif %}
+</section>
+
+<section class="ob-card-block">
+  <h2>Where you are signed in</h2>
+  <p class="desc">Every session that can still reach this account.</p>
+  <div class="ob-list">
+    {% for item in sessions %}
+    <div class="ob-list-row{% if item.id == current_session_id %} ob-list-row--current{% endif %}">
+      <div class="main">
+        <strong>{{ item.label }}{% if item.id == current_session_id %} · this device{% endif %}</strong>
+        <span>
+          Started {{ item.created_at[:16].replace('T', ' ') }} UTC ·
+          last used {{ item.last_seen[:16].replace('T', ' ') }} UTC ·
+          expires {{ item.expires_at[:10] }}
+        </span>
+      </div>
+      {% if item.id != current_session_id %}
+      <form method="post" action="{{ url_for('onboarding.settings_security') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="action" value="revoke" />
+        <input type="hidden" name="session_id" value="{{ item.id }}" />
+        <button class="ob-btn ob-btn--quiet ob-btn--sm" type="submit">Sign out</button>
+      </form>
+      {% else %}
+      <span class="ob-chip ob-chip--ok"><span class="ob-dot"></span>Current</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div class="ob-form-actions">
+    <a class="ob-btn ob-btn--ghost ob-btn--sm" href="/settings/security">Manage sessions and password</a>
+  </div>
+</section>
+{% endblock %}

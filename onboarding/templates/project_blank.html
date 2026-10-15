@@ -1,0 +1,37 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Blank project — ORBIT{% endblock %}
+
+{% block page %}
+<div class="ob-page-head">
+  <div>
+    <div class="ob-crumbs"><a href="/projects/new">New project</a><span aria-hidden="true">/</span><span>Blank</span></div>
+    <h1>Blank project in ORBIT</h1>
+    <p class="lede">
+      A name and a place to think. No template, no files, no folder created on your machine.
+    </p>
+  </div>
+</div>
+
+<div class="ob-card-block" style="max-width:720px">
+  <form method="post" action="{{ url_for('onboarding.project_blank') }}" novalidate data-validate-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    {{ m.field('name', 'Project name', request.form.get('name', ''), error=errors.get('name', ''),
+               placeholder='Order tracking', required=True, autofocus=True,
+               hint='A working title is fine. Renaming it later takes one field.') }}
+    {{ m.field('description', 'One line about it', request.form.get('description', ''),
+               placeholder='What should exist when this is done?',
+               hint='Optional. ORBIT uses this as the first thing it knows about the project.') }}
+    {{ m.field('primary_language', 'Main language or stack', request.form.get('primary_language', ''),
+               placeholder='Python, TypeScript, Dart…',
+               hint='Optional, and only used to order suggestions.') }}
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Creating…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Create project</span>
+      </button>
+      <a class="ob-btn ob-btn--ghost" href="/projects/new">Choose a different way in</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

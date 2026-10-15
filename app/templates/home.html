@@ -1,55 +1,68 @@
 {% extends "layout.html" %}
-{% block title %}orbit — Home{% endblock %}
+{% block title %}ORBIT — Workspace{% endblock %}
+{% block head_extra %}
+{#- The onboarding stylesheets and the client for the dashboard, tour and feedback
+    drawer. Loaded only when the onboarding layer handed this render an account, so
+    the plain app (and the offline suite) stays byte-for-byte what it was. -#}
+{% if account %}
+<link rel="stylesheet" href="{{ url_for('onboarding.static', filename='onboarding.css') }}" />
+<script src="{{ url_for('onboarding.static', filename='onboarding.js') }}" defer></script>
+{% endif %}
+{% endblock %}
 {% block body %}
 <div class="screen screen--active" id="screen-home">
 {% include "_sidebar.html" %}
 
   <div class="home-main{% if docked %} is-docked{% endif %}" id="homeMain">
-    <div class="home-topbar app-topbar">
-      <div class="topbar-title" id="currentConversationTitle" title="{{ active_conversation_title }}">
-        <span class="topbar-eyebrow">Conversation</span>
-        <span class="topbar-name">{{ active_conversation_title }}</span>
-      </div>
-      <div class="home-topbar-controls topbar-controls">
-        <div class="mode-toggle" aria-label="Workspace mode">
-          <button type="button" class="{% if mode == 'chat' %}active{% endif %}" data-arena="mode-chat" data-mode="chat" aria-pressed="{{ 'true' if mode == 'chat' else 'false' }}">Chat</button>
-          <button type="button" class="{% if mode == 'agent' %}active{% endif %}" data-arena="mode-agent" data-mode="agent" aria-pressed="{{ 'true' if mode == 'agent' else 'false' }}">Agent</button>
-        </div>
-        <div class="mode-toggle thinking-toggle" role="group" aria-label="Response depth">
-          <button type="button" class="{% if thinking_level == 'quick' %}active{% endif %}" data-thinking-level="quick" aria-pressed="{{ 'true' if thinking_level == 'quick' else 'false' }}">Quick</button>
-          <button type="button" class="{% if thinking_level == 'deep' %}active{% endif %}" data-thinking-level="deep" aria-pressed="{{ 'true' if thinking_level == 'deep' else 'false' }}">Deep</button>
-        </div>
-      </div>
+    <div class="app-topbar">
+      <nav class="crumbs" aria-label="Breadcrumb">
+        <span>{{ (account.workspace if account and account.workspace else user.workspace) }}</span>
+        <span class="sep" aria-hidden="true">/</span>
+        <span class="here" id="currentConversationTitle" title="{{ active_conversation_title }}"><span class="topbar-name">{{ active_conversation_title }}</span></span>
+      </nav>
+      <div class="topbar-controls"></div>
       <div class="topbar-actions">
-        {# The new-sidebar era dropped the chat history from the rail (the design
-           centres on projects), so the conversation control itself moved here —
-           same real seam app.js always wired, /api/conversations/new. #}
-        <button type="button" class="topbar-icon-button" id="newConvo" title="New conversation" aria-label="New conversation">+</button>
-        <button type="button" class="topbar-icon-button" data-open-settings aria-label="Settings" title="Settings">⚙</button>
+        {# The rail centres on projects, so the conversation control itself lives
+           here — same real seam app.js has always wired, /api/conversations/new. #}
+        <button type="button" class="topbar-icon-button" id="newConvo" title="New conversation" aria-label="New conversation">
+          <span aria-hidden="true">+</span>
+        </button>
+        <button type="button" class="topbar-quiet" data-appearance-toggle
+                aria-label="Appearance: system. Switch theme.">
+          <span aria-hidden="true">◐</span> Appearance <span data-appearance-label>System</span>
+        </button>
         <button type="button" class="topbar-account" data-open-settings title="{{ user.name }} · {{ user.workspace }}" aria-label="Account and settings for {{ user.name }}">
-          <span class="topbar-avatar">{{ user.name[:2]|upper }}</span>
-          <span class="topbar-account-name">{{ user.name }}</span>
+          <span class="topbar-avatar">{{ (account.initials if account else user.name[:2]|upper) }}</span>
+          <span class="topbar-name">{{ user.name }}</span>
         </button>
       </div>
     </div>
 
     <div class="home-center">
+      {#- The adaptive dashboard: guidance for a new account, work for an account
+          that has some, and a one-click way back for a returning one. Rendered
+          from onboarding.projects.dashboard_state(). -#}
+      {% if dashboard %}{% include "onboarding/_dashboard.html" %}{% endif %}
+
       {% if welcome %}
       {# The welcome screen belongs to a genuinely empty conversation. A
          returning conversation with history gets the thread, never this. The
          rings idle slowly here and are replaced by the fast pair beside the
          status line the moment Orbit starts responding. #}
-      <div class="welcome" id="welcome">
-        <p class="welcome-greeting">{{ greeting }}</p>
+      <div class="welcome{% if dashboard %} is-compact{% endif %}" id="welcome">
         <div class="welcome-rings rings-slow" aria-hidden="true">
           <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" />
         </div>
+        <p class="welcome-greeting">{{ greeting }}</p>
         <h1>Your ideas, in orbit.</h1>
         <p class="welcome-sub">Think it. Build it. Let’s work on it together.</p>
         <div class="welcome-actions" id="welcomeActions">
           {% for starter in starters %}
           {# A real prompt, sent through the ordinary composer path. #}
-          <button type="button" class="welcome-action" data-starter="{{ starter.prompt }}">{{ starter.label }}</button>
+          <button type="button" class="welcome-action" data-starter="{{ starter.prompt }}">
+            <strong>{{ starter.label }}</strong>
+            <span>{{ starter.prompt }}</span>
+          </button>
           {% endfor %}
         </div>
       </div>
@@ -80,6 +93,7 @@
         {% for msg in thread %}
         {# Same markup as app.js builds live: every Orbit message carries the orbital mark. #}
         <div class="chat-row {% if msg.is_orbit %}orbit{% else %}user{% endif %}"{% if msg.id %} data-message-id="{{ msg.id }}"{% endif %}>
+          {% if not msg.is_orbit %}<div class="chat-who">{{ user.name }}</div>{% endif %}
           <div class="chat-bubble {% if msg.is_orbit %}orbit{% else %}user{% endif %}">
             {% if msg.action %}
             {# A proposed tool call: nothing runs until Approve. Same markup app.js builds live. #}
@@ -90,8 +104,8 @@
               </div>
               {% if msg.action.state == 'pending' %}
               <div class="action-buttons">
-                <button type="button" class="action-approve">Approve</button>
-                <button type="button" class="action-decline">Decline</button>
+                <button type="button" class="btn btn--sm action-approve">Approve</button>
+                <button type="button" class="btn btn--sm action-decline">Decline</button>
               </div>
               {% else %}
               <div class="action-result">{{ {'approved': 'Approved', 'declined': 'Declined', 'failed': 'Failed', 'expired': 'Expired'}.get(msg.action.state, msg.action.state) }}{% if msg.action.result %} — {{ msg.action.result }}{% endif %}</div>
@@ -121,28 +135,42 @@
         {% endfor %}
       </div>
 
-      <div class="composer-dock">
+      <div class="composer-dock" id="composerDock">
         <div class="home-composer">
-          <input type="text" id="homeInput" placeholder="Message Orbit…" autocomplete="off" />
+          <div class="composer-task-head">
+            <span class="glyph" aria-hidden="true">◍</span>
+            <span class="grow">Conversation · {{ active_conversation_title }}</span>
+          </div>
+          <input type="text" id="homeInput" placeholder="Ask, plan, or describe what to build…" autocomplete="off" aria-label="Message Orbit" />
           <div class="voice-feedback" id="homeVoiceStatus" role="status" aria-live="polite" hidden></div>
           <div class="composer-controls">
             <div class="composer-left-tools">
               <button type="button" class="composer-tool attach-tool" id="homeAttach" aria-label="Attach a file" title="Attach a file">＋</button>
               <input type="file" id="homeAttachmentInput" class="visually-hidden" multiple />
-              <a class="composer-tool github-shortcut" href="https://github.com" target="_blank" rel="noopener noreferrer" aria-label="Open GitHub">● <span>GitHub</span></a>
+              <a class="composer-tool github-shortcut" href="https://github.com" target="_blank" rel="noopener noreferrer" aria-label="Open GitHub"><span aria-hidden="true">◧</span> GitHub</a>
             </div>
-            <div class="spacer"></div>
-            <div class="voice-control-group">
-              <button type="button" class="icon-btn-round voice-btn" id="homeVoice" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
-              <button type="button" class="voice-expand-btn" id="homeVoiceExpand" aria-label="Open voice chat view" aria-controls="voiceChatView" aria-expanded="false" title="Open voice chat view">⌃</button>
+            <div class="composer-right-tools">
+              <div class="mode-toggle" id="modeToggle" aria-label="Workspace mode">
+                <button type="button" class="{% if mode == 'chat' %}active{% endif %}" data-arena="mode-chat" data-mode="chat" aria-pressed="{{ 'true' if mode == 'chat' else 'false' }}">Chat</button>
+                <button type="button" class="{% if mode == 'agent' %}active{% endif %}" data-arena="mode-agent" data-mode="agent" aria-pressed="{{ 'true' if mode == 'agent' else 'false' }}">Agent</button>
+              </div>
+              <div class="mode-toggle thinking-toggle" id="depthToggle" role="group" aria-label="Response depth">
+                <button type="button" class="{% if thinking_level == 'quick' %}active{% endif %}" data-thinking-level="quick" aria-pressed="{{ 'true' if thinking_level == 'quick' else 'false' }}">Quick</button>
+                <button type="button" class="{% if thinking_level == 'deep' %}active{% endif %}" data-thinking-level="deep" aria-pressed="{{ 'true' if thinking_level == 'deep' else 'false' }}">Deep</button>
+              </div>
+              <div class="voice-control-group">
+                <button type="button" class="icon-btn-round voice-btn" id="homeVoice" aria-label="Hold to talk" aria-pressed="false" title="Hold to talk">🎙</button>
+                <button type="button" class="icon-btn-round voice-expand-btn" id="homeVoiceExpand" aria-label="Open voice chat view" aria-controls="voiceChatView" aria-expanded="false" title="Open voice chat view">⌃</button>
+              </div>
+              <button type="button" class="send-btn-round" id="homeSend" aria-label="Send message" title="Send message">↑</button>
             </div>
-            <button type="button" class="send-btn-round" id="homeSend" aria-label="Send message" title="Send message">➤</button>
           </div>
           <div class="attachment-note" id="homeAttachmentNote" aria-live="polite" hidden></div>
         </div>
       </div>
 
-      <div class="connected-tools">
+      {% if connections %}
+      <div class="connected-tools" id="connectedTools">
         <div class="label">Your development tools, connected to Orbit</div>
         <div class="tool-row">
           {% for conn in connections %}
@@ -150,9 +178,9 @@
             <span class="status-dot"></span>{{ conn.name }}
           </div>
           {% endfor %}
-          <div class="manage-link">Manage →</div>
         </div>
       </div>
+      {% endif %}
     </div>
 
     <div class="home-footer">🔒 Just you and Orbit. Your conversations stay private.</div>
@@ -183,7 +211,7 @@
 <dialog class="settings-dialog" id="settingsDialog" aria-labelledby="settingsDialogTitle">
   <form method="dialog">
     <div class="settings-dialog-head">
-      <div><span class="topbar-eyebrow">Workspace</span><h2 id="settingsDialogTitle">Account &amp; settings</h2></div>
+      <div class="grow"><span class="topbar-eyebrow">Workspace</span><h2 id="settingsDialogTitle">Account &amp; settings</h2></div>
       <button type="submit" class="settings-dialog-close" aria-label="Close settings">×</button>
     </div>
     <div class="settings-dialog-details">
@@ -191,6 +219,11 @@
       <div><span>Workspace</span><strong>{{ user.workspace }}</strong></div>
       <div><span>Connected apps</span><strong>{{ connected_count }} active</strong></div>
     </div>
+    {% if account %}
+    <div class="row">
+      <a class="btn btn--soft btn--block" href="/settings/profile">Open full settings</a>
+    </div>
+    {% endif %}
     <p class="settings-dialog-note">Reminder timing follows Africa/Lagos local time. Use the Reminders control in the sidebar to pause or resume check-ins.</p>
   </form>
 </dialog>

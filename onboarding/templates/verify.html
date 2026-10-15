@@ -1,0 +1,140 @@
+{% extends "_base.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Confirm your email — ORBIT{% endblock %}
+{% block nav %}<a href="{{ url_for('onboarding.landing') }}">← Back to ORBIT</a>{% endblock %}
+
+{% block content %}
+<div class="ob-auth ob-auth--centered">
+  <div>
+    {% if mode in ('pending', 'sent', 'changed', 'expired') %}
+    <div class="ob-panel">
+      <div class="ob-panel-head">
+        <span class="ob-eyebrow">Step 2 of 3</span>
+        {% if mode == 'expired' %}
+        <h1>That link expired</h1>
+        <p>
+          Confirmation links last 24 hours and work once. Nothing is lost — send a fresh
+          one and you are straight in.
+        </p>
+        {% elif mode == 'changed' %}
+        <h1>New address, new link</h1>
+        <p>We sent a confirmation to the new address. Until it is confirmed, the workspace stays closed.</p>
+        {% else %}
+        <h1>Check your inbox</h1>
+        <p>
+          Click the link in the email and you are in. Until then the workspace stays shut —
+          that is what stops a mistyped address from becoming an account.
+        </p>
+        {% endif %}
+      </div>
+
+      {% if mode == 'sent' %}
+      {{ m.alert('success', 'Sent. The previous link stopped working the moment this one was created.') }}
+      {% endif %}
+
+      {% if email %}
+      <div class="ob-verify-mail">
+        <span class="to">Sent to</span>
+        <div class="addr">{{ email }}</div>
+        {% if resend_wait > 0 %}
+        <p class="ob-small ob-faint" style="margin:10px 0 0">
+          You can send another in <span data-resend-countdown data-seconds="{{ resend_wait }}">{{ resend_wait }}s</span>.
+        </p>
+        {% endif %}
+        <div class="ob-link-row">
+          <form method="post" action="{{ url_for('onboarding.verify_resend') }}" data-loading-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit"
+                    {% if resend_wait > 0 %}disabled aria-disabled="true" data-enable-after="{{ resend_wait }}"{% endif %}>
+              <span class="ob-spinner" aria-hidden="true"></span>
+              <span class="ob-btn-label">Send it again</span>
+            </button>
+          </form>
+          <button class="ob-btn ob-btn--quiet ob-btn--sm" type="button" data-toggle-panel="changeEmailPanel" aria-expanded="false">
+            Use a different address
+          </button>
+          <form method="post" action="{{ url_for('onboarding.logout') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button class="ob-btn ob-btn--quiet ob-btn--sm" type="submit">Sign out</button>
+          </form>
+        </div>
+      </div>
+
+      <div id="changeEmailPanel" hidden style="margin-bottom:16px">
+        <form method="post" action="{{ url_for('onboarding.verify_change_email') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          {{ m.field('email', 'Correct email address', '', type='email', inputmode='email',
+                     hint='A typo is the usual reason. We will send the link to the new address instead.') }}
+          <button class="ob-btn ob-btn--primary ob-btn--sm" type="submit">Update and resend</button>
+        </form>
+      </div>
+      {% else %}
+      <div class="ob-alert ob-alert--warning" role="status">
+        <span class="glyph" aria-hidden="true">!</span>
+        <div class="ob-alert-body">
+          We no longer have that address on this device. <a href="{{ url_for('onboarding.login') }}">Sign in</a>
+          and ORBIT will offer to send a new link.
+        </div>
+      </div>
+      {% endif %}
+
+      {# The demo mailbox. No transactional email provider is configured on this
+         build, so instead of leaving someone staring at an empty inbox the real
+         link is offered here — labeled, and only ever for the address above. #}
+      {% if outbox_visible and outbox %}
+      <div class="ob-demo-mailbox">
+        <h3>Demo mailbox — no email was actually sent</h3>
+        <p>
+          This deployment has no email provider configured, so ORBIT writes the message to
+          its console and to <span class="ob-mono">runtime/outbox/</span> instead. The real
+          link is below, and it behaves exactly like the one in the email would.
+        </p>
+        {% for message in outbox %}
+        <div class="msg">
+          <p class="ob-small ob-faint" style="margin:0 0 8px">
+            To {{ message.to }} · “{{ message.subject }}” · {{ message.sent_at[11:16] }} UTC
+          </p>
+          <a class="ob-btn ob-btn--primary ob-btn--sm" href="{{ message.link }}">Open the confirmation link</a>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="ob-panel">
+      <h2 class="ob-h4">Nothing arriving?</h2>
+      <ul class="ob-rules" style="margin-top:12px">
+        <li data-ok="false">Check the spam folder — a first message from a new domain usually lands there once.</li>
+        <li data-ok="false">Add <span class="ob-mono">no-reply@</span> to contacts, then resend.</li>
+        <li data-ok="false">If the address is wrong, use “Use a different address” above. Resending is faster than signing up again — it keeps the same account.</li>
+      </ul>
+    </div>
+
+    {% elif mode == 'done' %}
+    <div class="ob-panel">
+      <div class="ob-panel-head">
+        <span class="ob-eyebrow" style="color:var(--ok)">Confirmed</span>
+        <h1>That email is already confirmed</h1>
+        <p>Nothing more to do here. The workspace is open.</p>
+      </div>
+      <a class="ob-btn ob-btn--primary" href="{{ url_for('onboarding.login') }}">Sign in</a>
+    </div>
+
+    {% else %}
+    <div class="ob-panel">
+      <div class="ob-panel-head">
+        <h1>Nothing waiting to be confirmed</h1>
+        <p>
+          There is no pending sign-up on this device. If you followed an old link, it has
+          either been used already or replaced by a newer one.
+        </p>
+      </div>
+      <div class="ob-inline-actions">
+        <a class="ob-btn ob-btn--primary" href="{{ url_for('onboarding.login') }}">Sign in</a>
+        <a class="ob-btn ob-btn--ghost" href="{{ url_for('onboarding.signup') }}">Create an account</a>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

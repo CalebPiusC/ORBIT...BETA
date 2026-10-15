@@ -1,0 +1,110 @@
+{#- The persistent feedback entry point.
+
+    Two rules shape this markup:
+      * It is a drawer, not a page navigation. The workspace behind it never
+        reloads, so nobody loses a half-typed message or a running turn to give
+        feedback about it.
+      * The context that will be attached is listed in full, before sending, with a
+        switch to drop it. Nothing is added afterwards. #}
+{% if account %}
+<button class="ob-fab" type="button" id="obFeedbackFab" data-open-feedback
+        aria-haspopup="dialog" aria-controls="obFeedbackDrawer" data-compact="true">
+  <span class="glyph" aria-hidden="true">✦</span>
+  <span class="label">Beta feedback</span>
+</button>
+
+<div class="ob-drawer-backdrop" id="obDrawerBackdrop" hidden></div>
+
+<aside class="ob-drawer" id="obFeedbackDrawer" data-open="false" role="dialog" aria-modal="true"
+       aria-labelledby="obFeedbackTitle" hidden>
+  <div class="ob-drawer-head">
+    <div>
+      <span class="ob-eyebrow">Private beta</span>
+      <h2 id="obFeedbackTitle">Tell us what to fix next</h2>
+      <p>Sending this changes nothing in your workspace — no rebuild, no reload.</p>
+    </div>
+    <button class="ob-drawer-close" type="button" data-close-feedback aria-label="Close feedback">×</button>
+  </div>
+
+  <div class="ob-drawer-body">
+    <form id="obFeedbackForm" data-feedback-form data-endpoint="/api/onboarding/feedback">
+      {% set drawer_context = [
+        {'k': 'Screen', 'v': feedback_context.surface},
+        {'k': 'Route', 'v': feedback_context.route},
+        {'k': 'Project', 'v': feedback_context.project},
+        {'k': 'Window', 'v': feedback_context.viewport},
+        {'k': 'Browser', 'v': feedback_context.browser},
+        {'k': 'Build', 'v': feedback_context.build}
+      ] %}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+      <fieldset class="ob-field-group">
+        <legend>What kind of feedback is this?</legend>
+        <div class="ob-seg ob-seg--stack">
+          {% for type in content.FEEDBACK_TYPES %}
+          <label>
+            <input type="radio" name="kind" value="{{ type.value }}"
+                   {% if loop.first %}checked{% endif %} />
+            <span>
+              {{ type.label }}
+              <span class="blurb">{{ type.blurb }}</span>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <div class="ob-field">
+        <label for="obFeedbackBody">What happened, or what should change?</label>
+        <textarea class="ob-textarea" id="obFeedbackBody" name="body" rows="7"
+                  placeholder="Be as specific as you like. Steps to reproduce, what you expected, what you saw."
+                  aria-describedby="obFeedbackBodyHelp"></textarea>
+        <span class="ob-hint" id="obFeedbackBodyHelp">
+          Your draft is kept in this browser, so closing this panel by accident does not lose it.
+        </span>
+        <span class="ob-error" id="obFeedbackBodyError" role="alert" hidden></span>
+      </div>
+
+      <div class="ob-field">
+        <label for="obFeedbackSubject">Short title <span class="ob-faint">— optional</span></label>
+        <input class="ob-input" id="obFeedbackSubject" name="subject" type="text"
+               maxlength="140" placeholder="One line, if it helps you find this later" />
+      </div>
+
+      <div class="ob-context" id="obFeedbackContext">
+        <div class="ob-context-head">
+          <span>Context attached to this report</span>
+          <label class="keep"><input type="checkbox" checked data-context-toggle /> include</label>
+        </div>
+        <ul>
+          {% for item in drawer_context %}
+          {% if item.v %}<li><b>{{ item.k }}</b> <span>{{ item.v }}</span></li>{% endif %}
+          {% endfor %}
+          <li><b>Account</b> <span>{{ account.email }}</span></li>
+        </ul>
+      </div>
+
+      <p class="ob-small ob-faint" style="margin:14px 0 0">
+        {{ content.FEEDBACK_PROMISE }}
+      </p>
+    </form>
+  </div>
+
+  <div class="ob-drawer-foot">
+    <span class="ob-small ob-faint" id="obFeedbackStatus" role="status" aria-live="polite"></span>
+    <div class="ob-inline-actions">
+      <a class="ob-btn ob-btn--quiet ob-btn--sm" href="/feedback">Open the full form</a>
+      <button class="ob-btn ob-btn--primary ob-btn--sm" type="submit" form="obFeedbackForm"
+              data-feedback-submit data-loading-label="Sending…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Send feedback</span>
+      </button>
+    </div>
+  </div>
+</aside>
+
+<div class="ob-toast" id="obToast" role="status" aria-live="polite" hidden>
+  <span class="glyph" aria-hidden="true">✓</span>
+  <span id="obToastText"></span>
+</div>
+{% endif %}

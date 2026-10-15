@@ -17,7 +17,7 @@ before, and they are in better shape than the plan expected:
 | 0 — repo hygiene, secret guard | **Done**, with one gap (see 0.2) | `.gitignore`, `.env.example`, `check_secrets.py`, `.githooks/pre-commit`, `setup.sh` |
 | 1 — provider seam, multi-model from the start | **Done** | `providers/base.py` (`ChatProvider`), `providers/gemini.py`, `config.py`, `chat.py` |
 | 2 — tools + confirmation gate in the same pass | **Done** | `tools/registry.py` (gate + audit wrap), `tools/confirmation.py`, `tools/notes.py` |
-| 3 — UI from a real file, not a description | **Done**, offline-verified | `design/orbit_mockup.html` → `app/templates/`, `app/server.py`, `app/store.py` |
+| 3 — UI from a real file, not a description | **Done**, offline-verified | `design/orbit_ui_spec.html` + `app/static/orbit.css` → `app/templates/`, `app/server.py`, `app/store.py` |
 | 4 — memory, heartbeat, browser voice | **Partly done**: memory and heartbeat foundations exist; browser push-to-talk, speech replies, and Quick/Deep selection are built in Phase 4c and offline-tested | `heartbeat/`, `memory/`, `app/voice.py`, `app/static/app.js`, `runtime/heartbeat.json`, `runtime/plans.json` |
 | 5 — second provider, agent mode | **Partly done**: Agent UI plus an OpenRouter chain for Deep-mode streaming exist; no general second-provider selection or sub-agents | `providers/openrouter.py`, `providers/gemini.py`, `ChatProvider`, task stream in `app/server.py` |
 | 6 — `user_id` from the start | **Seeded**, no persistence yet | `app/store.py` (`DEFAULT_USER_ID`, `user_id` on `Conversation`/`Task`/`User`, `conversations_for`, `tasks_for`) |
@@ -107,8 +107,11 @@ These are not style preferences. Each one exists because the previous build viol
    declined confirmation, `tool_call_limit`, `invalid_model_response` — all recorded as
    JSON lines in `audit.log`. `AuditLog.record` runs in a `finally`, so an audit line
    exists even when the handler raises.
-4. **The mockup is the spec.** `design/orbit_mockup.html` is the literal structure and
-   palette for the two screens. "Arena keeps changing the UI" was mostly UI being
+4. **The sheet and the stylesheet are the spec.** `design/orbit_ui_spec.html` is the
+   token and component reference; `app/static/orbit.css` is the single stylesheet every
+   page loads, and `DesignSpecSyncTests` fails the build if the two disagree on the
+   accent tokens. `design/orbit_mockup.html` is gone — it described a palette and a set
+   of screens this product no longer uses. "Arena keeps changing the UI" was mostly UI being
    re-derived from a description instead of from a file. If a change conflicts with the
    mockup, the mockup wins or the change is explicitly proposed first.
 5. **No placeholder is faked as live.** Only GitHub renders as connected; Linear/Vercel
@@ -291,7 +294,7 @@ Do these in order. Stop and report after each; do not batch them into one commit
 Constraints:
 - No secrets, tokens, or key-like strings in any committed file, log, or screenshot.
 - No placeholder rendered as if it were live.
-- Do not touch design/orbit_mockup.html or app/templates/ in this phase.
+- Do not touch design/orbit_ui_spec.html, app/static/orbit.css or app/templates/ in this phase.
 - Commit messages say which rule a change protects when it touches one.
 - Branch: work toward main in the same session; do not leave branches dangling.
 
