@@ -1,0 +1,63 @@
+{% extends "settings/_shell.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Profile — ORBIT{% endblock %}
+
+{% block section %}
+<form method="post" action="{{ url_for('onboarding.settings_profile') }}" novalidate data-validate-form>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+  <section class="ob-card-block">
+    <h2>How ORBIT addresses you</h2>
+    <p class="desc">This is the only part of your profile that is required, because a greeting needs a name.</p>
+    {% if errors %}
+    {{ m.alert('error', 'One field needs another look.') }}
+    {% endif %}
+
+    <div style="display:flex;gap:20px;align-items:center;margin-bottom:24px">
+      <span class="ob-start" style="padding:0;border:0;background:none" aria-hidden="true">
+        <span class="ico" style="width:52px;height:52px;border-radius:16px;font-size:1.1rem">{{ account.initials }}</span>
+      </span>
+      <div>
+        <strong style="display:block">{{ account.name }}</strong>
+        <span class="ob-small ob-faint">
+          Initials are generated from your name. Image uploads are not part of the beta —
+          an avatar field that silently kept nothing would be worse than none.
+        </span>
+      </div>
+    </div>
+
+    <div class="ob-form-row">
+      {{ m.field('name', 'Display name', account.name, error=errors.get('name', ''), required=True) }}
+      {{ m.field('workspace', 'Workspace name', account.workspace,
+                 hint='A label only. It appears in the sidebar and nowhere else.') }}
+    </div>
+    <div class="ob-form-row">
+      {{ m.field('role', 'Role or context', preferences.role, placeholder='Backend developer, studio of four') }}
+      {{ m.field('goal', 'What you want out of ORBIT', preferences.goal, placeholder='Ship on weekends without a rewrite') }}
+    </div>
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Saving…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Save profile</span>
+      </button>
+      {% if saved %}<span class="ob-small" style="color:var(--ok)">Saved.</span>{% endif %}
+    </div>
+  </section>
+</form>
+
+<section class="ob-card-block">
+  <h2>How you signed up</h2>
+  <div class="ob-kv">
+    <div><span class="k">Method</span><span class="v">{{ account.provider_label }}</span></div>
+    <div><span class="k">Email confirmed</span><span class="v">{{ 'Yes' if account.verified else 'Not yet' }}</span></div>
+    <div><span class="k">Member since</span><span class="v">{{ account.created_at[:10] }}</span></div>
+    <div>
+      <span class="k">Profile completeness</span>
+      <span class="v">
+        {% set filled = [preferences.role, preferences.goal, preferences.experience, preferences.background, (preferences.languages or []) | length] | select | list | length %}
+        {{ filled }} of 5 optional details · not required for anything
+      </span>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -221,6 +221,7 @@ def create_app(
     actions: PendingActions | None = None,
     voice_service: Any | None = None,
     model_audit: AuditLog | None = None,
+    onboarding: Any | None = None,
 ) -> Flask:
     """Build the Flask app.
 
@@ -228,6 +229,13 @@ def create_app(
     lazily constructs a real ``GeminiProvider`` on first use (which needs
     GEMINI_API_KEY). Tests pass a stubbed provider directly. ``facts`` is the
     background-fact file; it is re-read on every turn.
+
+    ``onboarding`` is the optional onboarding layer (accounts, landing, welcome,
+    projects, settings, feedback). When it is omitted — which is how the offline
+    suite builds every app — no gate is installed and ``/`` renders exactly as it
+    always has. When it is present, ``onboarding.attach`` registers the blueprint,
+    requires a verified account for every non-public route, and installs a resolver
+    so each account gets its own workspace Store.
 
     ``heartbeat`` is the reminder service. It is deliberately not built here:
     ``run_app`` builds it and starts its scheduler at boot, so importing or
@@ -253,6 +261,20 @@ def create_app(
     # The queue of tool calls the home chat proposed. Without it, Chat mode is
     # plain text, as before. run_app builds it with the real tools.
     app.config["ACTIONS"] = actions
+
+    def current_store() -> Store:
+        """The signed-in account's workspace, or the single seeded one.
+
+        Without the onboarding layer there is exactly one Store, which is what the
+        tests and the demo have always used. With it, each account gets its own so
+        a new sign-up never opens on somebody else's conversations.
+        """
+        resolver = app.config.get("STORE_RESOLVER")
+        if resolver is not None:
+            resolved = resolver()
+            if resolved is not None:
+                return resolved
+        return app.config["STORE"]
 
     @app.errorhandler(RequestEntityTooLarge)
     def request_too_large(_error: RequestEntityTooLarge) -> Response:
@@ -359,7 +381,15 @@ def create_app(
 
     @app.get("/")
     def home() -> str:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
+        # The onboarding layer adds the adaptive dashboard and the first-use
+        # guidance to this screen. Without it (the demo provider and the tests)
+        # this returns {} and the home screen renders exactly as before.
+        onboarding_context: dict[str, Any] = {}
+        if app.config.get("ONBOARDING") is not None:
+            from onboarding.blueprint import home_context_for_store
+
+            onboarding_context = home_context_for_store(st)
         return render_template(
             "home.html",
             user=st.user,
@@ -386,11 +416,12 @@ def create_app(
             starters=WELCOME_STARTERS,
             followups=followups_for(st.home_thread),
             heartbeat=_heartbeat_view(),
+            **onboarding_context,
         )
 
     @app.get("/task/<task_id>")
     def task(task_id: str) -> str:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         task_obj = st.get_task(task_id)
         if task_obj is None:
             return render_template("task_not_found.html", task_id=task_id), 404
@@ -422,7 +453,7 @@ def create_app(
     @app.post("/api/tasks")
     def api_new_task() -> Response:
         """Create an Agent task from a request the person typed."""
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         payload = request.get_json(silent=True) or {}
         request_text = payload.get("request")
         request_text = request_text.strip() if isinstance(request_text, str) else ""
@@ -433,7 +464,7 @@ def create_app(
 
     @app.post("/api/mode")
     def set_mode() -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         payload = request.get_json(silent=True) or {}
         mode = payload.get("mode")
         try:
@@ -444,7 +475,7 @@ def create_app(
 
     @app.post("/api/thinking-level")
     def set_thinking_level() -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         payload = request.get_json(silent=True) or {}
         try:
             st.set_thinking_level(payload.get("thinking_level"))
@@ -566,13 +597,13 @@ def create_app(
 
     @app.post("/api/conversations/new")
     def api_new_conversation() -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         st.new_conversation()
         return Response(json.dumps({"active_conversation_id": None}), mimetype="application/json")
 
     @app.post("/api/chat")
     def api_chat() -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         payload = request.get_json(silent=True) or {}
         regenerate = payload.get("regenerate") is True
         message = payload.get("message")
@@ -814,7 +845,7 @@ def create_app(
     @app.post("/api/actions/<action_id>/<decision>")
     def api_action_decide(action_id: str, decision: str) -> Response:
         """Approve or decline one proposed tool call. Both outcomes are audited by the registry."""
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         queue: PendingActions | None = app.config["ACTIONS"]
         if queue is None:
             return _json({"error": "tools are not enabled"}, 503)
@@ -840,7 +871,7 @@ def create_app(
         the log's own timestamp. The client does not re-send the rating that is
         already showing, so switching from up to down leaves one line for each.
         """
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         payload = request.get_json(silent=True) or {}
         rating = payload.get("rating")
         if rating not in RATING_LABELS:
@@ -864,7 +895,7 @@ def create_app(
     @app.get("/analytics")
     def analytics() -> str:
         """The Analytics view: audit.log read back, nothing tracked separately."""
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         audit: AuditLog | None = app.config["MODEL_AUDIT"]
         # The same file the rest of the app logs to, so the view cannot drift
         # onto a different path from the records it counts.
@@ -886,7 +917,7 @@ def create_app(
 
     @app.post("/api/task/<task_id>/stream")
     def api_task_stream(task_id: str) -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         task_obj = st.get_task(task_id)
         if task_obj is None:
             return Response(json.dumps({"error": "unknown task"}), status=404, mimetype="application/json")
@@ -1066,7 +1097,7 @@ def create_app(
 
     @app.post("/api/task/<task_id>/approve")
     def api_approve(task_id: str) -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         if st.get_task(task_id) is None:
             return Response(json.dumps({"error": "unknown task"}), status=404, mimetype="application/json")
         payload = request.get_json(silent=True) or {}
@@ -1085,7 +1116,7 @@ def create_app(
 
     @app.post("/api/task/<task_id>/apply")
     def api_apply(task_id: str) -> Response:
-        st: Store = app.config["STORE"]
+        st: Store = current_store()
         if st.get_task(task_id) is None:
             return Response(json.dumps({"error": "unknown task"}), status=404, mimetype="application/json")
         try:
@@ -1203,6 +1234,13 @@ def create_app(
             },
         )
 
+    if onboarding is not None:
+        # Registered last on purpose: every route above already exists, so the
+        # gate cannot accidentally be the thing that makes one of them 404.
+        from onboarding import attach as attach_onboarding
+
+        attach_onboarding(app, onboarding)
+
     return app
 
 
@@ -1238,6 +1276,32 @@ def run_app(app: Flask) -> None:
     from tools.registry import AuditLog
 
     configure_logging()
+
+    # Attach the onboarding layer unless the app was built without it and cannot
+    # take it. ``hasattr`` is not defensive noise here: ``run_app`` is used by the
+    # launcher tests with a minimal app-shaped double, and a test double has no
+    # blueprint registry to register into.
+    wants_onboarding = (
+        app.config.get("ONBOARDING") is None
+        and app.config.get("ONBOARDING_DISABLED") is not True
+        and hasattr(app, "register_blueprint")
+    )
+    if wants_onboarding:
+        # Accounts, projects, feedback, email and OAuth. Built here rather than in
+        # create_app so importing or testing the app never touches runtime/.
+        from onboarding import attach as attach_onboarding, build_onboarding
+
+        onboarding_config = build_onboarding(
+            runtime_dir=os.environ.get("ORBIT_RUNTIME_DIR", "runtime"),
+            audit=AuditLog(),
+        )
+        attach_onboarding(app, onboarding_config)
+        log.info(
+            "onboarding enabled: mailbox=%s oauth_google=%s oauth_github=%s",
+            onboarding_config.mailer.name,
+            onboarding_config.oauth.status_line("google"),
+            onboarding_config.oauth.status_line("github"),
+        )
 
     voice_service = app.config.get("VOICE_SERVICE")
     voice_report = _voice_dependency_dict(voice_service) if voice_service is not None else {}

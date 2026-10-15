@@ -1,0 +1,102 @@
+{% extends "settings/_shell.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Notifications — ORBIT{% endblock %}
+
+{% block section %}
+<section class="ob-card-block">
+  <h2>Reminders</h2>
+  <p class="desc">
+    The heartbeat checks two things in Africa/Lagos time: whether today has a plan, and how
+    long it has been since you last checked in. Quiet hours (22:00–08:00) hold automatic
+    notices back; asking for one directly skips the hold.
+  </p>
+  {% if not heartbeat_ready %}
+  {{ m.alert('warning', 'The reminder service is not running in this session, so this switch has nothing to control.') }}
+  {% endif %}
+  <form method="post" action="{{ url_for('onboarding.settings_notifications') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="action" value="reminders" />
+    <div class="ob-toggle-row">
+      <div class="text">
+        <strong>Reminders are {{ 'paused' if reminders_paused else 'on' }}</strong>
+        <span>
+          Plan check after {{ '%02d' | format(plan_hour) }}:00 · check-in gap {{ checkin_gap }} days
+        </span>
+      </div>
+      <label class="ob-switch">
+        <input type="checkbox" name="reminders" {% if not reminders_paused %}checked{% endif %}
+               {% if not heartbeat_ready %}disabled{% endif %} />
+        <span class="track" aria-hidden="true"></span>
+        <span class="ob-sr">Reminders</span>
+      </label>
+    </div>
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit" {% if not heartbeat_ready %}disabled{% endif %}>Save reminder setting</button>
+    </div>
+  </form>
+
+  <div class="ob-kv" style="margin-top:18px">
+    <div>
+      <span class="k">Phone push</span>
+      <span class="v">
+        {% if push_configured %}
+        Configured for this deployment (topic {{ push_topic_hint }})
+        {% else %}
+        Off — no NTFY_TOPIC is set on this deployment
+        {% endif %}
+      </span>
+    </div>
+    <div>
+      <span class="k">Where notices appear</span>
+      <span class="v">A card on the workspace home screen, dismissed with ✕</span>
+    </div>
+  </div>
+  <p class="ob-small ob-faint" style="margin:16px 0 0">
+    Push topics are a shared secret by design: anyone who knows the topic name can read the
+    notices. A per-account push setup is not built yet, so this line tells you what the
+    deployment actually has rather than offering a switch that changes nothing.
+  </p>
+</section>
+
+<section class="ob-card-block">
+  <h2>Email</h2>
+  <form method="post" action="{{ url_for('onboarding.settings_notifications') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="action" value="email" />
+    <div class="ob-toggle-row">
+      <div class="text">
+        <strong>Beta release notes</strong>
+        <span>Occasional, only when something meaningful changes. No drip campaigns.</span>
+      </div>
+      <label class="ob-switch">
+        <input type="checkbox" name="email_product_updates" {% if preferences.email_product_updates %}checked{% endif %} />
+        <span class="track" aria-hidden="true"></span>
+        <span class="ob-sr">Beta release notes</span>
+      </label>
+    </div>
+    <div class="ob-toggle-row">
+      <div class="text">
+        <strong>Replies about my feedback</strong>
+        <span>Off means your reports are still read — you just get no reply.</span>
+      </div>
+      <label class="ob-switch">
+        <input type="checkbox" name="feedback_replies" {% if preferences.feedback_replies %}checked{% endif %} />
+        <span class="track" aria-hidden="true"></span>
+        <span class="ob-sr">Replies about my feedback</span>
+      </label>
+    </div>
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit" data-loading-label="Saving…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Save email preferences</span>
+      </button>
+      {% if not mailer_delivers %}
+      <span class="ob-small ob-faint">
+        This deployment has no email provider configured: messages are written to the console
+        and <span class="ob-mono">runtime/outbox/</span> instead.
+      </span>
+      {% endif %}
+    </div>
+  </form>
+</section>
+{% endblock %}

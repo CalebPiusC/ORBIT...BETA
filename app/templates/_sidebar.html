@@ -1,34 +1,88 @@
-{# The sidebar, shared by every screen so it collapses identically on all of them.
+{# The rail, shared by every workspace screen so the shell is identical on all of
+   them: brand, the workspace you are in, the primary action, where you have been,
+   help, and the account card pinned to the bottom.
 
    Collapsed state is icons-only: each control keeps its tooltip and accessible
-   name, and the conversation list becomes a scrollable column of compact icon
-   buttons. app.js writes the choice to localStorage; the inline script in
+   name. app.js writes the choice to localStorage; the inline script in
    layout.html's <head> applies it before first paint. #}
 <div class="sidebar" id="sidebar">
   <div class="sidebar-head">
-    <div class="sidebar-brand"><img class="brand-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" /><span class="brand-word">ORBIT</span></div>
+    <a class="sidebar-brand" href="/" title="ORBIT">
+      <img class="brand-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+      <span class="brand-word">orbit</span>
+    </a>
     <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-pressed="false"
             aria-label="Collapse sidebar" title="Collapse sidebar"><span aria-hidden="true">«</span></button>
   </div>
-  <button type="button" class="new-convo" id="newConvo" title="New conversation"><span class="new-convo-plus" aria-hidden="true">+</span><span class="sidebar-label">New conversation</span></button>
-  <label class="sidebar-search" for="conversationSearch" title="Search chats"><span aria-hidden="true">⌕</span><input type="search" id="conversationSearch" placeholder="Search chats" autocomplete="off" aria-label="Search chats" /></label>
+
+  {#- Which space you are in, and how you got here. A signed-in account shows its
+      own name; without the onboarding layer this falls back to the store's user. -#}
+  <button type="button" class="workspace-chip" data-open-settings
+          title="{{ (account.workspace if account and account.workspace else user.workspace) }} · account and settings">
+    <span class="avatar">{{ account.initials if account else user.name[:2]|upper }}</span>
+    <span class="ident">
+      <strong>{{ (account.workspace if account and account.workspace else user.workspace) }}</strong>
+      <span>{{ user.name }}</span>
+    </span>
+    <span class="caret" aria-hidden="true">⌄</span>
+  </button>
+
+  <button type="button" class="new-convo" id="newConvo" title="New conversation">
+    <span class="new-convo-plus" aria-hidden="true">+</span><span class="sidebar-label">New conversation</span>
+  </button>
+
+  <label class="sidebar-search" for="conversationSearch" title="Search chats">
+    <span aria-hidden="true">⌕</span>
+    <input type="search" id="conversationSearch" placeholder="Search chats" autocomplete="off" aria-label="Search chats" />
+  </label>
+
+  <nav class="sidebar-nav" aria-label="Main">
+    {#- The three destinations that exist. Projects and the workspace are the two
+        you move between; Analytics reads the audit log you already have. -#}
+    <a class="sidebar-nav-item{% if page == 'projects' %} active{% endif %}" id="projectsLink" href="/projects" title="Projects"><span class="sidebar-nav-icon" aria-hidden="true">▦</span><span class="sidebar-label">Projects</span>{% if project_count %}<span class="sidebar-count sidebar-label">{{ project_count }}</span>{% endif %}</a>
+    <a class="sidebar-nav-item{% if page in ('home', 'agents') %} active{% endif %}" id="agentsLink" href="/" title="Workspace"><span class="sidebar-nav-icon" aria-hidden="true">◍</span><span class="sidebar-label">Workspace</span></a>
+    <a class="sidebar-nav-item{% if analytics_active %} active{% endif %}" id="analyticsLink" href="/analytics" title="Analytics"><span class="sidebar-nav-icon" aria-hidden="true">◔</span><span class="sidebar-label">Analytics</span></a>
+  </nav>
 
   <div class="sidebar-scroll">
-    {% for group, items in conversations.items() %}
-    <div class="history-group">
-      <h4>{{ group }}</h4>
-      {% for conv in items %}
-      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}" data-conv-id="{{ conv.id }}" title="{{ conv.title }}"><span class="history-icon" aria-hidden="true">{{ conv.title[:1]|upper }}</span><span class="sidebar-label">{{ conv.title }}</span></div>
+    {% if account and projects %}
+    {#- Real projects, newest first, so the rail says what you are building and
+        not only what you have chatted about. -#}
+    <section class="side-section">
+      <h4 class="side-section-title">Recent projects</h4>
+      {% for project in projects[:5] %}
+      <a class="side-row recent-project{% if project.id == active_project_id %} is-current{% endif %}" href="/projects/{{ project.id }}" title="{{ project.name }}">
+        <span class="glyph" aria-hidden="true">{% if project.kind in ('orbit', 'idea') %}◧{% else %}⌸{% endif %}</span><span class="label">{{ project.name }}</span>
+      </a>
       {% endfor %}
-    </div>
+    </section>
+    {% endif %}
+
+    {% for group, items in conversations.items() %}
+    <section class="side-section history-group">
+      <h4 class="side-section-title">{{ group }}</h4>
+      {% for conv in items %}
+      <div class="history-item{% if conv.id == active_conversation_id %} active{% endif %}" data-conv-id="{{ conv.id }}" title="{{ conv.title }}"><span class="glyph" aria-hidden="true">{{ conv.title[:1]|upper }}</span><span class="label sidebar-label">{{ conv.title }}</span></div>
+      {% endfor %}
+    </section>
     {% endfor %}
   </div>
 
-  <div class="sidebar-nav">
-    <a class="sidebar-nav-item{% if analytics_active %} active{% endif %}" id="analyticsLink" href="/analytics" title="Analytics"><span class="sidebar-nav-icon" aria-hidden="true">◔</span><span class="sidebar-label">Analytics</span></a>
-  </div>
-
   <div class="sidebar-foot">
+    <a class="side-row" href="/settings/help" title="Help & getting started">
+      <span class="glyph" aria-hidden="true">?</span><span class="label sidebar-label">Help &amp; getting started</span>
+    </a>
+    {% if account %}
+    {#- Real destinations for a signed-in person. Without an account these do not
+        render, so the plain workspace rail is exactly what it was. -#}
+    <a class="side-row{% if page == 'feedback' %} is-current{% endif %}" id="feedbackLink" href="/feedback" title="Beta feedback">
+      <span class="glyph" aria-hidden="true">✦</span><span class="label sidebar-label">Beta feedback</span>{% if feedback_count %}<span class="meta sidebar-label">{{ feedback_count }}</span>{% endif %}
+    </a>
+    <a class="side-row{% if page == 'settings' %} is-current{% endif %}" id="settingsLink" href="/settings/profile" title="Settings">
+      <span class="glyph" aria-hidden="true">⚙</span><span class="label sidebar-label">Settings</span>
+    </a>
+    {% endif %}
+
     {% if heartbeat %}
     <div class="reminders-row">
       <div class="names sidebar-label">
@@ -39,14 +93,22 @@
               aria-label="Reminders" title="Reminders" aria-checked="{{ 'false' if heartbeat.paused else 'true' }}"><span class="knob"></span></button>
     </div>
     {% endif %}
-    <div class="connected-apps-row" title="Connected apps · {{ connected_count }} active"><span class="dot"></span><span class="label-text">Connected apps · {{ connected_count }} active</span></div>
-    <div class="user-row">
-      <div class="user-avatar">{{ user.name[:2]|upper }}</div>
+    <div class="connected-apps-row" title="Connected apps · {{ connected_count }} active"><span class="dot{% if connected_count %} on{% endif %}"></span><span class="label-text">Connected apps · {{ connected_count }} active</span></div>
+
+    <div class="account-card">
+      <div class="user-avatar">{{ account.initials if account else user.name[:2]|upper }}</div>
       <div class="names">
         <div class="name">{{ user.name }}</div>
-        <div class="sub">{{ user.workspace }}</div>
+        <div class="sub">{{ (account.workspace if account and account.workspace else user.workspace) }}</div>
       </div>
+      {% if account %}
+      <form method="post" action="/logout" class="sidebar-signout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button type="submit" class="utility-settings" aria-label="Sign out of ORBIT" title="Sign out">⏻</button>
+      </form>
+      {% else %}
       <button type="button" class="utility-settings" data-open-settings aria-label="Account and settings" title="Account and settings">⚙</button>
+      {% endif %}
     </div>
   </div>
 </div>

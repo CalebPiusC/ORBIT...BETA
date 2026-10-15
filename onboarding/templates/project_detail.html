@@ -1,0 +1,154 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}{{ project.name }} — ORBIT{% endblock %}
+
+{% block page %}
+<div class="ob-page-head">
+  <div>
+    <div class="ob-crumbs">
+      <a href="/projects">Projects</a><span aria-hidden="true">/</span><span>{{ project.name }}</span>
+    </div>
+    <h1>{{ project.name }}</h1>
+    <p class="lede">
+      {{ project.description or 'No description yet.' }}
+    </p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+      <span class="ob-kind" data-kind="{{ project.kind_slug }}">{{ project.kind_label }}</span>
+      {% if project.primary_language %}<span class="ob-chip">{{ project.primary_language }}</span>{% endif %}
+      <span class="ob-chip">{{ project.file_summary }}</span>
+      <span class="ob-chip">Created {{ project.created_human }}</span>
+      {% if project.archived %}<span class="ob-chip ob-chip--note">Archived</span>{% endif %}
+    </div>
+  </div>
+  <div class="ob-page-head-actions">
+    <form method="post" action="/projects/{{ project.id }}/chat">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit">Open in Chat</button>
+    </form>
+    <form method="post" action="/projects/{{ project.id }}/archive">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <button class="ob-btn ob-btn--quiet ob-btn--sm" type="submit">
+        {{ 'Restore' if project.archived else 'Archive' }}
+      </button>
+    </form>
+  </div>
+</div>
+
+{% if project.notes %}
+{{ m.alert('warning', project.notes) }}
+{% endif %}
+
+<div class="ob-form-row" style="align-items:start">
+  {# ---- The plan ---- #}
+  <div>
+    <section class="ob-card-block">
+      <h2>Plan</h2>
+      {% if project.plan and project.plan.files %}
+      <p class="desc">
+        Proposed by <strong>{{ project.plan.generated_by }}</strong>
+        {%- if project.plan.status == 'approved' %}, approved when you created the project{% endif %}.
+        Nothing has been written — ask for any line and ORBIT will create it.
+      </p>
+      <div class="ob-file-list">
+        {% for item in project.plan.files %}
+        <div class="ob-file" data-kind="planned">
+          <span class="path">{{ item.path }}</span>
+          <span class="size">{{ item.why }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% elif project.plan and project.plan.milestones %}
+      <p class="desc">Proposed by <strong>{{ project.plan.generated_by }}</strong> from your description.</p>
+      {% for item in project.plan.milestones %}
+      <div class="ob-milestone">
+        <span class="name">{{ item.name }}</span>
+        {% if item.detail %}<span class="detail">{{ item.detail }}</span>{% endif %}
+      </div>
+      {% endfor %}
+      {% if project.plan.first_tasks %}
+      <h3 class="ob-h4" style="margin:20px 0 10px">First tasks</h3>
+      <ul class="ob-rules" style="margin-top:0">
+        {% for item in project.plan.first_tasks %}<li data-ok="false">{{ item }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% else %}
+      <p class="desc" style="margin-bottom:0">
+        No plan yet. Describe what you want done below and the Agent panel will plan a
+        checklist from your words.
+      </p>
+      {% endif %}
+    </section>
+
+    {# ---- Agent task, using the existing task surface ---- #}
+    <section class="ob-card-block">
+      <h2>Work on it in Agent mode</h2>
+      <p class="desc">
+        This creates a real task — the same one the Agent panel runs. The panel plans from
+        your wording, names files as it goes, and proposes changes for approval.
+      </p>
+      <form method="post" action="/projects/{{ project.id }}/task" data-validate-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="ob-field">
+          <label for="ask">What should be done?</label>
+          <textarea class="ob-textarea" id="ask" name="ask" rows="4"
+                    placeholder="Add a status field to each order and update the lookup, but don’t push anything — I want to review the diff."></textarea>
+        </div>
+        <div class="ob-form-actions">
+          <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Creating the task…">
+            <span class="ob-spinner" aria-hidden="true"></span>
+            <span class="ob-btn-label">Create the task</span>
+          </button>
+          <span class="ob-small ob-faint">Nothing is applied without your explicit approval.</span>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  {# ---- Source, files, settings ---- #}
+  <div>
+    <section class="ob-card-block">
+      <h2>Where it came from</h2>
+      <div class="ob-kv">
+        <div><span class="k">Kind</span><span class="v">{{ project.kind_label }}</span></div>
+        <div><span class="k">Reference</span><span class="v">{{ project.origin_line }}</span></div>
+        {% if project.remote.branch %}<div><span class="k">Branch</span><span class="v">{{ project.remote.branch }}</span></div>{% endif %}
+        <div><span class="k">Contents copied</span><span class="v">{{ 'No' if not project.remote.contents_copied else 'Yes' }}</span></div>
+        <div><span class="k">Opened</span><span class="v">{{ project.opened_count }} time{{ '' if project.opened_count == 1 else 's' }}</span></div>
+      </div>
+    </section>
+
+    <section class="ob-card-block">
+      <h2>Files listed ({{ project.files | length }})</h2>
+      {{ m.file_list(project.files, limit=16) }}
+    </section>
+
+    <section class="ob-card-block">
+      <h2>Settings</h2>
+      <form method="post" action="/projects/{{ project.id }}/update">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        {{ m.field('name', 'Name', project.name) }}
+        {{ m.field('description', 'Description', project.description) }}
+        {{ m.field('primary_language', 'Main language', project.primary_language) }}
+        <div class="ob-form-actions">
+          <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit">Save changes</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="ob-card-block ob-card-block--danger">
+      <h2>Delete this project</h2>
+      <p class="desc">
+        Removes the project record and its listing. Nothing on your machine is touched —
+        there is nothing on your machine to touch.
+      </p>
+      <form method="post" action="/projects/{{ project.id }}/delete"
+            onsubmit="return confirm('Delete “{{ project.name }}” from your workspace?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        {{ m.field('confirm', 'Type the project name to confirm', '',
+                   placeholder=project.name, hint='Exactly as written above.') }}
+        <button class="ob-btn ob-btn--danger ob-btn--sm" type="submit">Delete project</button>
+      </form>
+    </section>
+  </div>
+</div>
+{% endblock %}

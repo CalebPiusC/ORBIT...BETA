@@ -1,0 +1,119 @@
+{% extends "settings/_shell.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Development preferences — ORBIT{% endblock %}
+
+{% block section %}
+<form method="post" action="{{ url_for('onboarding.settings_preferences') }}" data-personalize-form>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+  <section class="ob-card-block">
+    <h2>Background and experience</h2>
+    <p class="desc">
+      Experience changes how much ORBIT explains, not how much it can do. “New to this”
+      gets the reasoning; “Expert” gets the trade-offs.
+    </p>
+    <fieldset class="ob-field-group">
+      <legend>Background <span class="ob-faint">— optional</span></legend>
+      <div class="ob-choices">
+        {% for item in backgrounds %}
+        <label class="ob-choice">
+          <input type="radio" name="background" value="{{ item.value }}" {% if preferences.background == item.value %}checked{% endif %} />
+          <span><strong>{{ item.label }}</strong></span>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <fieldset class="ob-field-group" style="margin-top:20px">
+      <legend>Experience</legend>
+      <div class="ob-choices">
+        {% for item in experience_levels %}
+        <label class="ob-choice">
+          <input type="radio" name="experience" value="{{ item.value }}" {% if preferences.experience == item.value %}checked{% endif %} />
+          <span><strong>{{ item.label }}</strong><span class="hint">{{ item.hint }}</span></span>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <div class="ob-form-row" style="margin-top:20px">
+      {{ m.field('role', 'Role or context', preferences.role) }}
+      {{ m.field('goal', 'What you want out of ORBIT', preferences.goal) }}
+    </div>
+  </section>
+
+  <section class="ob-card-block">
+    <h2>What you like building</h2>
+    <div class="ob-chip-field" role="group" aria-label="Interests">
+      {% for item in interests %}
+      {{ m.chip_toggle('interests', item.value, item.label, checked=(item.value in (preferences.interests or []))) }}
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="ob-card-block">
+    <h2>Languages and tools</h2>
+    <p class="desc">The first thing ORBIT suggests comes from here.</p>
+    {% for group, items in language_groups.items() %}
+    <fieldset class="ob-field-group">
+      <legend>{{ group }}</legend>
+      <div class="ob-chip-field" role="group" aria-label="{{ group }}">
+        {% for item in items %}
+        {{ m.chip_toggle('languages', item.value, item.label, checked=(item.value in (preferences.languages or []))) }}
+        {% endfor %}
+      </div>
+    </fieldset>
+    {% endfor %}
+    <div class="ob-field" style="margin-top:8px">
+      <label for="customLanguageInput">Add your own</label>
+      <div class="ob-custom-add">
+        <input class="ob-input" id="customLanguageInput" type="text" maxlength="40"
+               placeholder="Elixir, Terraform, your in-house DSL…" data-custom-input="custom_languages" />
+        <button class="ob-btn ob-btn--ghost ob-btn--sm" type="button" data-custom-add="custom_languages">Add</button>
+      </div>
+      <div class="ob-custom-list" data-custom-list="custom_languages">
+        {% for item in preferences.custom_languages or [] %}
+        <span class="tag">{{ item }}<input type="hidden" name="custom_languages" value="{{ item }}" /><button type="button" data-custom-remove aria-label="Remove {{ item }}">✕</button></span>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <section class="ob-card-block">
+    <h2>How your answers are used</h2>
+    <div class="ob-toggle-row">
+      <div class="text">
+        <strong>Use my preferences to order suggestions</strong>
+        <span>Starter prompts, dashboard recommendations, and the first project idea ORBIT offers.</span>
+      </div>
+      <label class="ob-switch">
+        <input type="checkbox" name="use_preferences_for_suggestions"
+               {% if preferences.use_preferences_for_suggestions %}checked{% endif %} />
+        <span class="track" aria-hidden="true"></span>
+        <span class="ob-sr">Use my preferences to order suggestions</span>
+      </label>
+    </div>
+    <div class="ob-toggle-row">
+      <div class="text">
+        <strong>Compact density</strong>
+        <span>Not built yet — the switch is listed here as planned rather than shipped as a no-op.</span>
+      </div>
+      <label class="ob-switch">
+        <input type="checkbox" name="density" value="compact" disabled
+               {% if preferences.density == 'compact' %}checked{% endif %} />
+        <span class="track" aria-hidden="true"></span>
+        <span class="ob-sr">Compact density (not built yet)</span>
+      </label>
+    </div>
+    <p class="ob-small ob-faint" style="margin:16px 0 0">
+      Nothing here is shared, sold, or used to train anything. It orders lists in your own
+      workspace and stops there.
+    </p>
+  </section>
+
+  <div class="ob-form-actions">
+    <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Saving…">
+      <span class="ob-spinner" aria-hidden="true"></span>
+      <span class="ob-btn-label">Save preferences</span>
+    </button>
+  </div>
+</form>
+{% endblock %}

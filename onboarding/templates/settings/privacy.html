@@ -1,0 +1,80 @@
+{% extends "settings/_shell.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Privacy & data — ORBIT{% endblock %}
+
+{% block section %}
+<section class="ob-card-block">
+  <h2>What ORBIT stores, and where</h2>
+  <p class="desc">
+    This deployment keeps everything on its own disk. Nothing about you goes to an
+    analytics product, and nothing is sold or used to train anything.
+  </p>
+  <div class="ob-kv">
+    <div><span class="k">Account record</span><span class="v"><span class="ob-mono">runtime/accounts.json</span> — name, email, hashed password, preferences</span></div>
+    <div><span class="k">Projects</span><span class="v"><span class="ob-mono">runtime/projects.json</span> — {{ project_count }} record{{ '' if project_count == 1 else 's' }}, file listings only</span></div>
+    <div><span class="k">Feedback</span><span class="v"><span class="ob-mono">runtime/feedback.json</span> — {{ feedback_count }} entr{{ 'y' if feedback_count == 1 else 'ies' }} you sent</span></div>
+    <div><span class="k">Activity log</span><span class="v"><span class="ob-mono">audit.log</span> — append-only JSON lines</span></div>
+    <div><span class="k">Conversations</span><span class="v">In the running process only; they are not written to disk in this beta</span></div>
+  </div>
+</section>
+
+<section class="ob-card-block">
+  <h2>The audit log, specifically</h2>
+  <p class="desc">
+    ORBIT records what it <em>did</em>: event names, ids, timings, which model answered, and
+    whether a tool call was approved. It does not record the text of your messages or
+    replies.
+  </p>
+  <p class="desc" style="margin-bottom:0">
+    The Analytics screen is built by reading that same log — no new tracking was added to
+    produce it. If you want a log with less in it, the honest answer is that trimming it is
+    not built yet; deleting <span class="ob-mono">audit.log</span> resets the view and ORBIT
+    starts a new one.
+  </p>
+</section>
+
+<section class="ob-card-block">
+  <h2>Take your data with you</h2>
+  <p class="desc">
+    One JSON file: your account record, your preferences, every project with its listing,
+    your feedback, and your session history. Credential material — the password hash and
+    any live verification or reset token — is deliberately left out of the file.
+  </p>
+  <div class="ob-form-actions">
+    <a class="ob-btn ob-btn--ghost" href="{{ url_for('onboarding.settings_export') }}">Export everything (.json)</a>
+    <span class="ob-small ob-faint">Downloads immediately. Nothing is queued or emailed.</span>
+  </div>
+</section>
+
+<section class="ob-card-block">
+  <h2>First-use tips</h2>
+  <p class="desc">
+    Dismissed hints are remembered so they never reappear. This puts them back — the tour
+    and the getting-started checklist are reset from Help & beta.
+  </p>
+  <form method="post" action="{{ url_for('onboarding.settings_privacy') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="action" value="clear-hints" />
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit">Bring back dismissed tips</button>
+    </div>
+  </form>
+</section>
+
+<section class="ob-card-block ob-card-block--danger">
+  <h2>Delete this account</h2>
+  <p class="desc">
+    Removes the account, every project you created here, and your feedback entries from this
+    deployment. Conversations live only in the running process, so they end with it.
+    There is no undo and no grace period.
+  </p>
+  <form method="post" action="{{ url_for('onboarding.settings_privacy') }}"
+        onsubmit="return confirm('Delete your ORBIT account and all its projects? This cannot be undone.')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="action" value="delete" />
+    {{ m.field('confirm', 'Type “delete my account” to confirm', '',
+               placeholder='delete my account', hint='Exactly those three words, lower case.') }}
+    <button class="ob-btn ob-btn--danger" type="submit">Delete my account</button>
+  </form>
+</section>
+{% endblock %}

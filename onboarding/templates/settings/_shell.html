@@ -1,0 +1,64 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+
+{#- The settings shell. One nav, one content column, one place where "required"
+    and "optional" are labelled — because the brief's point about optional profile
+    completion is easy to lose across nine separate screens.
+
+    Section nav is a real nav: aria-current marks the page you are on, and the whole
+    thing collapses to a horizontal rail under 1100px. -#}
+{% block page %}
+<div class="ob-page-head">
+  <div>
+    <span class="ob-eyebrow">Settings</span>
+    <h1>{{ section_meta.label }}</h1>
+    <p class="lede">{{ section_meta.blurb }}</p>
+  </div>
+  <div class="ob-page-head-actions">
+    <a class="ob-btn ob-btn--quiet ob-btn--sm" href="/">Back to workspace</a>
+  </div>
+</div>
+
+<div class="ob-settings">
+  <nav class="ob-settings-nav" aria-label="Settings sections">
+    <span class="group-label">You</span>
+    {% for slug, label, icon, blurb in settings_sections %}
+    {% if slug in ('profile', 'account', 'preferences') %}
+    <a href="/settings/{{ slug }}" {% if section == slug %}aria-current="page"{% endif %}>
+      <span class="icon" aria-hidden="true">{{ icon }}</span> {{ label }}
+    </a>
+    {% endif %}
+    {% endfor %}
+    <span class="group-label">ORBIT</span>
+    {% for slug, label, icon, blurb in settings_sections %}
+    {% if slug in ('ai', 'integrations', 'notifications') %}
+    <a href="/settings/{{ slug }}" {% if section == slug %}aria-current="page"{% endif %}>
+      <span class="icon" aria-hidden="true">{{ icon }}</span> {{ label }}
+    </a>
+    {% endif %}
+    {% endfor %}
+    <span class="group-label">Trust</span>
+    {% for slug, label, icon, blurb in settings_sections %}
+    {% if slug in ('privacy', 'security', 'help') %}
+    <a href="/settings/{{ slug }}" {% if section == slug %}aria-current="page"{% endif %}>
+      <span class="icon" aria-hidden="true">{{ icon }}</span> {{ label }}
+    </a>
+    {% endif %}
+    {% endfor %}
+  </nav>
+
+  <div>
+    {# Required vs optional, stated once per screen rather than implied. #}
+    <div class="ob-hint" style="margin-bottom:20px">
+      <span class="ico" aria-hidden="true">i</span>
+      <div class="text">
+        <strong>Only your name and email are required.</strong>
+        Everything else on these screens is optional, skippable, and reversible — including
+        the personalization answers, which only order what ORBIT suggests.
+      </div>
+    </div>
+
+    {% block section %}{% endblock %}
+  </div>
+</div>
+{% endblock %}

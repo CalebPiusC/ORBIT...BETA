@@ -1,0 +1,189 @@
+{#- The adaptive dashboard. One screen, three shapes, decided by dashboard.kind:
+
+      new        no projects, no conversations — a short list of true first steps
+      projects   work exists — resume first, then the project grid
+      returning  conversations but no projects — pick the thread back up
+
+    Everything rendered here comes from onboarding.projects.dashboard_state(); the
+    template never decides what the person needs, it only draws it. #}
+{% if dashboard %}
+<div class="ob-dash" id="orbitDashboard" data-dashboard-kind="{{ dashboard.kind }}">
+
+  <div class="ob-dash-hero">
+    <h2>{{ dashboard.heading }}</h2>
+    <p>{{ dashboard.subheading }}</p>
+    <div class="actions">
+      <a class="ob-btn ob-btn--primary ob-btn--sm" href="/projects/new">New project</a>
+      {% if dashboard.projects %}
+      <a class="ob-btn ob-btn--ghost ob-btn--sm" href="/projects">All projects ({{ dashboard.projects | length }})</a>
+      {% endif %}
+      {% if not account.onboarding.tour_seen and not account.onboarding.tour_opt_out %}
+      <button class="ob-btn ob-btn--quiet ob-btn--sm" type="button" data-tour-start>
+        Take the 60-second tour
+      </button>
+      {% endif %}
+    </div>
+  </div>
+
+  {# One contextual hint at a time, dismissible for good. #}
+  {% if dashboard.hint %}
+  <div class="ob-hint" data-hint="{{ dashboard.hint.id }}">
+    <span class="ico" aria-hidden="true">✦</span>
+    <div class="text">
+      <strong>{{ dashboard.hint.title }}</strong>
+      {{ dashboard.hint.body }}
+      {% if dashboard.hint.action_label %}
+      <div class="actions">
+        <a class="ob-btn ob-btn--ghost ob-btn--sm" href="{{ dashboard.hint.action_href }}">{{ dashboard.hint.action_label }}</a>
+      </div>
+      {% endif %}
+    </div>
+    <button class="close" type="button" data-dismiss-hint="{{ dashboard.hint.id }}"
+            aria-label="Dismiss this tip for good">✕</button>
+  </div>
+  {% endif %}
+
+  {# ---- State: work exists. Lead with the way back in. ---- #}
+  {% if dashboard.kind == 'projects' and dashboard.resume %}
+  <div class="ob-resume">
+    <div class="meta">
+      <span class="ob-kind" data-kind="{{ dashboard.resume.kind_slug }}">{{ dashboard.resume.kind_label }}</span>
+      <h3 style="margin-top:8px">{{ dashboard.resume.name }}</h3>
+      <p>
+        Last opened {{ dashboard.resume.last_opened_human }} · {{ dashboard.resume.file_summary }}
+        {%- if dashboard.resume.primary_language %} · {{ dashboard.resume.primary_language }}{% endif %}
+      </p>
+    </div>
+    <div class="actions">
+      <a class="ob-btn ob-btn--primary ob-btn--sm" href="/projects/{{ dashboard.resume.id }}">Open project</a>
+      <form method="post" action="/projects/{{ dashboard.resume.id }}/chat">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit">Continue in Chat</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ---- The starting actions, shown in every state, sized by state. ---- #}
+  {% if dashboard.kind == 'new' %}
+  <div class="ob-start-grid" style="margin-bottom:var(--ob-s5)">
+    {% for option in content.WELCOME_OPTIONS %}
+    <a class="ob-start" href="{{ option.href }}">
+      <span class="top">
+        <span class="ico" aria-hidden="true">{{ option.icon }}</span>
+        <strong>{{ option.title }}</strong>
+      </span>
+      <span class="body">{{ option.body }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="ob-section-title">
+    <h2>Start something new</h2>
+    <p>Or keep going in Chat below — a new conversation is one message away.</p>
+  </div>
+  <div class="ob-start-grid" style="margin-bottom:var(--ob-s5)">
+    {% for point in dashboard.entry_points if point.group == 'start' %}
+    <a class="ob-start" href="{{ point.href }}">
+      <span class="top">
+        <span class="ico" aria-hidden="true">{{ point.icon }}</span>
+        <strong>{{ point.title }}</strong>
+        {% if point.badge %}<span class="badge">{{ point.badge }}</span>{% endif %}
+      </span>
+      <span class="body">{{ point.body }}</span>
+    </a>
+    {% endfor %}
+    <a class="ob-start" href="/projects/new?group=import">
+      <span class="top">
+        <span class="ico" aria-hidden="true">↧</span>
+        <strong>Import an existing project</strong>
+      </span>
+      <span class="body">GitHub, a ZIP, a folder on your machine, or a few loose files.</span>
+    </a>
+  </div>
+  {% endif %}
+
+  {# ---- Projects grid. ---- #}
+  {% if dashboard.projects and dashboard.kind == 'projects' %}
+  <div class="ob-section-title">
+    <h2>Your projects</h2>
+    <p>Sorted by when you last opened them.</p>
+  </div>
+  <div class="ob-project-grid" style="margin-bottom:var(--ob-s5)">
+    {% for project in dashboard.projects[:6] %}
+    <a class="ob-project" href="/projects/{{ project.id }}">
+      <span class="ob-project-head">
+        <strong>{{ project.name }}</strong>
+        <span class="ob-kind" data-kind="{{ project.kind_slug }}">{{ project.kind_label }}</span>
+      </span>
+      <span class="origin">{{ project.origin_line }}</span>
+      <span class="foot">
+        <span>{{ project.file_summary }}</span>
+        <span>{{ project.last_opened_human }}</span>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# ---- Recent conversations, for the returning state. ---- #}
+  {% if dashboard.kind == 'returning' and dashboard.recent_conversations %}
+  <div class="ob-section-title">
+    <h2>Recent conversations</h2>
+    <p>Any of these can become a project — the button is on the project screen, not here, so nothing moves by accident.</p>
+  </div>
+  <div class="ob-convo-list" style="margin-bottom:var(--ob-s5)">
+    {% for conversation in dashboard.recent_conversations %}
+    <a class="ob-convo" href="/?conversation={{ conversation.id }}">
+      <span class="title">{{ conversation.title }}</span>
+      <span class="when">{{ conversation.group }}</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# ---- Recommendations, ordered by the person's own answers. ---- #}
+  {% if dashboard.recommendations %}
+  <div class="ob-rec" style="margin-bottom:var(--ob-s5)">
+    <div class="ob-section-title">
+      <h2>Because of what you told us</h2>
+      <p>
+        Ordered by your preferences. <a href="/settings/preferences">Change them</a> —
+        or turn this off entirely on that screen.
+      </p>
+    </div>
+    <ul>
+      {% for line in dashboard.recommendations %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {# ---- The getting-started checklist: real state, dismissible forever. ---- #}
+  {% if dashboard.show_getting_started %}
+  {% set done_count = dashboard.getting_started | selectattr('done') | list | length %}
+  {% set total = dashboard.getting_started | length %}
+  <div class="ob-checklist" id="gettingStarted">
+    <div class="ob-checklist-head">
+      <strong>Getting started</strong>
+      <span class="count">{{ done_count }} of {{ total }} done</span>
+      <button class="ob-hint-close" type="button" data-dismiss-checklist
+              aria-label="Hide the getting-started list for good"
+              style="margin-left:auto;border:0;background:transparent;color:var(--text-faint);cursor:pointer;font:inherit">✕</button>
+    </div>
+    <div class="ob-progress" aria-hidden="true"><i style="width:{{ (done_count / total * 100) | round(0) }}%"></i></div>
+    <ol>
+      {% for step in dashboard.getting_started %}
+      <li data-done="{{ 'true' if step.done else 'false' }}">
+        <span class="tick" aria-hidden="true">✓</span>
+        {% if step.done %}
+        <span>{{ step.label }}{% if step.id == 'verify' and account.provider in ('google', 'github') %} (the provider confirmed it){% endif %}</span>
+        {% else %}
+        <a href="{{ step.href }}">{{ step.label }}</a>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
+  {% endif %}
+</div>
+{% endif %}

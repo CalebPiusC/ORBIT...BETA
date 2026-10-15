@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ORBIT — UI reference sheet</title>
+<!--
+  ORBIT UI reference sheet.
+
+  This is the design the product is built against: one token set, one component
+  vocabulary, and the states each piece can be in — shown in both themes. Light
+  is the default; dark follows the operating system or data-theme on <html>.
+
+  The palette values here are the measured source of truth. A test compares the
+  five accent tokens in this file with app/static/orbit.css, so a colour changed
+  in one place has to be changed in the other in the same commit.
+
+  Everything drawn here exists in the product. Nothing that does not exist yet
+  is drawn, and no screen is mocked up with invented project data.
+-->
+<style>
+  @font-face {
+    font-family: "Poppins"; font-style: normal; font-weight: 400; font-display: swap;
+    src: url("../app/static/fonts/poppins-latin-400-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Poppins"; font-style: normal; font-weight: 500; font-display: swap;
+    src: url("../app/static/fonts/poppins-latin-500-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Poppins"; font-style: normal; font-weight: 600; font-display: swap;
+    src: url("../app/static/fonts/poppins-latin-600-normal.woff2") format("woff2");
+  }
+
+  /* ==== tokens ============================================================ */
+  :root {
+    --bg: #EFEDE7;
+    --bg-sunken: #E7E4DC;
+    --surface: #FBFAF7;
+    --surface-2: #F4F2EC;
+    --surface-3: #EAE6DD;
+    --border: #E4E0D6;
+    --border-strong: #D5D0C4;
+
+    --text: #201F1C;
+    --text-dim: #68655E;
+    --text-faint: #8C887F;
+
+    --accent: #A2673F;
+    --accent-brand: #B5714A;
+    --accent-text: #8C5230;
+    --accent-wash: #F3E3D7;
+    --accent-line: #E8D3C3;
+    --on-accent: #FFFDF9;
+
+    --ok: #4F7A4A;
+    --warn: #8A6118;
+    --bad: #A8443C;
+
+    --r-xs: 8px; --r-sm: 10px; --r-md: 12px; --r-lg: 16px; --r-xl: 22px; --r-pill: 999px;
+    --shadow-1: 0 1px 2px rgba(32, 31, 28, 0.05);
+    --shadow-2: 0 2px 6px rgba(32, 31, 28, 0.06), 0 12px 28px -22px rgba(32, 31, 28, 0.5);
+    --font: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color-scheme: light;
+  }
+  html[data-theme="dark"] {
+    --bg: #141311;
+    --bg-sunken: #0F0E0C;
+    --surface: #1D1B18;
+    --surface-2: #262420;
+    --surface-3: #2E2B26;
+    --border: #322F29;
+    --border-strong: #403C34;
+    --text: #F4F1EA;
+    --text-dim: #A8A49C;
+    --text-faint: #837F79;
+    --accent: #A2673F;
+    --accent-brand: #C98A63;
+    --accent-text: #D9A279;
+    --accent-wash: #3A2A20;
+    --accent-line: #4E3A2A;
+    --on-accent: #FFFDF9;
+    --ok: #8FB98A;
+    --warn: #D8B072;
+    --bad: #E0948C;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.5), 0 18px 40px -26px rgba(0, 0, 0, 0.8);
+  }
+
+  /* ==== the sheet ==== */
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--font); font-size: 14.5px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1200px; margin: 0 auto; padding: 44px 28px 90px; display: flex; flex-direction: column; gap: 44px; }
+  .sheet > header { display: flex; flex-direction: column; gap: 10px; }
+  .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent-text); }
+  header h1 { font-size: clamp(2rem, 4vw, 2.9rem); font-weight: 600; letter-spacing: -0.035em; margin: 0; }
+  header p { margin: 0; color: var(--text-dim); max-width: 74ch; }
+  section { display: flex; flex-direction: column; gap: 18px; }
+  h2 { font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-dim); margin: 0; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 15px; font-weight: 600; margin: 0; }
+
+  .primitive {
+    display: flex; flex-direction: column; gap: 16px;
+    padding: 22px; border-radius: var(--r-lg);
+    background: var(--surface); border: 1px solid var(--border);
+  }
+  .primitive-title { font-size: 13px; font-weight: 600; color: var(--text-dim); }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .col { display: flex; flex-direction: column; gap: 10px; }
+
+  /* ==== swatches ==== */
+  .swatches { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+  .swatch { display: flex; flex-direction: column; gap: 9px; padding: 14px; border-radius: var(--r-md); background: var(--surface); border: 1px solid var(--border); }
+  .swatch .chip { height: 52px; border-radius: var(--r-sm); border: 1px solid var(--border); }
+  .swatch .role { font-size: 13.5px; font-weight: 500; }
+  .swatch code { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--text-dim); }
+
+  /* ==== components (the same rules the product ships) ==== */
+  .btn { display: inline-flex; align-items: center; gap: 9px; padding: 11px 20px; border-radius: var(--r-sm);
+         background: var(--surface-2); border: 1px solid var(--border); color: var(--text); font: inherit; font-weight: 600; font-size: 14px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .btn.soft { background: var(--accent-wash); border-color: var(--accent-line); color: var(--accent-text); }
+  .btn.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+  .badge { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: var(--r-pill);
+           background: var(--surface-2); border: 1px solid var(--border); font-size: 12px; color: var(--text-dim); }
+  .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .badge.progress { background: var(--accent-wash); border-color: var(--accent-line); color: var(--accent-text); }
+  .badge.live { color: var(--ok); }
+  .chip { padding: 9px 16px; border-radius: var(--r-pill); background: var(--surface-2); border: 1px solid var(--border);
+          font-size: 13.5px; color: var(--text-dim); }
+  .chip.active { background: var(--accent-wash); border-color: var(--accent-line); color: var(--accent-text); font-weight: 600; }
+  .input { padding: 13px 16px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--border); color: var(--text); font: inherit; width: 100%; }
+  .option { display: flex; gap: 14px; padding: 16px 18px; border-radius: var(--r-md); background: var(--surface-2); }
+  .option.selected { background: var(--accent-wash); border: 1px solid var(--accent-line); }
+  .option .mark { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--text-faint); flex-shrink: 0; margin-top: 2px; }
+  .option.selected .mark { border-color: var(--accent); display: grid; place-items: center; }
+  .option.selected .mark::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+  .card { padding: 22px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-1); }
+  .progress { height: 6px; border-radius: var(--r-pill); background: var(--surface-2); overflow: hidden; }
+  .progress > span { display: block; height: 100%; width: 62%; background: var(--accent); }
+  .notice { padding: 14px 16px; border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-dim); font-size: 13.5px; }
+  .notice.err { background: #F7E3E0; color: #A8443C; }
+  html[data-theme="dark"] .notice.err { background: #35211F; color: #E0948C; }
+
+  /* ==== conversation ==== */
+  .chat-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+  .chat-row.user { align-items: flex-end; }
+  .chat-row.orbit { align-items: stretch; width: 100%; }
+  .chat-meta { font-size: 11.5px; color: var(--text-faint); padding: 0 4px; }
+  .chat-bubble { font-size: 14.5px; line-height: 1.65; }
+  .chat-bubble.user { background: var(--surface-2); color: var(--text); padding: 13px 18px;
+                      border-radius: var(--r-md) var(--r-md) 6px var(--r-md); max-width: min(620px, 88%); }
+  .chat-bubble.orbit { background: transparent; border: 0; padding: 0; width: 100%; }
+  .chat-bubble.orbit .body { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 14px; align-items: start; white-space: pre-wrap; }
+  .orbit-icon { width: 34px; height: 34px; padding: 6px; border-radius: var(--r-sm);
+                background: var(--accent-wash); border: 1px solid var(--accent-line); }
+  .action-card { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 12px; padding: 15px 17px;
+                 border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--border); }
+  .action-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--accent-text); }
+  .action-buttons { margin-left: auto; display: flex; gap: 8px; }
+
+  /* ==== the columns ==== */
+  .columns { display: grid; gap: 18px; grid-template-columns: 300px minmax(0, 1fr) 380px; }
+  .column { padding: 22px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--border); }
+  .column.rail { display: flex; flex-direction: column; gap: 12px; }
+  .map-step { display: flex; gap: 11px; padding: 11px 13px; border-radius: var(--r-sm); background: var(--surface-2); margin-bottom: 8px; }
+  .map-step.active { background: var(--accent-wash); border: 1px solid var(--accent-line); }
+  .map-step .mark { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--border-strong); flex-shrink: 0;
+                    display: grid; place-items: center; font-size: 10px; color: var(--text-faint); }
+  .map-step.done .mark { background: #E6EBE0; border-color: transparent; color: #4F7A4A; }
+  html[data-theme="dark"] .map-step.done .mark { background: #232B20; color: #8FB98A; }
+  .map-step.active .mark { border-color: var(--accent); color: var(--accent); }
+  .map-step .name { font-size: 13.5px; font-weight: 600; }
+  .map-step .meta { font-size: 11.5px; color: var(--text-dim); }
+  .req { display: flex; gap: 11px; font-size: 14px; margin-bottom: 10px; }
+  .req .box { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--border-strong); flex-shrink: 0; margin-top: 2px; }
+  .req.done .box { background: var(--accent); border-color: var(--accent); }
+
+  /* ==== scroll panels =======================================================
+     Four elements scroll with the bar hidden: the map column, the agent thread,
+     the conversation thread and the activity list. Copied verbatim from
+     app/static/orbit.css so this sheet and the product cannot drift. */
+  .task-work, .task-chat-log, .home-thread, .activity-section {
+    scrollbar-width: none; -ms-overflow-style: none;
+  }
+  .task-work::-webkit-scrollbar, .task-chat-log::-webkit-scrollbar,
+  .home-thread::-webkit-scrollbar, .activity-section::-webkit-scrollbar {
+    display: none;
+  }
+  .task-work, .task-chat-log, .home-thread { overflow-y: auto; }
+  .task-chat-log, .home-thread { max-height: 320px; }
+  .task-work { max-height: 420px; }
+
+  footer { font-size: 12.5px; color: var(--text-faint); border-top: 1px solid var(--border); padding-top: 18px; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header>
+    <span class="eyebrow">ORBIT · interface reference</span>
+    <h1>Warm paper, clear ink, one signal colour.</h1>
+    <p>
+      One token set and one component vocabulary for the whole product: the workspace,
+      project pages, forms, empty states and the agent rail. Light is the default; dark
+      follows the operating system. Toggle the theme to check both at once — every
+      value below is measured, and every component here ships.
+    </p>
+    <div class="row">
+      <button class="btn" type="button" onclick="document.documentElement.toggleAttribute('data-theme'); document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');">
+        Toggle theme
+      </button>
+    </div>
+  </header>
+
+  <section>
+    <h2>Palette</h2>
+    <div class="swatches">
+      <div class="swatch"><span class="chip" style="background:#EFEDE7"></span><span class="role">Paper · page</span><code>--bg #EFEDE7</code></div>
+      <div class="swatch"><span class="chip" style="background:#E7E4DC"></span><span class="role">Sunken · sidebar</span><code>--bg-sunken #E7E4DC</code></div>
+      <div class="swatch"><span class="chip" style="background:#FBFAF7"></span><span class="role">Surface · cards</span><code>--surface #FBFAF7</code></div>
+      <div class="swatch"><span class="chip" style="background:#F4F2EC"></span><span class="role">Surface 2 · inputs</span><code>--surface-2 #F4F2EC</code></div>
+      <div class="swatch"><span class="chip" style="background:#201F1C"></span><span class="role">Ink · primary text</span><code>--text #201F1C</code></div>
+      <div class="swatch"><span class="chip" style="background:#68655E"></span><span class="role">Ink · secondary text</span><code>--text-dim #68655E</code></div>
+      <div class="swatch"><span class="chip" style="background:#A2673F"></span><span class="role">Terracotta · accent</span><code>--accent #A2673F</code></div>
+      <div class="swatch"><span class="chip" style="background:#B5714A"></span><span class="role">Brand terracotta</span><code>--accent-brand #B5714A</code></div>
+      <div class="swatch"><span class="chip" style="background:#8C5230"></span><span class="role">Accent text on paper</span><code>--accent-text #8C5230</code></div>
+      <div class="swatch"><span class="chip" style="background:#F3E3D7"></span><span class="role">Accent wash · selected</span><code>--accent-wash #F3E3D7</code></div>
+    </div>
+    <p class="muted" style="font-size:13.5px">
+      Every text colour here clears 4.5:1 against every surface it is allowed to sit on
+      (7:1 for primary text), which a test in the suite checks. The dark palette mirrors
+      these roles on <code>#141311</code> paper and <code>#1D1B18</code> cards.
+    </p>
+  </section>
+
+  <section>
+    <h2>Controls</h2>
+    <div class="primitive">
+      <span class="primitive-title">Buttons, badges, chips, input</span>
+      <div class="row">
+        <button class="btn primary" type="button">Create a project</button>
+        <button class="btn soft" type="button">Import instead</button>
+        <button class="btn" type="button">Secondary</button>
+        <button class="btn ghost" type="button">Quiet</button>
+      </div>
+      <div class="row">
+        <span class="badge progress">Build in progress</span>
+        <span class="badge live">Live</span>
+        <span class="badge">Saved idea</span>
+        <span class="badge">Archived</span>
+      </div>
+      <div class="row">
+        <span class="chip active">All 6</span><span class="chip">Live 2</span><span class="chip">Archived 1</span>
+      </div>
+      <input class="input" placeholder="Project name" />
+      <div class="col">
+        <div class="option selected"><span class="mark"></span><span><strong class="primitive-title" style="color:var(--text)">Plan it first</strong><br /><span class="muted" style="font-size:13px">Turn the idea into a plan before any code is written.</span></span></div>
+        <div class="option"><span class="mark"></span><span><strong class="primitive-title" style="color:var(--text)">Start blank</strong><br /><span class="muted" style="font-size:13px">An empty project you fill in yourself.</span></span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Conversation</h2>
+    <div class="primitive">
+      <div class="chat-row user">
+        <div class="chat-bubble user">Where does the order status live today?</div>
+        <div class="chat-meta">09:41</div>
+      </div>
+      <div class="chat-row orbit">
+        <div class="chat-bubble orbit">
+          <div class="body">
+            <svg class="orbit-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.2" fill="currentColor" />
+              <ellipse cx="12" cy="12" rx="9.6" ry="4.2" stroke="currentColor" stroke-width="1.4" transform="rotate(-28 12 12)" />
+            </svg>
+            <span class="reply">In <strong>orders.py</strong>, as <code>order_state</code> — and the vendor summary reads it directly, so a rename would touch both.</span>
+          </div>
+          <div class="action-card">
+            <div class="col" style="gap:3px">
+              <span class="action-label">Proposed action · nothing runs until you approve</span>
+              <span>Add a <code>status</code> alias and update the lookup command.</span>
+            </div>
+            <div class="action-buttons">
+              <button class="btn primary" type="button">Approve</button>
+              <button class="btn" type="button">Decline</button>
+            </div>
+          </div>
+        </div>
+        <div class="chat-meta">09:42</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Workspace columns</h2>
+    <div class="columns">
+      <div class="column task-work">
+        <h3 style="margin-bottom:14px">Project map</h3>
+        <div class="map-step done"><span class="mark">✓</span><span><span class="name">Store notes locally</span><br /><span class="meta">Done</span></span></div>
+        <div class="map-step active"><span class="mark">◐</span><span><span class="name">Search your notes</span><br /><span class="meta">In progress</span></span></div>
+        <div class="map-step"><span class="mark">○</span><span><span class="name">Add tags</span><br /><span class="meta">Planned</span></span></div>
+        <div style="margin-top:16px" class="progress"><span></span></div>
+        <p class="meta muted" style="margin-top:8px; font-size:12px">This column scrolls; its bar is hidden.</p>
+      </div>
+      <div class="column">
+        <h3>Search your notes</h3>
+        <p class="muted" style="margin:8px 0 16px">Find a note by a word in its title or body, without leaving the notebook.</p>
+        <div class="req done"><span class="box"></span><span>Match note titles and body text</span></div>
+        <div class="req"><span class="box"></span><span>Show a helpful no-results state</span></div>
+        <div class="req"><span class="box"></span><span>Keep search usable with the keyboard</span></div>
+        <div class="notice" style="margin-top:16px">Nothing is committed or pushed without your approval.</div>
+      </div>
+      <div class="column rail task-chat-log">
+        <h3>With you, as I work</h3>
+        <div class="chat-row orbit" style="margin:0">
+          <div class="chat-bubble orbit">
+            <div class="body">
+              <svg class="orbit-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="3.2" fill="currentColor" />
+                <ellipse cx="12" cy="12" rx="9.6" ry="4.2" stroke="currentColor" stroke-width="1.4" transform="rotate(-28 12 12)" />
+              </svg>
+              <span class="reply">I can add the no-results state — it is one line in the search view.</span>
+            </div>
+          </div>
+        </div>
+        <div class="col" style="gap:6px">
+          <div class="home-thread" style="display:flex;flex-direction:column;gap:6px">
+            <div class="notice">Thread scrolls here with no visible bar.</div>
+          </div>
+          <div class="activity-section">
+            <div class="notice">Activity scrolls here too.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>States</h2>
+    <div class="primitive">
+      <div class="row">
+        <span class="badge live">Connected</span>
+        <span class="badge progress">Waiting on approval</span>
+        <span class="badge">Not connected</span>
+      </div>
+      <div class="col">
+        <div class="notice">Files are named and sized. Nothing is uploaded — the browser never sends contents.</div>
+        <div class="notice err">The reply stopped before it finished. Nothing was applied.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Reference sheet for the ORBIT interface. The product stylesheet lives at
+    <code>app/static/orbit.css</code>; this file is the measured copy, and a test keeps the
+    accent tokens in the two in step.
+  </footer>
+</div>
+<script>
+  // Draw the sheet in the theme the operating system asked for, unless someone
+  // has already toggled it here.
+  (function () {
+    try {
+      var chosen = window.localStorage.getItem("orbit.theme");
+      if (chosen === "light" || chosen === "dark") { document.documentElement.setAttribute("data-theme", chosen); }
+    } catch (_error) {}
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,98 @@
+{% extends "_base.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Sign in to ORBIT{% endblock %}
+{% block nav %}<a href="{{ url_for('onboarding.landing') }}">← Back to ORBIT</a>{% endblock %}
+
+{% block content %}
+<div class="ob-auth">
+  <div>
+    <div class="ob-panel">
+      <div class="ob-panel-head">
+        <h1>Sign in</h1>
+        <p>Your workspace, exactly where you left it.</p>
+      </div>
+
+      {% if just_signed_out %}
+      {{ m.alert('info', 'Signed out. Your workspace is still here when you come back.') }}
+      {% endif %}
+      {% if just_reset %}
+      {{ m.alert('success', 'Password updated. Sign in with the new one.') }}
+      {% endif %}
+
+      {% if errors %}
+      <div class="ob-alert ob-alert--error" role="alert" tabindex="-1" data-error-summary>
+        <span class="glyph" aria-hidden="true">⚠</span>
+        <div class="ob-alert-body">
+          <strong>We couldn’t sign you in.</strong>
+          <ul style="margin:8px 0 0;padding-left:18px">
+            {% for key, message in errors.items() %}<li>{{ message }}</li>{% endfor %}
+          </ul>
+          <div class="ob-alert-actions">
+            <a class="ob-btn ob-btn--ghost ob-btn--sm" href="{{ url_for('onboarding.forgot_password') }}">Reset your password</a>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {{ m.social_buttons('login', next_url) }}
+
+      <div class="ob-divider">or with your email</div>
+
+      <form method="post" action="{{ url_for('onboarding.login') }}" novalidate data-validate-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="next" value="{{ next_url }}" />
+
+        {{ m.field('email', 'Email address', values.email, type='email', autocomplete='email',
+                   inputmode='email', placeholder='you@example.com', required=True, autofocus=True) }}
+        {{ m.password_field('password', 'Password', autocomplete='current-password', meter=False) }}
+
+        <div class="ob-toggle-row" style="border-bottom:0;padding-top:0">
+          <label class="ob-check" style="align-items:center">
+            <input type="checkbox" name="remember" checked />
+            <span>Keep me signed in on this device for 30 days</span>
+          </label>
+          <a class="ob-small" href="{{ url_for('onboarding.forgot_password') }}">Forgot password?</a>
+        </div>
+
+        <button class="ob-btn ob-btn--primary ob-btn--wide" type="submit" data-loading-label="Signing in…">
+          <span class="ob-spinner" aria-hidden="true"></span>
+          <span class="ob-btn-label">Sign in</span>
+        </button>
+      </form>
+    </div>
+
+    <p class="ob-small ob-muted" style="margin-top:16px">
+      New to ORBIT? <a href="{{ url_for('onboarding.signup') }}">Create an account</a> ·
+      <a href="{{ url_for('onboarding.demo_enter') }}">Open the demo workspace</a>
+    </p>
+  </div>
+
+  <aside class="ob-trust" aria-label="Sign-in help">
+    <div class="ob-trust-card">
+      <h3>If the email never arrives</h3>
+      <p>
+        The confirmation screen has a resend button with a real cooldown, and a field to
+        fix a mistyped address. Check the spam folder once — then resend rather than
+        signing up again, so you keep the same account.
+      </p>
+    </div>
+    <div class="ob-trust-card">
+      <h3>Left signed in somewhere else?</h3>
+      <p>
+        Settings → Security lists every active session with the device it came from.
+        Changing your password signs the others out, and keeps this one.
+      </p>
+    </div>
+    <div class="ob-trust-card">
+      <h3>Nothing to lose by looking</h3>
+      <p>
+        The demo workspace opens with sample projects and needs no account. It is shared
+        and nothing you type there is kept against a real profile.
+      </p>
+      <div style="margin-top:14px">
+        <a class="ob-btn ob-btn--ghost ob-btn--sm" href="{{ url_for('onboarding.demo_enter') }}">Open the demo</a>
+      </div>
+    </div>
+  </aside>
+</div>
+{% endblock %}

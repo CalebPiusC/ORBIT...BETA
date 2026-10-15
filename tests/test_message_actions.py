@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import re
 import unittest
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
@@ -35,7 +36,10 @@ from providers.personas import model_persona_map, persona_for_model
 from tools.registry import AuditLog
 
 APP_JS = Path(__file__).resolve().parent.parent / "app" / "static" / "app.js"
-LAYOUT = Path(__file__).resolve().parent.parent / "app" / "templates" / "layout.html"
+LAYOUT = Path(__file__).resolve().parent.parent / "app" / "static" / "orbit.css"
+TEMPLATE = Path(__file__).resolve().parent.parent / "app" / "templates" / "layout.html"
+# The rules this module checks used to live inline in layout.html; the design
+# system owns them now, and layout.html carries no tokens or component CSS.
 
 
 def parse_sse(raw: str) -> list[tuple[str, str]]:
@@ -337,7 +341,7 @@ class SidebarCollapseTests(AppCase):
         self.assertIn('data-conv-id="c1" title="Add order tracking to WhatsApp bot"', body)
 
     def test_the_choice_persists_across_reloads_and_applies_before_paint(self) -> None:
-        layout = LAYOUT.read_text(encoding="utf-8")
+        layout = TEMPLATE.read_text(encoding="utf-8")
         script = APP_JS.read_text(encoding="utf-8")
         self.assertIn('orbit.sidebar.collapsed', layout)  # restored before first paint
         self.assertIn("sidebar-collapsed-pending", layout)
@@ -348,7 +352,9 @@ class SidebarCollapseTests(AppCase):
         self.assertIn("catch (_error)", script)
 
     def test_collapsed_state_is_icons_only_with_a_scrollable_history(self) -> None:
-        layout = LAYOUT.read_text(encoding="utf-8")
+        # Whitespace-insensitive: the stylesheet is formatted for reading, not for
+        # matching a rule on one long line.
+        layout = re.sub(r"\s+", " ", LAYOUT.read_text(encoding="utf-8"))
         self.assertIn(".sidebar--collapsed", layout)
         self.assertIn(".sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto;", layout)
         # The collapsed rail hides the labels, not the controls themselves.

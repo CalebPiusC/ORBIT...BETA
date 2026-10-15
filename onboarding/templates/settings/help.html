@@ -1,0 +1,93 @@
+{% extends "settings/_shell.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Help & beta — ORBIT{% endblock %}
+
+{% block section %}
+<section class="ob-card-block">
+  <h2>Guidance, on your terms</h2>
+  <p class="desc">
+    The tour is five stops and takes about a minute. Replaying it does not reset anything
+    else; hiding it means it will not be offered again until you ask for it here.
+  </p>
+  <div class="ob-list">
+    <div class="ob-list-row">
+      <div class="main">
+        <strong>Introductory tour</strong>
+        <span>
+          {% if onboarding.tour_seen %}Seen{% else %}Not seen yet{% endif %} ·
+          {% if onboarding.tour_opt_out %}opted out{% else %}still offered on the dashboard{% endif %}
+        </span>
+      </div>
+      <form method="post" action="{{ url_for('onboarding.settings_help') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="action" value="replay-tour" />
+        <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit">Replay the tour</button>
+      </form>
+    </div>
+    <div class="ob-list-row">
+      <div class="main">
+        <strong>First-use tips</strong>
+        <span>
+          {{ onboarding.dismissed_hints | length }} dismissed ·
+          getting-started list {{ 'hidden' if onboarding.getting_started_dismissed else 'visible' }}
+        </span>
+      </div>
+      <form method="post" action="{{ url_for('onboarding.settings_help') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="action" value="reset-hints" />
+        <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit">Reset tips and checklist</button>
+      </form>
+    </div>
+    <div class="ob-list-row">
+      <div class="main">
+        <strong>Stop offering the tour</strong>
+        <span>For people who would rather find things themselves.</span>
+      </div>
+      <form method="post" action="{{ url_for('onboarding.settings_help') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="action" value="hide-tour" />
+        <button class="ob-btn ob-btn--quiet ob-btn--sm" type="submit">Don’t offer it again</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="ob-card-block">
+  <h2>What the tour will show you</h2>
+  <p class="desc">The same five stops, in words, for anyone who would rather read them.</p>
+  <ol class="ob-timeline">
+    {% for step in tour_steps %}
+    <li>
+      <span class="n" aria-hidden="true">{{ loop.index }}</span>
+      <span class="t"><strong>{{ step.title }}</strong>{{ step.body }}</span>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+
+<section class="ob-card-block">
+  <h2>Found something?</h2>
+  <p class="desc">
+    Feedback goes to the people building ORBIT. Feature suggestions, bugs, and general
+    thoughts all land in the same place, with a reference number you can quote.
+    {% if feedback_count %}
+    You have sent {{ feedback_count }} so far.
+    {% endif %}
+  </p>
+  <div class="ob-form-actions">
+    <a class="ob-btn ob-btn--primary ob-btn--sm" href="/feedback">Send feedback</a>
+    <a class="ob-btn ob-btn--ghost ob-btn--sm" href="/feedback#history">Your feedback history</a>
+  </div>
+</section>
+
+<section class="ob-card-block">
+  <h2>Keyboard and accessibility</h2>
+  <div class="ob-kv">
+    <div><span class="k">Skip to content</span><span class="v">First Tab on any marketing or auth page</span></div>
+    <div><span class="k">Tour</span><span class="v">← and → to move, Esc to end it</span></div>
+    <div><span class="k">Feedback drawer</span><span class="v">Esc closes it; focus returns to the button that opened it</span></div>
+    <div><span class="k">Reduced motion</span><span class="v">Orbit rings and spinners stop when your system asks them to</span></div>
+    <div><span class="k">Known gap</span><span class="v">No custom screen-reader shortcuts beyond standard landmarks and live regions</span></div>
+  </div>
+</section>
+{% endblock %}

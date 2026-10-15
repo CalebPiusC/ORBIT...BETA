@@ -1,8 +1,20 @@
 {% extends "layout.html" %}
 {% block title %}ORBIT — Task not found{% endblock %}
 {% block body %}
-<div class="screen screen--active" style="align-items:center; justify-content:center; flex-direction:column; gap:12px;">
-  <h2 style="margin:0;">Task “{{ task_id }}” not found</h2>
-  <p style="color:var(--text-faint);">This task doesn’t exist yet. <a href="/" style="color:var(--accent-bright);">Back to home</a>.</p>
+{# A task id with nothing behind it. One honest sentence and one way back — no
+   sidebar, because there is no workspace state to show beside a 404. #}
+<div class="screen screen--active">
+  <main class="home-main">
+    <div class="state-page">
+      <div class="empty-state">
+        <span class="glyph" aria-hidden="true">◌</span>
+        <h1>Task “{{ task_id }}” not found</h1>
+        <p>This task doesn’t exist yet — it may have been removed, or the link may belong to a different workspace.</p>
+        <div class="row">
+          <a class="btn btn--primary" href="/">Back to your workspace</a>
+        </div>
+      </div>
+    </div>
+  </main>
 </div>
 {% endblock %}

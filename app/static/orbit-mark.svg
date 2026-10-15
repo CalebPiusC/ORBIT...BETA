@@ -1,6 +1,12 @@
-<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <ellipse cx="32" cy="32" rx="27" ry="11" stroke="var(--accent, #1f4a8f)" stroke-width="2" transform="rotate(25 32 32)"/>
-  <ellipse cx="32" cy="32" rx="27" ry="11" stroke="var(--accent-dim, #16336a)" stroke-width="2" transform="rotate(-30 32 32)"/>
-  <circle cx="32" cy="32" r="5" fill="var(--accent-bright, #6b98de)"/>
-  <circle cx="55" cy="23" r="2.5" fill="var(--accent, #1f4a8f)"/>
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ORBIT">
+  <title>ORBIT</title>
+  <!-- The mark: one atom, two orbits, one small companion. Copper is the
+       brand's own colour — this file never reads a CSS variable, because it is
+       also used as a favicon and as an <img>, where no stylesheet applies. -->
+  <ellipse cx="32" cy="32" rx="26" ry="10" stroke="#AD7048" stroke-width="2.6"
+           transform="rotate(42 32 32)" />
+  <ellipse cx="32" cy="32" rx="26" ry="10" stroke="#AD7048" stroke-width="2.6"
+           transform="rotate(-42 32 32)" />
+  <circle cx="32" cy="32" r="4.6" fill="#AD7048" />
+  <circle cx="53.7" cy="24.4" r="3.4" fill="#A2673F" />
 </svg>

@@ -15,6 +15,15 @@ from app.store import Connection, Store
 from tools.registry import AuditLog
 
 
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def _stylesheet(name: str) -> str:
+    """A stylesheet with its comments removed: they would bleed into selectors."""
+    text = (ROOT / name).read_text(encoding="utf-8")
+    return re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+
+
 class FakeStreamingProvider:
     """Stand-in for GeminiProvider: returns canned streamed chunks, no network."""
 
@@ -131,8 +140,10 @@ class AppRoutesTests(unittest.TestCase):
         svg = mark.get_data(as_text=True)
         mark.close()
         self.assertIn('viewBox="0 0 64 64"', svg)
-        self.assertIn('rotate(25 32 32)', svg)
-        self.assertIn('rotate(-30 32 32)', svg)
+        # The atom: two crossed orbits and a core, drawn in the brand copper.
+        self.assertIn('rotate(42 32 32)', svg)
+        self.assertIn('rotate(-42 32 32)', svg)
+        self.assertIn("#AD7048", svg)
 
     def test_only_github_shown_as_connected(self):
         resp = self.client.get("/")
@@ -516,9 +527,7 @@ class ChatBubbleLayoutTests(unittest.TestCase):
         self.assertIn("Add order status tracking", body)
 
     def test_orbit_messages_are_unboxed_and_have_full_reply_width(self) -> None:
-        css = (Path(__file__).resolve().parent.parent / "app" / "templates" / "layout.html").read_text(
-            encoding="utf-8"
-        )
+        css = _stylesheet("app/static/orbit.css")
         orbit = re.search(r"\.chat-bubble\.orbit\s*\{([^}]*)\}", css)
         self.assertIsNotNone(orbit)
         self.assertRegex(orbit.group(1), r"background:\s*transparent")
@@ -530,7 +539,12 @@ class ChatBubbleLayoutTests(unittest.TestCase):
 
         user = re.search(r"\.chat-bubble\.user\s*\{([^}]*)\}", css)
         self.assertIsNotNone(user)
-        self.assertIn("background: var(--accent)", user.group(1))
+        self.assertIn("background: var(--surface-2)", user.group(1))
+        # The accent fill is spent on the control that acts, not on the bubble.
+        send = re.search(r"\.send-btn-round\s*\{([^}]*)\}", css)
+        self.assertIsNotNone(send)
+        self.assertIn("background: var(--accent)", send.group(1))
+        self.assertIn("color: var(--on-accent)", send.group(1))
 
     def test_orbit_messages_are_left_aligned_with_orbital_mark_in_text(self) -> None:
         body = self.client.get("/task/T1").get_data(as_text=True)
@@ -583,10 +597,9 @@ class ChatBubbleLayoutTests(unittest.TestCase):
         self.assertEqual(script.count('voiceFailureText(payload, "'), 2)  # transcribe + speech
 
     def test_focused_voice_view_reuses_existing_orbit_ring_state_styles(self) -> None:
-        root = Path(__file__).resolve().parent.parent
         home = self.client.get("/").get_data(as_text=True)
-        script = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
-        styles = (root / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
+        script = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
+        styles = _stylesheet("app/static/orbit.css")
         self.assertIn('aria-label="Back to text chat"', home)
         self.assertIn('aria-modal="true"', home)
         self.assertIn("voiceChatBack.focus()", script)
@@ -627,33 +640,32 @@ class ServerMessageTimeTests(unittest.TestCase):
         self.assertEqual(now_label(), datetime.now().strftime("%H:%M"))
 
 
-class DesignMockupSyncTests(unittest.TestCase):
-    """design/orbit_mockup.html is the spec: its palette and chat markup must match the app."""
+class DesignSpecSyncTests(unittest.TestCase):
+    """design/orbit_ui_spec.html is the reference sheet: palette and markup must match the app."""
 
-    ROOT = Path(__file__).resolve().parent.parent
+    ROOT = ROOT
 
     def _root_vars(self, text: str) -> dict[str, str]:
         block = re.search(r":root\s*\{(.*?)\}", text, re.S)
         self.assertIsNotNone(block, "no :root block found")
         return dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", block.group(1)))
 
-    def test_accent_tokens_match_between_app_and_mockup(self) -> None:
-        app_text = (self.ROOT / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
-        mock_text = (self.ROOT / "design" / "orbit_mockup.html").read_text(encoding="utf-8")
-        app_vars, mock_vars = self._root_vars(app_text), self._root_vars(mock_text)
-        for token in ("--accent", "--accent-bright", "--accent-dim", "--accent-wash", "--accent-soft"):
+    def test_accent_tokens_match_between_app_and_spec(self) -> None:
+        app_vars = self._root_vars((self.ROOT / "app" / "static" / "orbit.css").read_text(encoding="utf-8"))
+        spec_vars = self._root_vars((self.ROOT / "design" / "orbit_ui_spec.html").read_text(encoding="utf-8"))
+        for token in ("--accent", "--accent-text", "--accent-wash", "--accent-line", "--on-accent"):
             self.assertIn(token, app_vars)
             self.assertEqual(
-                mock_vars.get(token), app_vars[token].strip(), f"{token} differs between app and mockup"
+                spec_vars.get(token), app_vars[token].strip(), f"{token} differs between app and spec"
             )
 
-    def test_mockup_chat_uses_rows_and_has_no_name_labels(self) -> None:
-        mock_text = (self.ROOT / "design" / "orbit_mockup.html").read_text(encoding="utf-8")
-        self.assertNotIn('class="who"', mock_text)
-        self.assertNotIn("You · ", mock_text)
-        self.assertIn('class="chat-row user"', mock_text)
-        self.assertIn('class="chat-row orbit"', mock_text)
-        self.assertIn('class="chat-meta"', mock_text)
+    def test_spec_chat_uses_rows_and_has_no_name_labels(self) -> None:
+        spec_text = (self.ROOT / "design" / "orbit_ui_spec.html").read_text(encoding="utf-8")
+        self.assertNotIn('class="who"', spec_text)
+        self.assertNotIn("You · ", spec_text)
+        self.assertIn('class="chat-row user"', spec_text)
+        self.assertIn('class="chat-row orbit"', spec_text)
+        self.assertIn('class="chat-meta"', spec_text)
 
 
 def _root_tokens(path: Path) -> dict[str, str]:
@@ -678,29 +690,33 @@ def _contrast(a: str, b: str) -> float:
 class PaletteAndBubbleTests(unittest.TestCase):
     """Dark-blue accent, readable text on it, and the bubble markup the UI relies on."""
 
-    ROOT = Path(__file__).resolve().parent.parent
+    ROOT = ROOT
 
     def setUp(self) -> None:
-        self.tokens = _root_tokens(self.ROOT / "app" / "templates" / "layout.html")
+        self.tokens = _root_tokens(self.ROOT / "app" / "static" / "orbit.css")
         self.store = Store()
         self.client = create_app(provider=FakeStreamingProvider(), store=self.store).test_client()
 
-    def test_accent_is_dark_blue_not_copper(self) -> None:
-        for token in ("--accent", "--accent-dim", "--accent-bright"):
-            hex_value = self.tokens[token]
-            red, green, blue = (int(hex_value[i : i + 2], 16) for i in (1, 3, 5))
-            self.assertGreater(blue, red, f"{token} must be blue, not warm/copper")
-            self.assertGreater(blue, green, f"{token} must be blue, not warm/copper")
-        self.assertLess(_hex_luminance(self.tokens["--accent"]), 0.1, "--accent must be dark")
+    def test_accent_is_terracotta_not_blue(self) -> None:
+        for token in ("--accent", "--accent-text"):
+            value = self.tokens[token]
+            red, green, blue = (int(value[i : i + 2], 16) for i in (1, 3, 5))
+            self.assertGreater(red, blue, f"{token} must be warm, not blue")
+            self.assertGreater(red, green, f"{token} must be warm, not blue")
 
-    def test_text_on_the_accent_bubble_is_readable(self) -> None:
-        self.assertGreaterEqual(_contrast(self.tokens["--text"], self.tokens["--accent"]), 4.5)
+    def test_text_on_the_accent_fill_is_readable(self) -> None:
+        self.assertGreaterEqual(_contrast(self.tokens["--on-accent"], self.tokens["--accent"]), 4.5)
 
-    def test_accent_labels_are_readable_on_the_navy_surfaces(self) -> None:
-        for surface in ("--bg", "--bg-raised", "--bg-card"):
+    def test_accent_labels_are_readable_on_every_surface(self) -> None:
+        for surface in ("--bg", "--bg-sunken", "--surface", "--surface-2"):
             self.assertGreaterEqual(
-                _contrast(self.tokens["--accent-bright"], self.tokens[surface]), 4.5, surface
+                _contrast(self.tokens["--accent-text"], self.tokens[surface]), 4.5, surface
             )
+
+    def test_body_and_secondary_text_hold_contrast_on_every_surface(self) -> None:
+        for surface in ("--bg", "--bg-sunken", "--surface", "--surface-2"):
+            self.assertGreaterEqual(_contrast(self.tokens["--text"], self.tokens[surface]), 7.0, surface)
+            self.assertGreaterEqual(_contrast(self.tokens["--text-dim"], self.tokens[surface]), 4.5, surface)
 
     def test_home_thread_renders_every_orbit_message_with_orbital_mark(self) -> None:
         from app.store import ChatMessage as StoreChatMessage
@@ -752,7 +768,7 @@ class AgentScrollbarTests(unittest.TestCase):
         return found
 
     def test_every_panel_hides_its_scrollbar_in_all_three_engines(self) -> None:
-        for name in ("app/templates/layout.html", "design/orbit_mockup.html"):
+        for name in ("app/static/orbit.css",):
             css = self._css(name)
             self.assertIn("scrollbar-width: none", css, name)
             self.assertIn("-ms-overflow-style: none", css, name)
@@ -770,7 +786,7 @@ class AgentScrollbarTests(unittest.TestCase):
                 self.assertTrue(webkit, f"{name}: {panel} lacks a ::-webkit-scrollbar rule")
 
     def test_scrolling_is_not_disabled_on_the_scroll_containers(self) -> None:
-        css = self._css("app/templates/layout.html")
+        css = self._css("app/static/orbit.css")
         for panel in (".task-work", ".task-chat-log", ".home-thread"):
             bodies = self._rules_for(css, panel)
             self.assertTrue(bodies, panel)
@@ -809,7 +825,10 @@ def _script() -> str:
 
 
 def _layout() -> str:
-    return (Path(__file__).resolve().parent.parent / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
+    """The product stylesheet: one file dresses every screen."""
+    return (Path(__file__).resolve().parent.parent / "app" / "static" / "orbit.css").read_text(
+        encoding="utf-8"
+    )
 
 
 class WelcomeScreenTests(unittest.TestCase):
@@ -1085,6 +1104,47 @@ class RouteStreamingTests(unittest.TestCase):
         )
         self.assertEqual(provider.calls, [{"think": True, "report_attempts": False, "thinking_level": "quick"}])
         self.assertNotIn("status", [event for event, _ in seen])
+
+
+class DesignSystemCoverageTests(unittest.TestCase):
+    """No screen may be styled by a sheet that does not exist.
+
+    The failure this guards against is the one the rebuild was about: a template
+    that still carries the old vocabulary renders unstyled chrome next to the new
+    design. Every class a template writes has to have a rule in one of the three
+    sheets, unless it is listed below as a hook the scripts drive.
+    """
+
+    ROOT = Path(__file__).resolve().parent.parent
+    SHEETS = (
+        "app/static/orbit.css",
+        "onboarding/static/onboarding.css",
+        "onboarding/static/workspace.css",
+    )
+    # Classes that exist so JavaScript can find an element, deliberately unstyled:
+    # `history-group` groups conversation rows, `thinking-toggle` marks the depth
+    # control, `visible` is read by `.home-thread:not(.visible):empty`, and
+    # `sidebar-collapsed-pending` is set on <html> by layout.html's pre-paint
+    # script, which carries its own two rules.
+    HOOKS = {"history-group", "thinking-toggle", "visible", "sidebar-collapsed-pending"}
+
+    def test_every_class_a_template_uses_has_a_rule(self) -> None:
+        sheets = "\n".join((self.ROOT / name).read_text(encoding="utf-8") for name in self.SHEETS)
+        used: set[str] = set()
+        for path in (
+            list((self.ROOT / "app" / "templates").rglob("*.html"))
+            + list((self.ROOT / "onboarding" / "templates").rglob("*.html"))
+        ):
+            text = path.read_text(encoding="utf-8")
+            groups = re.findall(r'class="([^"{}]*)"', text) + re.findall(r"class='([^'{}]*)'", text)
+            for group in groups:
+                used.update(group.split())
+        unstyled = sorted(
+            name
+            for name in used
+            if name not in self.HOOKS and not re.search(r"\." + re.escape(name) + r"[\s,:{.\[]", sheets)
+        )
+        self.assertEqual(unstyled, [], f"no rule in any sheet for: {unstyled}")
 
 
 if __name__ == "__main__":

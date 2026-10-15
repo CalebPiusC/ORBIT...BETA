@@ -117,11 +117,13 @@ git config core.hooksPath .githooks
 
 `.env`, Python caches, logs, and common generated runtime-state files are ignored. `.env.example` is intentionally tracked and contains only a placeholder.
 
-## Phase 3 — web UI from the mockup
+## Phase 3 — web UI
 
-`design/orbit_mockup.html` is the literal structure and palette for two screens.
-They are implemented as real routes/templates backed by live data in `app/store.py`
-(every placeholder in the mockup is rendered from the store, not hard-coded):
+The original two-screen mockup (`design/orbit_mockup.html`) has been replaced: the
+design lives in `design/orbit_ui_spec.html` (tokens and components, with the states
+each one can be in) and in `app/static/orbit.css`, the single stylesheet every page
+loads. Both are implemented as real routes/templates backed by live data in
+`app/store.py` (every value is rendered from the store, not hard-coded):
 
 - `GET /` — the chat-first **home** (sidebar history, Chat/Agent mode toggle,
   composer, connected-tools row).
@@ -138,7 +140,7 @@ The mockup's dev-only screen switcher is removed; navigation is real state
 (not a replacement). It yields `StreamChunk(kind="thinking"|"answer", text)`
 as Gemini generates them (`client.models.generate_content_stream`). The UI
 receives these over Server-Sent Events (`/api/chat`, `/api/task/<id>/stream`)
-and reveals them progressively — replacing the mockup's timer-based fake.
+and reveals them progressively — replacing the old timer-based fake.
 
 The **thinking block** is Orbit narrating its reasoning in plain language. In
 this phase it is generated as part of the normal response (the model is asked to

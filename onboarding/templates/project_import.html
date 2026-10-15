@@ -1,0 +1,184 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}{{ point.title }} — ORBIT{% endblock %}
+
+{% block page %}
+<div class="ob-page-head">
+  <div>
+    <div class="ob-crumbs"><a href="/projects/new">New project</a><span aria-hidden="true">/</span><span>{{ point.title }}</span></div>
+    <h1>{{ point.title }}</h1>
+    <p class="lede">{{ point.body }}</p>
+  </div>
+</div>
+
+{% if errors %}
+{{ m.alert('error', errors.get('_form') or 'That did not work yet — see the field below.') }}
+{% endif %}
+
+{% if slug == 'github' %}
+{# GitHub gets the fullest treatment because it is the one live integration — and
+   because this is the screen where the repository question has to be answered
+   honestly: connecting to sign in is not the same as reading your code. #}
+<div class="ob-card-block">
+  <h2>Repository access is a separate decision</h2>
+  <p class="desc">
+    Signing in with GitHub reads your public profile and verified email. It does not read
+    repositories, and it never has.
+  </p>
+  <div class="ob-list">
+    <div class="ob-list-row{% if repo_access %} ob-list-row--current{% endif %}">
+      <div class="main">
+        <strong>{% if repo_access %}Repository access: granted{% else %}Repository access: not granted{% endif %}</strong>
+        <span>
+          {% if repo_access %}
+          Listed in <a href="/settings/integrations">Settings → Integrations</a>, revocable on its own.
+          {% else %}
+          Grant read access from <a href="/settings/integrations">Settings → Integrations</a> when you want ORBIT to look at repository files.
+          {% endif %}
+        </span>
+      </div>
+      <a class="ob-btn ob-btn--ghost ob-btn--sm" href="/settings/integrations">Manage</a>
+    </div>
+    {% if not github_ready %}
+    <div class="ob-list-row">
+      <div class="main">
+        <strong>GitHub is not connected to this account</strong>
+        <span>
+          {% if github_oauth.available %}
+          Use “Connect GitHub” below, or record a repository as a reference without access.
+          {% else %}
+          OAuth is not configured on this deployment ({{ github_oauth.status }}), so use the
+          reference route below or import an archive instead.
+          {% endif %}
+        </span>
+      </div>
+      {% if github_oauth.available %}
+      <form method="post" action="{{ url_for('onboarding.oauth_start', slug='github') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="next" value="/settings/integrations" />
+        <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit">Connect GitHub</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div class="ob-card-block">
+  <h2>{% if slug == 'github' %}Which repository?{% elif slug == 'zip' %}Choose the archive{% elif slug == 'folder' %}Choose the folder{% else %}Choose the files{% endif %}</h2>
+
+  {% if slug == 'github' %}
+  <p class="desc">
+    A repository is recorded as a reference on this project. Its file listing is only read
+    once repository access is granted — ORBIT will not display a tree it has not actually
+    fetched.
+  </p>
+  <form method="post" action="{{ url_for('onboarding.project_import', slug=slug) }}" novalidate data-validate-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <div class="ob-form-row">
+      {{ m.field('owner', 'Owner or organisation', request.form.get('owner', ''), placeholder='calebpiuse') }}
+      {{ m.field('repo', 'Repository name', request.form.get('repo', ''), error=errors.get('repo', ''),
+                 placeholder='orbit-demo', required=True) }}
+    </div>
+    <div class="ob-form-row">
+      {{ m.field('branch', 'Default branch', request.form.get('branch', 'main'), placeholder='main') }}
+      {{ m.field('token', 'Read-only token', '', type='password',
+                 autocomplete='off', placeholder='Optional — kept in memory only',
+                 hint='Used for this request only. It is never written to disk, and ORBIT is not a password manager.') }}
+    </div>
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Recording…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Add this repository as a project</span>
+      </button>
+      <a class="ob-btn ob-btn--ghost" href="/projects/import/zip">Import a ZIP instead</a>
+    </div>
+  </form>
+
+  {% elif slug == 'zip' %}
+  <p class="desc">
+    ORBIT reads the archive's table of contents — file names and sizes — and then discards
+    the upload. Contents are not unpacked, not indexed, and not stored.
+  </p>
+  <form method="post" action="{{ url_for('onboarding.project_import', slug=slug) }}" enctype="multipart/form-data" data-validate-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <div class="ob-drop" data-drop>
+      <div class="ico" aria-hidden="true">❐</div>
+      <p>Choose the .zip you downloaded from your provider.</p>
+      <input type="file" name="archive" accept=".zip,application/zip" required
+             aria-describedby="zip-hint" />
+      <p class="ob-small ob-faint" id="zip-hint">
+        Up to 20 MB. Unzip <span class="ob-mono">.tar.gz</span> downloads first — ORBIT
+        rejects them rather than half-reading them.
+      </p>
+      <div class="ob-file-more" data-file-name></div>
+    </div>
+    {% if errors.get('archive') %}<span class="ob-error" role="alert">{{ errors.get('archive') }}</span>{% endif %}
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Reading the listing…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Read the listing</span>
+      </button>
+    </div>
+  </form>
+
+  {% elif slug == 'folder' %}
+  <p class="desc">
+    Your browser lists the file names for you and ORBIT keeps that listing. Nothing is
+    uploaded — the files stay exactly where they are on your machine.
+  </p>
+  <form method="post" action="{{ url_for('onboarding.project_import', slug=slug) }}" data-folder-form data-validate-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <div class="ob-drop" data-drop>
+      <div class="ico" aria-hidden="true">▤</div>
+      <p>Pick the project folder.</p>
+      <input type="file" name="folder" webkitdirectory directory multiple
+             data-folder-input aria-describedby="folder-hint" />
+      <p class="ob-small ob-faint" id="folder-hint">
+        Browsers only allow this from a click, and only send names and relative paths.
+      </p>
+      <div class="ob-file-more" data-folder-count></div>
+    </div>
+    <div data-folder-paths></div>
+    {% if errors.get('paths') %}<span class="ob-error" role="alert">{{ errors.get('paths') }}</span>{% endif %}
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Listing…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Create the project</span>
+      </button>
+    </div>
+  </form>
+
+  {% else %}
+  <p class="desc">Names and sizes are listed. Contents stay on your machine.</p>
+  <form method="post" action="{{ url_for('onboarding.project_import', slug=slug) }}" enctype="multipart/form-data" data-validate-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    {{ m.field('name', 'Name for this group', request.form.get('name', ''),
+               placeholder='Auth module review', hint='Optional — defaults to “Selected files”.') }}
+    <div class="ob-drop" data-drop>
+      <div class="ico" aria-hidden="true">❏</div>
+      <p>Choose one or more files.</p>
+      <input type="file" name="files" multiple required data-file-input />
+      <div class="ob-file-more" data-file-name></div>
+    </div>
+    {% if errors.get('files') %}<span class="ob-error" role="alert">{{ errors.get('files') }}</span>{% endif %}
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Listing…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Create the project</span>
+      </button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+
+<div class="ob-card-block">
+  <h2>What ORBIT keeps</h2>
+  <p class="desc" style="margin-bottom:0">
+    The project record holds the name, where it came from, and the listing of files. Ask
+    ORBIT to read a specific file in Chat mode and it will say whether it could — and
+    what it read — rather than implying it has the whole codebase in mind.
+  </p>
+</div>
+{% endblock %}

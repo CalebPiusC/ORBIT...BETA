@@ -1,0 +1,136 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Personalize ORBIT{% endblock %}
+
+{% block page %}
+<div class="ob-page-body" style="max-width:860px;padding:0">
+  <div class="ob-page-head">
+    <div>
+      <span class="ob-eyebrow">Optional · about a minute</span>
+      <h1>{{ content.PERSONALIZATION_HEADLINE }}</h1>
+      <p class="lede">{{ content.PERSONALIZATION_PROMISE }}</p>
+    </div>
+    <div class="ob-page-head-actions">
+      <form method="post" action="{{ url_for('onboarding.personalize') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="skip" value="1" />
+        <button class="ob-btn ob-btn--ghost ob-btn--sm" type="submit">Skip all of it</button>
+      </form>
+    </div>
+  </div>
+
+  {% if errors %}
+  {{ m.alert('error', errors.get('_form', 'Something in that form needs another look.')) }}
+  {% endif %}
+
+  <form method="post" action="{{ url_for('onboarding.personalize') }}" data-personalize-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+    {# ---- 1. Background and experience ---- #}
+    <section class="ob-card-block" aria-labelledby="personalize-you">
+      <h2 id="personalize-you">Where you are coming from</h2>
+      <p class="desc">
+        This changes how much ORBIT explains. “New to this” gets the why as well as the
+        fix; “Expert” gets the trade-offs and no warm-up.
+      </p>
+
+      <fieldset class="ob-field-group">
+        <legend>Which of these sounds most like you? <span class="ob-faint">— optional</span></legend>
+        <div class="ob-choices">
+          {% for item in backgrounds %}
+          <label class="ob-choice">
+            <input type="radio" name="background" value="{{ item.value }}"
+                   {% if preferences.background == item.value %}checked{% endif %} />
+            <span><strong>{{ item.label }}</strong></span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="ob-field-group" style="margin-top:24px">
+        <legend>How much experience do you have with this kind of work?</legend>
+        <div class="ob-choices">
+          {% for item in experience_levels %}
+          <label class="ob-choice">
+            <input type="radio" name="experience" value="{{ item.value }}"
+                   {% if preferences.experience == item.value %}checked{% endif %} />
+            <span>
+              <strong>{{ item.label }}</strong>
+              <span class="hint">{{ item.hint }}</span>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <div class="ob-form-row" style="margin-top:24px">
+        {{ m.field('role', 'Your role or context', preferences.role, placeholder='Backend developer at a small studio') }}
+        {{ m.field('goal', 'What you want out of ORBIT', preferences.goal, placeholder='Ship a side project without losing weekends') }}
+      </div>
+    </section>
+
+    {# ---- 2. Interests ---- #}
+    <section class="ob-card-block" aria-labelledby="personalize-building">
+      <h2 id="personalize-building">What you like building</h2>
+      <p class="desc">
+        Pick as many as you like, or none. These only order the starter prompts and
+        recommendations on your dashboard.
+      </p>
+      <div class="ob-chip-field" role="group" aria-label="Interests">
+        {% for item in interests %}
+        {{ m.chip_toggle('interests', item.value, item.label,
+                         checked=(item.value in (preferences.interests or []))) }}
+        {% endfor %}
+      </div>
+    </section>
+
+    {# ---- 3. Languages and tools ---- #}
+    <section class="ob-card-block" aria-labelledby="personalize-languages">
+      <h2 id="personalize-languages">Languages and tools you reach for</h2>
+      <p class="desc">
+        The first thing ORBIT suggests when you start something new comes from here.
+      </p>
+      {% for group, items in language_groups.items() %}
+      <fieldset class="ob-field-group">
+        <legend>{{ group }}</legend>
+        <div class="ob-chip-field" role="group" aria-label="{{ group }}">
+          {% for item in items %}
+          {{ m.chip_toggle('languages', item.value, item.label,
+                           checked=(item.value in (preferences.languages or []))) }}
+          {% endfor %}
+        </div>
+      </fieldset>
+      {% endfor %}
+
+      <div class="ob-field" style="margin-top:8px">
+        <label for="customLanguageInput">Anything missing? <span class="ob-faint">— add it</span></label>
+        <div class="ob-custom-add">
+          <input class="ob-input" id="customLanguageInput" type="text" maxlength="40"
+                 placeholder="Elixir, COBOL, your in-house DSL…" data-custom-input="custom_languages" />
+          <button class="ob-btn ob-btn--ghost ob-btn--sm" type="button" data-custom-add="custom_languages">Add</button>
+        </div>
+        <div class="ob-custom-list" data-custom-list="custom_languages">
+          {% for item in preferences.custom_languages or [] %}
+          <span class="tag">
+            {{ item }}
+            <input type="hidden" name="custom_languages" value="{{ item }}" />
+            <button type="button" data-custom-remove aria-label="Remove {{ item }}">✕</button>
+          </span>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    <div class="ob-form-actions">
+      <button class="ob-btn ob-btn--primary" type="submit" data-loading-label="Saving…">
+        <span class="ob-spinner" aria-hidden="true"></span>
+        <span class="ob-btn-label">Save and continue</span>
+      </button>
+      {# A named submit button, not a nested form: HTML has no nested forms, and the
+         skip has to travel with the same CSRF token as the save. #}
+      <button class="ob-btn ob-btn--ghost" type="submit" name="skip" value="1">Skip — take me to the workspace</button>
+      <span class="ob-small ob-faint">Everything here is editable in Settings → Development preferences.</span>
+    </div>
+  </form>
+</div>
+{% endblock %}

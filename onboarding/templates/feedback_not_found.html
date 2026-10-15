@@ -1,0 +1,6 @@
+{% extends "_workspace_page.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Feedback not found — ORBIT{% endblock %}
+{% block page %}
+{{ m.empty_state('✦', 'That report is not on this account', 'It may have been sent from a different account, or the link is mistyped.', [{'label': 'Back to feedback', 'href': '/feedback', 'style': 'ob-btn--primary'}]) }}
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "_base.html" %}
+{% import "onboarding/_macros.html" as m with context %}
+{% block title %}Continue with {{ provider.label }} — ORBIT{% endblock %}
+{% block nav %}<a href="{{ url_for('onboarding.login') }}">← Back to sign in</a>{% endblock %}
+
+{% block content %}
+<div class="ob-auth ob-auth--centered">
+  <div>
+    <div class="ob-panel">
+      <div class="ob-panel-head">
+        <span class="ob-sim-flag">Simulated consent · no provider was contacted</span>
+        <h1 style="margin-top:14px">Continue with {{ provider.label }}</h1>
+        <p>
+          A real deployment would show {{ provider.label }}’s own screen here. This build
+          has no {{ provider.label }} client credentials, so ORBIT is showing what it asks
+          for — and offers the same choice, with the same consequences.
+        </p>
+      </div>
+
+      <h2 class="ob-h4">ORBIT will receive</h2>
+      <ul class="ob-consent-scopes" style="margin-top:12px">
+        {% for scope, meaning in scopes %}
+        <li>
+          <span class="scope">{{ scope }}</span>
+          <span>{{ meaning }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="ob-small ob-faint" style="margin:0 0 16px">
+        Requested scopes, exactly as configured: <span class="ob-mono">{{ scope_string }}</span>
+      </p>
+
+      <div class="ob-consent-not-granted">
+        <strong>Not requested: your repositories.</strong><br />
+        {{ not_granted }}
+      </div>
+
+      <p class="ob-small ob-muted">
+        Repository reading is a separate permission (<span class="ob-mono">{{ scope_repo if scope_repo is defined else 'public_repo' }}</span>)
+        that you grant from Settings → Integrations after signing in. Granting it later is
+        one switch, and revoking it does not close your ORBIT account.
+      </p>
+
+      <form method="post" action="{{ url_for('onboarding.oauth_simulate_decide', slug=slug) }}" novalidate data-validate-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="state" value="{{ state }}" />
+
+        <div class="ob-divider">the account to use</div>
+        {{ m.field('email', 'Email address for this account', '', type='email', inputmode='email',
+                   placeholder='you@example.com', required=True, autofocus=True,
+                   hint='In a real flow this comes from the provider. Here you type it, and it is treated exactly like a verified provider email.') }}
+        {{ m.field('name', 'Display name', '', placeholder='Optional — defaults to the part before the @') }}
+
+        <div class="ob-inline-actions">
+          <button class="ob-btn ob-btn--primary" type="submit" name="decision" value="allow"
+                  data-loading-label="Continuing…">
+            <span class="ob-spinner" aria-hidden="true"></span>
+            <span class="ob-btn-label">Allow and continue</span>
+          </button>
+          <button class="ob-btn ob-btn--ghost" type="submit" name="decision" value="deny">
+            Cancel — share nothing
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <p class="ob-small ob-faint" style="margin-top:16px">
+      What this simulation cannot tell you: whether your {{ provider.label }} account has
+      an email ORBIT can use. The real flow does, and says so plainly when it doesn’t.
+    </p>
+  </div>
+</div>
+{% endblock %}

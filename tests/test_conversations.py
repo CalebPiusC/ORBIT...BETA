@@ -201,20 +201,26 @@ class HistoryTitleTests(unittest.TestCase):
 
 
 class TemplateSyncTests(unittest.TestCase):
-    """The mockup is the spec: it must carry the same composer structure and rules."""
+    """The markup and the stylesheet have to agree about the composer."""
 
-    def test_mockup_has_the_composer_dock_and_the_docked_rules(self) -> None:
-        mock = (ROOT / "design" / "orbit_mockup.html").read_text(encoding="utf-8")
-        app_css = (ROOT / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
-        self.assertIn('class="composer-dock"', mock)
+    def test_composer_dock_and_the_docked_rules_exist(self) -> None:
+        home = (ROOT / "app" / "templates" / "home.html").read_text(encoding="utf-8")
+        app_css = (ROOT / "app" / "static" / "orbit.css").read_text(encoding="utf-8")
+        self.assertIn('class="composer-dock"', home)
         for selector in (".composer-dock", ".home-main.is-docked .composer-dock", ".home-main.is-docked .home-center"):
-            self.assertIn(selector, mock)
             self.assertIn(selector, app_css)
 
-    def test_new_conversation_and_history_markup_match_the_app(self) -> None:
-        mock = (ROOT / "design" / "orbit_mockup.html").read_text(encoding="utf-8")
-        self.assertIn("+ New conversation", mock)
-        self.assertRegex(mock, r'class="history-item active"')
+    def test_new_conversation_and_history_markup_exist(self) -> None:
+        sidebar = (ROOT / "app" / "templates" / "_sidebar.html").read_text(encoding="utf-8")
+        self.assertIn("New conversation", sidebar)
+        self.assertIn('id="sidebarToggle"', sidebar)
+        # Rendered: once a conversation is open, its row carries the active class.
+        store = Store()
+        store.start_conversation()
+        client = create_app(store=store).test_client()
+        body = client.get("/").get_data(as_text=True)
+        self.assertIn('class="history-item', body)
+        self.assertRegex(body, r'class="history-item active"')
 
 
 if __name__ == "__main__":
