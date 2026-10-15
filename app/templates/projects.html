@@ -1,0 +1,121 @@
+{% extends "layout.html" %}
+{% block title %}orbit — Projects{% endblock %}
+{% block body_class %}v2{% endblock %}
+{% block body %}
+<div class="screen screen--active" id="screen-projects">
+{% include "_sidebar.html" %}
+
+  <main class="page-main">
+    {% include "_topbar.html" %}
+    <div class="page-wrap">
+
+      <div class="page-topline">
+        <nav class="page-crumb" aria-label="Breadcrumb"><span class="crumb-workspace">{{ user.workspace }}</span><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Projects</span></nav>
+        <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
+      </div>
+
+      {% if total == 0 and not query and not active_status %}
+      {# First run: the design's empty hero. Both paths go somewhere real. #}
+      <section class="empty-hero" aria-label="Start">
+        <img class="hero-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+        <h1 class="hero-title">What would you like to make?</h1>
+        <p class="hero-sub">Your projects live here — each with its own map, tasks and Main Agent.</p>
+        <div class="hero-paths">
+          <a class="hero-card" href="/create">
+            <span class="hero-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 4.5v11M6.5 10l5.5-5.5L17.5 10"/><path d="M5 19.5h14"/></svg></span>
+            <span class="hero-card-name">Start with an idea</span>
+            <span class="hero-card-text">Name it, tell the Main Agent what you want to build, and plan the first task together.</span>
+            <span class="hero-card-go">New project →</span>
+          </a>
+          <a class="hero-card" href="/create#import">
+            <span class="hero-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 15.5v-11M6.5 10 12 4.5 17.5 10"/><rect x="4.5" y="17" width="15" height="3" rx="1.5"/></svg></span>
+            <span class="hero-card-name">Bring your own project</span>
+            <span class="hero-card-text">Import from GitHub, GitLab or Bitbucket. No repository provider is connected yet — the import section says so honestly.</span>
+            <span class="hero-card-go">See import →</span>
+          </a>
+        </div>
+      </section>
+      {% else %}
+
+      <header class="page-head-block">
+        <p class="page-eyebrow">Your personal workspace</p>
+        <h1 class="page-title">Good ideas, moving forward.</h1>
+        <p class="page-sub">
+          {{ total }} project{{ 's' if total != 1 }}{% if building %} — {{ building }} in progress{% endif %}.
+          Pick up where you left off.
+        </p>
+      </header>
+
+      {% if notice %}
+      <div class="notice-bar" role="status">
+        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v5M12 16h.01"/></svg>
+        <span>{{ notice }}</span>
+      </div>
+      {% endif %}
+
+      <div class="projects-toolbar">
+        <form class="search-field" method="get" action="/projects" role="search">
+          <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
+          <input type="search" name="q" value="{{ query }}" placeholder="Search projects" aria-label="Search projects" autocomplete="off" />
+          {% if active_status %}<input type="hidden" name="status" value="{{ active_status }}" />{% endif %}
+        </form>
+        <nav class="sort-links" aria-label="Sort">
+          {% for key, label, link in sort_links %}
+          <a class="sort-link{% if active_sort == key %} active{% endif %}" href="{{ link }}">{{ label }}</a>
+          {% endfor %}
+        </nav>
+        <a class="btn-primary" href="/create" id="newProject"><svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg> New project</a>
+      </div>
+
+      <nav class="filter-chips" aria-label="Filter by status">
+        <a class="filter-chip{% if not active_status %} active{% endif %}" href="/projects{% if query %}?q={{ query }}{% endif %}">All <span class="count">{{ total }}</span></a>
+        {% for key, label in statuses %}
+        <a class="filter-chip{% if active_status == key %} active{% endif %}" href="/projects?status={{ key }}{% if query %}&q={{ query }}{% endif %}">{{ label }} <span class="count">{{ counts[key] }}</span></a>
+        {% endfor %}
+      </nav>
+
+      {% if projects %}
+      <section class="projects-grid" aria-label="Projects">
+        {% for p in projects %}
+        <article class="project-card">
+          <header class="pc-head">
+            <span class="pc-icon" aria-hidden="true">{% for part in p.name.split()[:2] %}{{ part[:1] }}{% endfor %}</span>
+            <span class="status-badge st-{{ p.status }}"><span class="dot"></span>{{ p.status_label }}</span>
+          </header>
+          <h2 class="pc-name"><a href="/projects/{{ p.id }}">{{ p.name }}</a></h2>
+          {% if p.summary %}
+          <p class="pc-desc">{{ p.summary }} <span class="pc-desc-origin">· AI summary</span></p>
+          {% elif p.description %}
+          <p class="pc-desc">{{ p.description }}</p>
+          {% else %}
+          <p class="pc-desc empty">No description yet.</p>
+          {% endif %}
+          <p class="pc-tech{% if not p.languages %} pc-tech-none{% endif %}">
+            {% if p.languages %}{{ p.languages|join(' · ') }}{% else %}No technology chosen yet{% endif %}
+          </p>
+          <footer class="pc-foot">
+            {% if p.tasks_total %}
+            <p class="pc-taskline">{{ p.task_title }} <span class="pc-taskstate">· {{ p.task_state }}</span></p>
+            <p class="pc-progressline">{{ p.tasks_done }} of {{ p.tasks_total }} tasks complete{% if p.age %} · {{ p.age }}{% endif %}</p>
+            {% else %}
+            <p class="pc-taskline pc-taskline-none">No tasks yet — the map starts when the first one is added.</p>
+            {% endif %}
+            <a class="pc-open" href="/projects/{{ p.id }}" aria-label="Open {{ p.name }}">↗</a>
+          </footer>
+        </article>
+        {% endfor %}
+      </section>
+      <p class="grid-caption">AI descriptions come from a real conversation with the project's Main Agent. Cards without one show what you wrote when the project started.</p>
+      {% else %}
+      <section class="empty-state" aria-label="No matching projects">
+        <img class="empty-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+        <h2>Nothing matches</h2>
+        <p>{% if query %}No project matches “{{ query }}”{% if active_status %} in {{ active_status }}{% endif %}.{% else %}No projects have this status yet.{% endif %}</p>
+        <a class="btn-ghost" href="/projects">Clear the filters</a>
+      </section>
+      {% endif %}
+      {% endif %}
+    </div>
+  </main>
+</div>
+{% endblock %}

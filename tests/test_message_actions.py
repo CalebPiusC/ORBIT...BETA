@@ -331,10 +331,11 @@ class SidebarCollapseTests(AppCase):
         body = self.client.get("/").get_data(as_text=True)
         # Without the text label, the tooltip is what names the control.
         self.assertIn('id="newConvo" title="New conversation"', body)
-        self.assertIn('title="Search chats"', body)
+        self.assertIn('title="Projects"', body)
         self.assertIn('title="Analytics"', body)
-        # Each history row keeps the whole conversation title as its tooltip.
-        self.assertIn('data-conv-id="c1" title="Add order tracking to WhatsApp bot"', body)
+        self.assertIn('title="Agents"', body)
+        # The workspace tile names the single workspace it represents.
+        self.assertIn('class="workspace-tile" title="Personal space"', body)
 
     def test_the_choice_persists_across_reloads_and_applies_before_paint(self) -> None:
         layout = LAYOUT.read_text(encoding="utf-8")

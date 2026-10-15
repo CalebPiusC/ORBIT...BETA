@@ -1,0 +1,322 @@
+{% extends "layout.html" %}
+{% block title %}orbit — {{ project.name }}{% endblock %}
+{% block body_class %}v2{% endblock %}
+{% block body %}
+<div class="screen screen--active screen-ws" id="screen-project">
+{% include "_sidebar.html" %}
+
+  <main class="page-main ws-main">
+    {% include "_topbar.html" %}
+
+    <div class="page-topline">
+      <nav class="page-crumb" aria-label="Breadcrumb"><a href="/projects">Projects</a><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">{{ project.name }}</span></nav>
+      <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
+    </div>
+
+    {# ============ project header ============ #}
+    <header class="ws-head">
+      <div class="ws-head-main">
+        <div class="ws-title-row">
+          <h1 class="page-title">{{ project.name }}</h1>
+          <span class="status-badge st-{{ project.status }}"><span class="dot"></span>{{ project.status_label }}</span>
+        </div>
+        {% if project.summary %}
+        <p class="ws-desc">{{ project.summary }} <span class="ws-desc-origin">· AI summary by orbit's {{ speaker }}</span></p>
+        {% elif project.description %}
+        <p class="ws-desc">{{ project.description }}</p>
+        {% else %}
+        <p class="ws-desc ws-desc-empty">No description yet.</p>
+        {% endif %}
+        <div class="ws-progress-row">
+          <span class="ws-progress-label">{{ done_tasks }} of {{ total_tasks }} tasks complete</span>
+          <span class="ws-progress-track" role="presentation"><span class="ws-progress-fill" style="width: {{ (done_tasks / total_tasks * 100) | round(0) if total_tasks else 0 }}%"></span></span>
+        </div>
+        <p class="ws-tech">{{ project.languages|join(' · ') if project.languages else 'No technology chosen yet' }}{% if updated_age %} · Updated {{ updated_age }}{% endif %}</p>
+      </div>
+      <a class="btn-ghost ws-info-btn" href="/projects/{{ project.id }}?view=overview">Project info</a>
+    </header>
+
+    <nav class="ws-tabs" aria-label="Workspace view">
+      <a class="ws-tab{% if view != 'overview' %} active{% endif %}" href="/projects/{{ project.id }}">Map &amp; tasks</a>
+      <a class="ws-tab{% if view == 'overview' %} active{% endif %}" href="/projects/{{ project.id }}?view=overview">Project overview</a>
+    </nav>
+
+    <div class="ws-grid">
+
+      {# ============ LEFT: the Project map ============ #}
+      <section class="ws-panel ws-map" id="map" aria-label="Project map">
+        <div class="ws-panel-head">
+          <h2 class="ws-panel-title">Project map</h2>
+          <span class="ws-panel-sub">{{ total_tasks }} task{{ 's' if total_tasks != 1 }}</span>
+        </div>
+
+        {% for stage in map %}
+        <div class="ws-stage">
+          <div class="ws-stage-head">
+            <h3 class="ws-stage-name">{{ stage.name }}</h3>
+            <span class="ws-stage-count">{{ stage.done }}/{{ stage.total }} complete</span>
+          </div>
+          <div class="ws-stage-tasks">
+            {% for t in stage.tasks %}
+            <a class="ws-task-row state-{{ t.state }}{% if selected and selected.id == t.id %} active{% endif %}"
+               href="/projects/{{ project.id }}?task={{ t.id }}{% if agent_id != 'main' %}&agent={{ agent_id }}{% endif %}#details">
+              <span class="ws-task-ico" aria-hidden="true">
+                {%- if t.state == 'done' -%}
+                <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.4 2.5 2.4 4.7-5.1"/></svg>
+                {%- elif t.state == 'in_progress' or t.state == 'needs_attention' -%}
+                <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3" /></svg>
+                {%- else -%}
+                <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/></svg>
+                {%- endif -%}
+              </span>
+              <span class="ws-task-text">
+                <span class="ws-task-title">{{ t.title }}</span>
+                <span class="ws-task-sub">{% if t.done %}Complete · you marked it{% elif t.steps_total %}{{ t.steps_done }}/{{ t.steps_total }} steps · {{ t.state_label }}{% else %}{{ t.state_label }}{% endif %}</span>
+              </span>
+            </a>
+            {% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+
+        <details class="ws-add" id="add-task">
+          <summary><span class="ws-add-plus" aria-hidden="true">+</span> Add a task</summary>
+          <form class="ws-add-form" method="post" action="/projects/{{ project.id }}/tasks">
+            <input class="text-input" name="request" type="text" required autocomplete="off" maxlength="400"
+                   placeholder="What is the work? e.g. “Fix the crash in checkout.py”" aria-label="Task request" />
+            <div class="ws-add-row">
+              <input class="text-input" name="stage" type="text" list="stageList" autocomplete="off" maxlength="60"
+                     placeholder="Stage (optional)" aria-label="Stage" />
+              {% if stage_names %}
+              <datalist id="stageList">
+                {% for name in stage_names %}<option value="{{ name }}">{% endfor %}
+              </datalist>
+              {% endif %}
+              <select class="text-input" name="builds_on" aria-label="Builds on">
+                <option value="">Builds on: nothing</option>
+                {% for t in tasks %}
+                <option value="{{ t.id }}">Builds on: {{ t.title }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <button type="submit" class="btn-primary">Add to the map</button>
+          </form>
+        </details>
+      </section>
+
+      {# ============ CENTER: the selected task's details, or the overview ============ #}
+      <section class="ws-panel ws-center" id="details" aria-label="{% if view == 'overview' %}Project overview{% else %}Task details{% endif %}">
+        {% if view == 'overview' %}
+        <div class="ws-panel-head">
+          <h2 class="ws-panel-title">Project overview</h2>
+        </div>
+        <div class="ws-overview">
+          <div class="ws-ov-block">
+            <h3 class="ws-ov-label">What it is</h3>
+            {% if project.summary %}
+            <p>{{ project.summary }} <span class="ws-desc-origin">· AI summary, written by orbit's {{ speaker }} from your conversation.</span></p>
+            {% elif project.description %}
+            <p>{{ project.description }} <span class="ws-desc-origin">· your words, from when you created it.</span></p>
+            {% else %}
+            <p class="ws-desc-empty">Nothing describes this project yet. Talk with the Main Agent in the rail on the right and the conversation can produce a summary.</p>
+            {% endif %}
+          </div>
+          <div class="ws-ov-grid">
+            <div class="ws-ov-block"><h3 class="ws-ov-label">Status</h3>
+              <form method="post" action="/projects/{{ project.id }}/status" class="ws-ov-status">
+                <select class="text-input" name="status">
+                  {% for key, label in statuses %}
+                  <option value="{{ key }}"{% if project.status == key %} selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+                <button type="submit" class="btn-ghost">Update</button>
+              </form>
+            </div>
+            <div class="ws-ov-block"><h3 class="ws-ov-label">Came from</h3><p>{{ project.source_label }}</p></div>
+            <div class="ws-ov-block"><h3 class="ws-ov-label">Created</h3><p>{{ created_label or '—' }}</p></div>
+            <div class="ws-ov-block"><h3 class="ws-ov-label">Last updated</h3><p>{% if updated_age %}{{ updated_age }}{% else %}—{% endif %}</p></div>
+            <div class="ws-ov-block"><h3 class="ws-ov-label">Technology</h3><p>{{ project.languages|join(' · ') if project.languages else 'No technology chosen yet.' }}</p></div>
+            <div class="ws-ov-block"><h3 class="ws-ov-label">Tasks</h3><p>{{ done_tasks }} of {{ total_tasks }} complete — the count is what you marked, on the map.</p></div>
+          </div>
+        </div>
+        {% elif selected %}
+        <div class="ws-panel-head">
+          <div class="ws-eyebrow-row">
+            <span class="ws-detail-eyebrow">{{ (selected.stage or 'Tasks') | upper }}</span>
+            <a class="ws-details-close" href="/projects/{{ project.id }}{% if agent_id != 'main' %}?agent={{ agent_id }}{% endif %}#map" title="Close the details">×</a>
+          </div>
+          <h2 class="ws-detail-title">{{ selected.title }}</h2>
+          <div class="ws-detail-badges">
+            <span class="state-badge state-{{ selected_state[0] }}">{{ selected_state[1] }}</span>
+            {% if selected.done %}<span class="state-badge state-done">You marked it complete</span>{% endif %}
+          </div>
+        </div>
+        <p class="ws-detail-desc">{{ selected.description }}</p>
+
+        <dl class="ws-links">
+          <div class="ws-link-row">
+            <dt>Builds on</dt>
+            <dd>{% if builds_on %}<a href="/projects/{{ project.id }}?task={{ builds_on.id }}{% if agent_id != 'main' %}&agent={{ agent_id }}{% endif %}#details">{{ builds_on.title }}</a>{% else %}<span class="ws-none">Nothing — no dependency was set.</span>{% endif %}</dd>
+          </div>
+          <div class="ws-link-row">
+            <dt>Next up</dt>
+            <dd>{% if next_task %}<a href="/projects/{{ project.id }}?task={{ next_task.id }}{% if agent_id != 'main' %}&agent={{ agent_id }}{% endif %}#details">{{ next_task.title }} →</a>{% else %}<span class="ws-none">Nothing else in this stage is open.</span>{% endif %}</dd>
+          </div>
+        </dl>
+
+        <div class="ws-req">
+          <h3 class="ws-ov-label">Requirements</h3>
+          {% if panel and panel.steps %}
+          <p class="ws-req-count">{{ panel.steps | selectattr('status', 'equalto', 'done') | list | length }} of {{ panel.steps | length }} done — {{ panel.operation }}</p>
+          <ul class="ws-req-list">
+            {% for step in panel.steps %}
+            <li class="ws-req-item st-{{ step.status }}">
+              <span class="req-check" aria-hidden="true">{% if step.status == 'done' %}☑{% else %}☐{% endif %}</span>
+              <span class="req-text">{{ step.title }}{% if step.evidence %} <span class="req-evidence">“{{ step.evidence }}”</span>{% endif %}</span>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="ws-none">Planned requirements appear here after this task runs — the agent writes its checklist from the request itself. <a href="/task/{{ selected.id }}">Open the task to run it →</a></p>
+          {% endif %}
+        </div>
+
+        {% if panel and panel.files %}
+        <div class="ws-files">
+          <h3 class="ws-ov-label">Associated work <span class="ws-files-count">{{ panel.files | length }} file{{ 's' if panel.files | length != 1 }}</span></h3>
+          <div class="ws-file-list">
+            {% for f in panel.files %}
+            <span class="ws-file-chip" title="{% if f.source == 'request' %}Named in your request{% else %}Named by orbit while planning{% endif %}">{{ f.name }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+
+        {% if selected.activity %}
+        <div class="ws-activity-line">
+          <span class="ws-ov-label ws-ov-inline">Latest activity ·</span>
+          <span class="ws-activity-text">{{ selected.activity[0].text }}</span>
+          <span class="ws-activity-time">{{ selected.activity[0].time }}</span>
+        </div>
+        {% endif %}
+
+        <div class="ws-detail-actions">
+          <form method="post" action="/projects/{{ project.id }}/tasks/{{ selected.id }}/complete">
+            <input type="hidden" name="agent" value="{{ agent_id }}" />
+            <button type="submit" class="{% if selected.done %}btn-ghost{% else %}btn-primary{% endif %}">
+              {% if selected.done %}Reopen this task{% else %}Mark complete{% endif %}
+            </button>
+          </form>
+          <a class="btn-ghost" href="/projects/{{ project.id }}?task={{ selected.id }}&agent={{ agent_id }}#agent">Discuss with {{ speaker }} →</a>
+        </div>
+        {% else %}
+        <div class="ws-center-empty">
+          <img class="empty-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+          {% if total_tasks %}
+          <h3>Pick a task on the map.</h3>
+          <p>Its requirements, links and latest activity show up here — and “Discuss” pins the agent's conversation to it.</p>
+          {% else %}
+          <h3>The map is empty.</h3>
+          <p>Add the first task on the left, or talk it through with the {{ speaker }} on the right — the plan becomes tasks on your map.</p>
+          {% endif %}
+        </div>
+        {% endif %}
+      </section>
+
+      {# ============ RIGHT: the agent conversation rail ============ #}
+      <aside class="ws-agent" id="agent" aria-label="{{ speaker }}">
+        <div class="ws-agent-head">
+          <div class="ws-agent-title-row">
+            <h2 class="ws-panel-title">{{ speaker }}</h2>
+            {% if rail_agents | length > 1 %}
+            <form method="get" action="/projects/{{ project.id }}" class="ws-agent-picker">
+              {% if selected %}<input type="hidden" name="task" value="{{ selected.id }}" />{% endif %}
+              <select class="text-input" name="agent" aria-label="Switch the agent in this project" onchange="this.form.submit()">
+                {% for a in rail_agents %}
+                <option value="{{ a.id }}"{% if a.id == agent_id %} selected{% endif %}>{{ a.name }}</option>
+                {% endfor %}
+              </select>
+            </form>
+            {% endif %}
+          </div>
+          <p class="ws-agent-sub">{% if agent_id == 'main' %}Ask about this project, plan its work, or shape the next task. The context is {{ project.name }} — nothing else leaks in.{% else %}Assigned to {{ project.name }} as its {{ speaker }} specialist. Ask it anything in that specialty — the project context comes with it.{% endif %}</p>
+        </div>
+
+        {% if discuss_task %}
+        <div class="ws-discussing" id="wsDiscussing">
+          <span class="ws-discussing-label">Now discussing</span>
+          <span class="ws-discussing-title">{{ discuss_task.title }}</span>
+          <a class="ws-discussing-clear" href="/projects/{{ project.id }}{% if agent_id != 'main' %}?agent={{ agent_id }}{% endif %}#agent" title="Stop discussing this task">×</a>
+        </div>
+        {% endif %}
+
+        <div class="ws-thread" id="wsThread" aria-live="polite" aria-atomic="false">
+          {% if thread %}
+            {% for msg in thread %}
+            <div class="chat-row {% if msg.is_orbit %}orbit{% else %}user{% endif %}"{% if msg.id %} data-message-id="{{ msg.id }}"{% endif %}>
+              {% if msg.is_orbit %}<div class="chat-speaker">{{ msg.speaker or speaker }}</div>{% endif %}
+              <div class="chat-bubble {% if msg.is_orbit %}orbit{% else %}user{% endif %}">
+                {% if msg.is_orbit %}
+                <div class="body"><img class="orbit-icon" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" /><span class="reply">{{ msg.body }}</span></div>
+                {% else %}
+                <div class="body">{{ msg.body }}</div>
+                {% endif %}
+              </div>
+              <div class="chat-meta">{{ msg.time }}</div>
+            </div>
+            {% endfor %}
+          {% else %}
+          <div class="ws-thread-empty">
+            <img class="empty-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+            <p>No conversation yet — this thread is about <strong>{{ project.name }}</strong> only.</p>
+            <div class="ws-chips">
+              {% for starter in starters %}
+              <button type="button" class="ws-chip" data-prompt="{{ starter.prompt }}">{{ starter.label }}</button>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="ws-turn-status" id="wsTurnStatus" role="status" aria-live="polite" hidden>
+          <img class="ws-turn-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+          <span id="wsTurnStatusText">Thinking…</span>
+        </div>
+
+        <div class="ws-followups ws-chips" id="wsFollowups">
+          {% for chip in followups %}
+          <button type="button" class="ws-chip" data-prompt="{{ chip.prompt }}">{{ chip.label }}</button>
+          {% endfor %}
+        </div>
+
+        {% if plan_hint %}<p class="ws-plan-hint" id="wsPlanHint">You chose “Plan with the {{ speaker }}” — describe the goal and it shapes the first tasks with you.</p>{% endif %}
+
+        {% if tasks %}
+        <div class="ws-task-pin">
+          <label class="ws-task-pin-label" for="wsTaskPin">Task</label>
+          <select class="text-input" id="wsTaskPin">
+            <option value="">None — just the project</option>
+            {% for t in pin_tasks %}
+            <option value="{{ t.id }}"{% if discuss_task and discuss_task.id == t.id %} selected{% endif %}>{{ t.title }} — {{ t.state_label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+
+        <form class="ws-composer" id="wsComposer" data-project-id="{{ project.id }}" data-agent="{{ agent_id }}" data-task-id="{{ discuss_task.id if discuss_task else '' }}" data-speaker="{{ speaker }}"
+              data-mode="{{ mode }}" data-thinking="{{ thinking_level }}" data-plan-hint="{{ '1' if plan_hint else '' }}">
+          <textarea class="text-input" id="wsInput" rows="2" required
+                    placeholder="{% if plan_hint %}Tell the {{ speaker }} what you want this project to be…{% elif discuss_task %}About “{{ discuss_task.title }}”…{% else %}Talk to the {{ speaker }} about {{ project.name }}…{% endif %}"></textarea>
+          <div class="ws-composer-row">
+            <span class="ws-mode-zone" id="wsModeZone"></span>
+            <button type="submit" class="btn-primary" id="wsSend">Send</button>
+          </div>
+          <noscript><p class="ws-noscript">The {{ speaker }} conversation needs JavaScript — replies stream in live.</p></noscript>
+        </form>
+      </aside>
+
+    </div>
+  </main>
+</div>
+<script src="{{ url_for('static', filename='project.js') }}"></script>
+{% endblock %}

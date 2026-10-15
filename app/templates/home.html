@@ -1,5 +1,5 @@
 {% extends "layout.html" %}
-{% block title %}ORBIT — Home{% endblock %}
+{% block title %}orbit — Home{% endblock %}
 {% block body %}
 <div class="screen screen--active" id="screen-home">
 {% include "_sidebar.html" %}
@@ -21,6 +21,10 @@
         </div>
       </div>
       <div class="topbar-actions">
+        {# The new-sidebar era dropped the chat history from the rail (the design
+           centres on projects), so the conversation control itself moved here —
+           same real seam app.js always wired, /api/conversations/new. #}
+        <button type="button" class="topbar-icon-button" id="newConvo" title="New conversation" aria-label="New conversation">+</button>
         <button type="button" class="topbar-icon-button" data-open-settings aria-label="Settings" title="Settings">⚙</button>
         <button type="button" class="topbar-account" data-open-settings title="{{ user.name }} · {{ user.workspace }}" aria-label="Account and settings for {{ user.name }}">
           <span class="topbar-avatar">{{ user.name[:2]|upper }}</span>

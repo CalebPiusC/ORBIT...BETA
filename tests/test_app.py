@@ -77,16 +77,20 @@ class AppRoutesTests(unittest.TestCase):
         body = resp.get_data(as_text=True)
         self.assertIn("Caleb", body)
         self.assertIn("Good ", body)  # time-based greeting
-        # Conversation history from the store.
-        self.assertIn("Add order tracking to WhatsApp bot", body)
         # Mode toggle reflects default chat mode.
         self.assertIn('data-arena="mode-chat"', body)
         self.assertIn('data-mode="chat"', body)
         self.assertIn('id="currentConversationTitle"', body)
         self.assertIn("Your ideas, in orbit.", body)
-        self.assertIn("Search chats", body)
         self.assertIn('data-open-settings', body)
         self.assertNotIn('class="plus-badge">ORBIT', body)
+        # The new sidebar (owner's design) is projects-centred: the chat
+        # history and its search left the rail, and the new-conversation
+        # control lives in the home topbar instead.
+        self.assertIn('class="workspace-tile"', body)
+        self.assertIn('id="newConvo"', body)
+        self.assertNotIn('class="history-item', body)
+        self.assertNotIn('id="conversationSearch"', body)
 
     def test_chat_and_agent_turn_prompts_include_lagos_time_context(self):
         home = self.client.post("/api/chat", json={"message": "What time is it?"})
@@ -676,7 +680,11 @@ def _contrast(a: str, b: str) -> float:
 
 
 class PaletteAndBubbleTests(unittest.TestCase):
-    """Dark-blue accent, readable text on it, and the bubble markup the UI relies on."""
+    """Copper accent on charcoal neutrals, readable ink on it, and the bubble
+    markup the UI relies on. The brand this pins is the 2026-10-15 product
+    brief's: blue was explored and dropped, the single accent is copper /
+    burnt amber, and surfaces must never be blue-tinted.
+    """
 
     ROOT = Path(__file__).resolve().parent.parent
 
@@ -685,21 +693,47 @@ class PaletteAndBubbleTests(unittest.TestCase):
         self.store = Store()
         self.client = create_app(provider=FakeStreamingProvider(), store=self.store).test_client()
 
-    def test_accent_is_dark_blue_not_copper(self) -> None:
+    def test_accent_is_copper_never_blue(self) -> None:
+        # The brief's one accent: copper / burnt amber. A regression here is
+        # the old blue (or any cool hue) sneaking back in — blue must stay
+        # the *smallest* channel of each accent token.
         for token in ("--accent", "--accent-dim", "--accent-bright"):
             hex_value = self.tokens[token]
             red, green, blue = (int(hex_value[i : i + 2], 16) for i in (1, 3, 5))
-            self.assertGreater(blue, red, f"{token} must be blue, not warm/copper")
-            self.assertGreater(blue, green, f"{token} must be blue, not warm/copper")
-        self.assertLess(_hex_luminance(self.tokens["--accent"]), 0.1, "--accent must be dark")
+            self.assertGreater(red, blue, f"{token} must be warm copper, not blue")
+            self.assertGreater(green, blue, f"{token} must be warm copper, not blue")
 
-    def test_text_on_the_accent_bubble_is_readable(self) -> None:
-        self.assertGreaterEqual(_contrast(self.tokens["--text"], self.tokens["--accent"]), 4.5)
+    def test_surfaces_are_neutral_never_blue_tinted(self) -> None:
+        # Charcoal may lean warm, it may not lean blue: blue is the tint that
+        # kept bleeding into backgrounds and competing with the accent.
+        for surface in ("--bg", "--bg-raised", "--bg-sunken", "--bg-card"):
+            hex_value = self.tokens[surface]
+            red, _, blue = (int(hex_value[i : i + 2], 16) for i in (1, 3, 5))
+            self.assertLessEqual(blue, red, f"{surface} must never be blue-tinted")
 
-    def test_accent_labels_are_readable_on_the_navy_surfaces(self) -> None:
+    def test_text_on_the_accent_fill_is_readable(self) -> None:
+        # A mid-tone copper hits AA with near-black ink, not with the warm
+        # white --text — so fills use --on-accent, and the user bubble (the
+        # main accent fill) must be one of the places that does.
+        self.assertGreaterEqual(_contrast(self.tokens["--on-accent"], self.tokens["--accent"]), 4.5)
+        css = (self.ROOT / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
+        bubble = re.search(r"\.chat-bubble\.user\s*\{[^}]*\}", css)
+        self.assertIsNotNone(bubble)
+        self.assertIn("var(--on-accent)", bubble.group(0))
+
+    def test_accent_labels_are_readable_on_the_charcoal_surfaces(self) -> None:
         for surface in ("--bg", "--bg-raised", "--bg-card"):
             self.assertGreaterEqual(
                 _contrast(self.tokens["--accent-bright"], self.tokens[surface]), 4.5, surface
+            )
+
+    def test_body_text_is_readable_on_every_surface(self) -> None:
+        for surface in ("--bg", "--bg-raised", "--bg-card"):
+            self.assertGreaterEqual(
+                _contrast(self.tokens["--text"], self.tokens[surface]), 4.5, surface
+            )
+            self.assertGreaterEqual(
+                _contrast(self.tokens["--text-faint"], self.tokens[surface]), 4.5, surface
             )
 
     def test_home_thread_renders_every_orbit_message_with_orbital_mark(self) -> None:

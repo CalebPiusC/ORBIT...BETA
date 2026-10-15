@@ -48,6 +48,14 @@ class Conversation:
     # Whether the one-time naming call has been made. It is made once, after
     # the first completed exchange, whether or not it succeeds.
     titled: bool = False
+    # Which agent brief the conversation runs under. "main" is the default;
+    # anything else names an AgentType from app/agents.py and picks that
+    # card's system prompt instead of the plain home prompt.
+    agent_id: str = "main"
+    # The project workspace this conversation belongs to, if any. A project
+    # conversation is the Main Agent thread for that project; it renders in
+    # the workspace, never in the home chat history.
+    project_id: str | None = None
 
 
 @dataclass
@@ -86,6 +94,10 @@ class ChatMessage:
     # reply names the message to replace. Seeded history has none, so the id is
     # empty until the store assigns one.
     id: str = ""
+    # Which agent brief produced this reply, as a display label ("Main Agent",
+    # "Coding", ...). Written when the reply lands — it is provenance, not
+    # decoration. Empty for history that predates the label or has none.
+    speaker: str = ""
 
 
 @dataclass
@@ -109,6 +121,20 @@ class Task:
     applied: bool = False
     last_turn_prompt: str | None = None
     last_turn_initial: bool = False
+    # The project this task belongs to, if any. Tasks created from a project's
+    # workspace carry its id, which is what the Project Map renders from.
+    project_id: str | None = None
+    # The stage of work the owner filed this task under on the project's map
+    # ("Foundation", "Find & organize", ...). Set by the person, never
+    # guessed: a task without one lands in the map's unlabelled group.
+    stage: str | None = None
+    # Another task's id, set by the owner: "this one builds on that one." The
+    # map renders the link only because the owner said it exists.
+    builds_on: str | None = None
+    # Completion is a human assertion — the person marked it complete (or
+    # reopened it). A turn finishing never sets it: that is the same rule as
+    # the approval gate, applied to "done".
+    done: bool = False
 
 
 @dataclass
@@ -135,7 +161,7 @@ _SEED_CONVERSATIONS: list[Conversation] = [
     Conversation(id="c6", title="Draft pricing page copy", group="Previous 7 days", user_id=DEFAULT_USER_ID),
 ]
 
-_SEED_USER = User(name="Caleb", workspace="Personal workspace", id=DEFAULT_USER_ID)
+_SEED_USER = User(name="Caleb", workspace="Personal space", id=DEFAULT_USER_ID)  # owner\x27s design frames name the workspace
 
 
 def _seed_task() -> Task:
@@ -190,6 +216,10 @@ class Store:
         self.tasks: dict[str, Task] = {"T1": _seed_task()}
         # Home chat threads (user + Orbit turns), one per conversation id.
         self.threads: dict[str, list[ChatMessage]] = {}
+        # The specialty the person picked on the Agents page, sitting in the
+        # "ready to assign" state until they choose a project for it (or
+        # deselect it). A page selection only — not a conversation yet.
+        self.selected_agent: str | None = None
 
     # ----- connections -----
     def connected_count(self) -> int:
@@ -197,10 +227,82 @@ class Store:
 
     # ----- per-user scoping (single-user today, every read uses it) -----
     def conversations_for(self, user_id: str = DEFAULT_USER_ID) -> list[Conversation]:
-        return [c for c in self.conversations if c.user_id == user_id]
+        return [
+            c
+            for c in self.conversations
+            if c.user_id == user_id and c.project_id is None
+        ]
+
+    # ----- project conversations (the workspace's Main Agent thread) -----
+    def project_conversations(self, project_id: str, user_id: str = DEFAULT_USER_ID) -> list[Conversation]:
+        """Every agent conversation a project carries (main + assigned
+        specialists). Rendering the workspace lists these; their agent ids are
+        the only options the panel's agent switcher may offer."""
+        return [
+            c
+            for c in self.conversations
+            if c.project_id == project_id and c.user_id == user_id
+        ]
+
+    def project_conversation(
+        self,
+        project_id: str,
+        *,
+        create: bool = False,
+        user_id: str = DEFAULT_USER_ID,
+        agent_id: str = "main",
+    ) -> Conversation | None:
+        """One project's conversation with one agent (``"main"`` or a specialty).
+
+        Find-or-create: reading a workspace (GET) never creates anything — the
+        conversation is born when the person assigns a specialist or sends the
+        first message. It is titled on creation: naming calls belong to the
+        home history, not to a thread that never renders there.
+        """
+        for conv in self.conversations:
+            if (
+                conv.project_id == project_id
+                and conv.user_id == user_id
+                and conv.agent_id == agent_id
+            ):
+                return conv
+        if not create:
+            return None
+        conv = Conversation(
+            id=f"pc-{uuid.uuid4().hex[:10]}",
+            title="Project conversation",
+            group="Today",
+            user_id=user_id,
+            titled=True,
+            project_id=project_id,
+            agent_id=agent_id,
+        )
+        self.conversations.insert(0, conv)
+        self.threads[conv.id] = []
+        return conv
+
+    def project_thread(
+        self, project_id: str, user_id: str = DEFAULT_USER_ID, agent_id: str = "main"
+    ) -> list[ChatMessage]:
+        conv = self.project_conversation(project_id, user_id=user_id, agent_id=agent_id)
+        if conv is None:
+            return []
+        return self.threads.get(conv.id, [])
 
     def tasks_for(self, user_id: str = DEFAULT_USER_ID) -> list[Task]:
         return [t for t in self.tasks.values() if t.user_id == user_id]
+
+    def tasks_for_project(self, project_id: str, user_id: str = DEFAULT_USER_ID) -> list[Task]:
+        """The tasks one project's workspace renders, oldest first.
+
+        ``self.tasks`` is insertion-ordered, so this is creation order — the
+        map's stable reading order ("Next up" derives from it).
+        """
+        return [
+            t
+            for t in self.tasks.values()
+            if t.project_id == project_id and t.user_id == user_id
+        ]
 
     # ----- conversations -----
     @property
@@ -216,17 +318,20 @@ class Store:
                 return conv
         return None
 
-    def start_conversation(self) -> Conversation:
+    def start_conversation(self, agent_id: str = "main") -> Conversation:
         """Create the conversation the first send belongs to, and make it active.
 
         It goes to the top of the Today group. It keeps the placeholder title
-        until the naming call lands.
+        until the naming call lands. ``agent_id`` is the Agents-page card the
+        conversation started from (or "main" for the default assistant) — the
+        chat route picks the matching system prompt from it.
         """
         conv = Conversation(
             id=f"h-{uuid.uuid4().hex[:10]}",
             title=PLACEHOLDER_TITLE,
             group="Today",
             user_id=self.user.id,
+            agent_id=agent_id,
         )
         self.conversations.insert(0, conv)
         self.threads[conv.id] = []
@@ -318,16 +423,28 @@ class Store:
     def get_task(self, task_id: str) -> Task | None:
         return self.tasks.get(task_id)
 
-    def create_task(self, request: str) -> Task:
+    def create_task(
+        self,
+        request: str,
+        project_id: str | None = None,
+        stage: str | None = None,
+        builds_on: str | None = None,
+    ) -> Task:
         """A task from a request the person typed.
 
         The title comes from the request itself (no model call for a heading),
         and the task starts with no run: the Agent panel appears once it runs
-        and plans its checklist from this text.
+        and plans its checklist from this text. ``project_id`` attaches the
+        task to a project workspace's map; ``stage`` files it under that
+        map's stage; ``builds_on`` links it to the task the person said it
+        follows. A ``builds_on`` id that is not a real task is refused — a
+        dependency link may only point at something that exists.
         """
         text = " ".join((request or "").split())
         if not text:
             raise ValueError("a task needs a request to work from.")
+        if builds_on is not None and builds_on not in self.tasks:
+            raise ValueError(f"builds_on points at an unknown task: {builds_on}")
         task_id = f"t-{uuid.uuid4().hex[:8]}"
         task = Task(
             id=task_id,
@@ -337,8 +454,21 @@ class Store:
             description=text,
             activity=[Activity(text="Task created from your request.", time=now_label())],
             chat=[],
+            project_id=project_id,
+            stage=" ".join((stage or "").split()) or None,
+            builds_on=builds_on,
         )
         self.tasks[task_id] = task
+        return task
+
+    def set_done(self, task_id: str, done: bool = True) -> Task | None:
+        """Mark a task complete, or reopen it. The person's call, recorded."""
+        task = self.tasks.get(task_id)
+        if task is None:
+            return None
+        task.done = bool(done)
+        marker = "You marked this task complete." if task.done else "You reopened this task."
+        task.activity.insert(0, Activity(text=marker, time=now_label()))
         return task
 
     def add_chat(self, task_id: str, message: ChatMessage) -> None:

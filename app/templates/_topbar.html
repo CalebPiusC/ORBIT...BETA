@@ -1,0 +1,13 @@
+{# The mobile top bar, visible under 900px (the sidebar steps away there).
+   Every control is a real destination — no hamburger that opens nothing. #}
+<div class="mobile-topbar">
+  <a class="mobile-brand" href="/projects">
+    <img class="brand-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" /><span>orbit</span>
+  </a>
+  <nav class="mobile-nav" aria-label="Main">
+    <a href="/projects"{% if projects_active %} class="active"{% endif %}>Projects</a>
+    <a href="/agents"{% if agents_active %} class="active"{% endif %}>Agents</a>
+    <a href="/analytics"{% if analytics_active %} class="active"{% endif %}>Analytics</a>
+    <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
+  </nav>
+</div>
