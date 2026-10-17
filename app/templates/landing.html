@@ -1,8 +1,9 @@
 {% extends "public.html" %}
 {# The marketing front door. Two honesty rules from the product carry over
-   here: every capability named below exists in the app today (the one card
-   that doesn't is labelled "coming"), and the beta is presented as what it
-   is — an early, working product with clearly marked edges, not a fake 1.0. #}
+   here: every capability named below exists in the app today, and anything
+   that does not is labelled for what it is ("in testing", "coming next") —
+   never presented as working. The beta is presented as what it is: an early,
+   working product with clearly marked edges, not a fake 1.0. #}
 {% block title %}orbit — an AI workspace for building software{% endblock %}
 {% block body %}
 <main>
@@ -16,7 +17,7 @@
       <p class="hero-sub">
         ORBIT is an AI development workspace. Describe what you want in plain words, plan it
         with the Main Agent and a bench of specialists, and watch the work happen — knowing
-        that nothing is ever committed without your explicit yes.
+        that nothing runs without your explicit yes.
       </p>
       <div class="hero-actions">
         {% if account %}
@@ -27,7 +28,7 @@
         <a class="btn-ghost btn-lg" href="/auth/login">Sign in</a>
         {% endif %}
       </div>
-      <p class="hero-micro"><span class="dot"></span>Working today: chat, agent tasks, project workspaces, voice, reminders — and a GitHub connection.</p>
+      <p class="hero-micro"><span class="dot"></span>Working today: chat, agent tasks, project workspaces and reminders. Voice is in testing; Git imports are coming next.</p>
     </div>
 
     <div class="hero-preview" role="img" aria-label="A preview of the ORBIT home screen: a chat composer, a conversation, and a sidebar of projects.">
@@ -64,7 +65,7 @@
       <div class="step-card">
         <span class="step-num">1</span>
         <h3>Describe it</h3>
-        <p>Tell Orbit what you want in the home chat — Quick for fast answers, Deep when you want it to think harder. Attach files, talk by voice, whatever works.</p>
+        <p>Tell Orbit what you want in the home chat — Quick for fast answers, Deep when you want it to think harder. Hold-to-talk voice input is in testing.</p>
       </div>
       <div class="step-card">
         <span class="step-num">2</span>
@@ -73,8 +74,8 @@
       </div>
       <div class="step-card">
         <span class="step-num">3</span>
-        <h3>Approve, then it ships</h3>
-        <p>Proposed changes stay in draft until you say yes. No commits, no pushes without your explicit approval — that’s a rule the code enforces, not a caption.</p>
+        <h3>Approve before it runs</h3>
+        <p>When Orbit wants to run a tool — save a note, remember a fact, save today’s plan, pause reminders — the request waits on a card until you click Approve. Declines are recorded too. Approving proposed code changes comes with the Git integration.</p>
       </div>
     </div>
   </section>
@@ -82,12 +83,12 @@
   <section class="land-section" id="capabilities">
     <p class="land-eyebrow">What’s inside</p>
     <h2 class="land-title">A real workspace, not a chat box.</h2>
-    <p class="land-sub">Everything below is live in the beta today — and one thing that isn’t, marked as such, because pretending otherwise is how products lose your trust.</p>
+    <p class="land-sub">Everything below is live in the beta today, except what is labelled otherwise — because pretending otherwise is how products lose your trust.</p>
     <div class="cap-grid">
       <div class="cap-card">
         <h3>Chat &amp; Agent modes</h3>
         <span class="cap-tag live">Working today</span>
-        <p>One toggle switches between conversation and an agent that plans a task, works a checklist, and drafts changes for your review.</p>
+        <p>One toggle switches between conversation and an agent that plans a task and works a checklist from your request. Drafting the code changes for your review is coming next.</p>
       </div>
       <div class="cap-card">
         <h3>Project workspaces</h3>
@@ -102,17 +103,17 @@
       <div class="cap-card">
         <h3>The approval gate</h3>
         <span class="cap-tag live">Working today</span>
-        <p>Tool calls and proposed changes queue behind an explicit Approve. Every decision, including declines, is written to an audit log.</p>
+        <p>Every tool call queues behind an explicit Approve, and every decision — including declines — is written to an audit log. Approving proposed code changes arrives with the Git integration.</p>
       </div>
       <div class="cap-card">
         <h3>Voice &amp; reminders</h3>
-        <span class="cap-tag live">Working today</span>
-        <p>Hold-to-talk input and spoken replies, plus daily-plan check-ins with quiet hours. Voice clips are processed locally and never stored.</p>
+        <span class="cap-tag coming">Voice in testing</span>
+        <p>Reminders work today: daily-plan check-ins with quiet hours, and phone push if you want it. Hold-to-talk input and spoken replies are built and in testing — clips are processed locally and never stored.</p>
       </div>
       <div class="cap-card">
         <h3>Git providers &amp; imports</h3>
-        <span class="cap-tag coming">Partly here</span>
-        <p>GitHub is connected today. GitLab, Bitbucket and file/ZIP import entry points are visible in the app — visibly disabled until they’re real.</p>
+        <span class="cap-tag coming">Coming next</span>
+        <p>No Git provider is connected yet — GitHub included. The GitHub, GitLab, Bitbucket and file/ZIP entry points are visible in the app and visibly disabled until they are real.</p>
       </div>
     </div>
   </section>
@@ -124,9 +125,10 @@
         <h2>Early, honest, and built with you.</h2>
         <p>ORBIT is in open beta. That means the core loop is real and daily-usable, the edges are clearly marked, and your feedback goes straight into what gets built next. Here’s exactly where things stand:</p>
         <ul class="beta-lists">
-          <li><span class="ok">✓</span><span><strong>Working daily:</strong> chat and agent modes, project workspaces, specialists, voice, reminders — with a streaming reply that never leaves you guessing.</span></li>
-          <li><span class="soon">◐</span><span><strong>Visibly unfinished:</strong> importing from GitLab/Bitbucket or files. The entry points are there — disabled and labelled, never faked as working.</span></li>
-          <li><span class="ok">✓</span><span><strong>Never unfinished:</strong> the approval gate. No change is applied without your yes, on day one, forever.</span></li>
+          <li><span class="ok">✓</span><span><strong>Working daily:</strong> chat and agent modes, project workspaces, specialists and reminders — with a streaming reply that never leaves you guessing.</span></li>
+          <li><span class="soon">◐</span><span><strong>In testing:</strong> hold-to-talk voice and spoken replies. Built, not yet proven on every machine — tell us when it fails.</span></li>
+          <li><span class="soon">◐</span><span><strong>Visibly unfinished:</strong> connecting any Git provider — GitHub included — and importing from files. The entry points are there, disabled and labelled, never faked as working.</span></li>
+          <li><span class="ok">✓</span><span><strong>Never unfinished:</strong> the approval gate. No tool call runs without your yes, on day one, forever.</span></li>
         </ul>
       </div>
       <div>

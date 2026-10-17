@@ -25,7 +25,7 @@ Environment knobs for this layer:
 | Variable            | Default                  | Meaning                                        |
 | ------------------- | ------------------------ | ---------------------------------------------- |
 | `ORBIT_ACCOUNTS_PATH` | `runtime/accounts.json`  | Where accounts/sessions/feedback persist.      |
-| `ORBIT_SECRET_KEY`    | `orbit-dev-secret`       | Flask session secret. **Set it anywhere that matters.** |
+| `ORBIT_SECRET_KEY`    | none — **required**      | Flask session secret. `run_app` refuses to start when it is unset or still the committed default `orbit-dev-secret`. |
 | `ORBIT_HOST`, `PORT`  | `127.0.0.1`, `5000`      | Bind address / port.                           |
 
 `runtime/` is git-ignored; the store file must never be committed.
@@ -86,9 +86,10 @@ break them):
 - Settings → Integrations: *"…**does not grant access to any repository**."*
 
 Provider *sign-in* (GitHub/Google/GitLab) is deliberately separate from provider
-*integrations* (the seeded GitHub connection, which is a capability ORBIT has, not a
-claim the account granted anything). The integrate tab says "visibly disabled" for
-what is not connected.**
+*integrations* — and there are none. Every row on the Integrations tab reads "not
+connected", because no repository integration is built yet; sign-in granting identity
+must never be mistaken for repository access. The integrate tab says "visibly disabled"
+for what is not connected.
 
 ## First-run flow
 

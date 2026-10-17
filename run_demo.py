@@ -10,6 +10,8 @@ the store, the approval gate, SSE wiring) is the real code path.
 
 from __future__ import annotations
 
+import os
+import secrets
 from collections.abc import Iterator
 
 from providers.base import StreamChunk
@@ -61,7 +63,15 @@ class StubStreamingProvider:
 def main() -> None:
     print("ORBIT demo UI · provider = StubStreamingProvider (no network, canned replies)")
     print("For the real model: set GEMINI_API_KEY in .env and run  python -m app.server")
+    # run_app refuses to serve on the committed default session secret, and it
+    # is right to. The demo mints a random one per run instead of shipping a
+    # known key: sessions then do not survive a restart, which is the correct
+    # trade for a launcher whose replies are canned anyway. Set
+    # ORBIT_SECRET_KEY in .env if you want them to.
     app = create_app(provider=StubStreamingProvider(), store=Store())
+    if not os.environ.get("ORBIT_SECRET_KEY", "").strip():
+        app.secret_key = secrets.token_urlsafe(48)
+        print("ORBIT_SECRET_KEY not set — signing this run's sessions with a random key.")
     run_app(app)
 
 

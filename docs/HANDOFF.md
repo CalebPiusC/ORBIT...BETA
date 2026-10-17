@@ -111,8 +111,11 @@ These are not style preferences. Each one exists because the previous build viol
    palette for the two screens. "Arena keeps changing the UI" was mostly UI being
    re-derived from a description instead of from a file. If a change conflicts with the
    mockup, the mockup wins or the change is explicitly proposed first.
-5. **No placeholder is faked as live.** Only GitHub renders as connected; Linear/Vercel
-   render `not_connected`. Data comes from `app/store.py`, never hard-coded in a template.
+5. **No placeholder is faked as live.** GitHub, Linear and Vercel all render
+   `not_connected` — no integration is built yet, so nothing may read as connected.
+   (GitHub was seeded `connected` for two phases while no GitHub code existed; that is
+   the failure this rule is about.) Data comes from `app/store.py`, never hard-coded in
+   a template.
 6. **The approval gate is enforced in the store, not in copy.** `Store.apply_changes`
    raises unless a task was explicitly approved; `POST /api/task/<id>/apply` returns 403.
    The sentence "No commits will be pushed without your explicit approval" is a rule, not
@@ -209,9 +212,10 @@ a live key in this checkout. Say so in any status report instead of implying oth
   description still says "the local notes.txt". Phase 4 should move note storage into the
   versioned memory store and leave `audit.log` as disposable local state. Until then do
   not delete or relocate `notes.txt` — it is somebody's notes.
-- **`Store` is in-memory scaffolding.** The seeded conversations and the example task `T1`
-  are seeded data the templates render, but `home_thread`/mode changes die with the
-  process. Phase 4 replaces this with the persistent store; keep the read paths
+- **`Store` is in-memory scaffolding.** The example task `T1` is seeded data the templates
+  render (its breadcrumb names no repository, and the seeded conversation history is gone —
+  invented titles in the rail read as work that never happened), but `home_thread`/mode
+  changes die with the process. Phase 4 replaces this with the persistent store; keep the read paths
   (`conversations_grouped`, `get_task`, `conversations_for`, `tasks_for`) as the interface
   and swap what is behind them. The task's *steps, files and activity* are no longer
   seeded at all — they come from `Task.run`, which is `None` until the task runs

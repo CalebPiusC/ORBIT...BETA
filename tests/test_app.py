@@ -138,20 +138,42 @@ class AppRoutesTests(unittest.TestCase):
         self.assertIn('rotate(25 32 32)', svg)
         self.assertIn('rotate(-30 32 32)', svg)
 
-    def test_only_github_shown_as_connected(self):
+    def test_no_integration_is_shown_as_connected(self):
+        """Nothing is faked as live: no tool or Git integration is built yet.
+
+        GitHub used to render as "connected" while no GitHub code existed. The
+        row now says what is true, and the composer's GitHub shortcut — a bare
+        link to github.com that read as an integration — is gone.
+        """
         resp = self.client.get("/")
         body = resp.get_data(as_text=True)
-        # GitHub is connected.
-        self.assertIn("tool-pill connected", body)
-        self.assertIn("GitHub", body)
-        # Linear/Vercel are present but explicitly NOT connected (never faked active).
-        self.assertIn("Linear", body)
-        self.assertIn("Vercel", body)
-        self.assertIn("tool-pill not-connected", body)
-        # Exactly one active connection.
-        self.assertIn("Connected apps · 1 active", body)
-        # Sanity: there is no "connected" pill for Linear or Vercel.
-        self.assertEqual(body.count("tool-pill connected"), 1)
+        # All three rows are present, and every one is explicitly not connected.
+        for name in ("GitHub", "Linear", "Vercel"):
+            self.assertIn(name, body)
+        self.assertEqual(body.count("tool-pill not-connected"), 3)
+        self.assertNotIn("tool-pill connected", body)
+        # The chrome's count agrees with the rows.
+        self.assertIn("Connected apps · 0 active", body)
+        self.assertNotIn("github-shortcut", body)
+
+    def test_the_task_composer_has_no_github_shortcut(self):
+        body = self.client.get("/task/T1").get_data(as_text=True)
+        self.assertNotIn("github-shortcut", body)
+        self.assertNotIn("https://github.com", body)
+
+    def test_the_seeded_task_names_no_repository(self):
+        """T1's breadcrumb must not claim a repo/branch that was never connected."""
+        body = self.client.get("/task/T1").get_data(as_text=True)
+        self.assertNotIn("whatsapp-ordering-bot / main", body)
+        self.assertIn("Example task", body)
+
+    def test_a_fresh_store_has_no_seeded_conversation_history(self):
+        """Invented history reads as work that happened when it did not."""
+        from app.store import Store
+
+        store = Store()
+        self.assertEqual(store.conversations, [])
+        self.assertEqual(store.conversations_grouped(), {})
 
     def test_task_panel_is_planned_from_the_request(self):
         """The checklist comes from this request's wording, not a fixed workflow."""

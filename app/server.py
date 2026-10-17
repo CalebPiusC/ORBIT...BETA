@@ -98,6 +98,13 @@ from tools.registry import DEFAULT_AUDIT_LOG_PATH, AuditLog
 
 log = logging.getLogger("orbit.server")
 
+# The session-signing secret's fallback. It is committed, so it is public: any
+# server that ran on it would let anyone forge a signed-in session cookie.
+# ``create_app`` still uses it so a bare launch can render a page, but
+# ``run_app`` refuses to serve on it — see ``_require_real_secret_key``.
+DEFAULT_SECRET_KEY = "orbit-dev-secret"
+SECRET_KEY_ENV_VAR = "ORBIT_SECRET_KEY"
+
 MAX_VOICE_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_SPEECH_TEXT_CHARS = 12_000
 MAX_REASON_CHARS = 300
@@ -324,7 +331,7 @@ def create_app(
     welcome → dashboard flow.
     """
     app = Flask(__name__, template_folder="templates")
-    app.secret_key = os.environ.get("ORBIT_SECRET_KEY", "orbit-dev-secret")
+    app.secret_key = os.environ.get(SECRET_KEY_ENV_VAR, DEFAULT_SECRET_KEY)
     app.config["MAX_CONTENT_LENGTH"] = MAX_VOICE_UPLOAD_BYTES
     app.config["PROVIDER"] = provider
     app.config["STORE"] = store or Store()
@@ -2689,8 +2696,52 @@ def create_app(
     return app
 
 
+def _require_real_secret_key(app: Any) -> None:
+    """Refuse to serve on a session secret everybody can read.
+
+    The secret signs the session cookie. The committed fallback is public in
+    this repository, so a server running on it would let anyone who has read
+    the source forge a signed-in session for any account. That is why this is a
+    boot failure and not a warning: a launch that quietly served on a known key
+    would look exactly like a working one.
+
+    What is checked is the secret the app will *actually* sign with, because
+    that is the one that matters. ``create_app`` derives it from
+    ``ORBIT_SECRET_KEY``, so an unset or default variable is caught here; a
+    launcher that supplies its own per-run secret (``run_demo.py``) passes, as
+    it should. ``ORBIT_SECRET_KEY`` set to the committed default is rejected on
+    its own, since that is a choice someone made on purpose.
+    """
+    configured = os.environ.get(SECRET_KEY_ENV_VAR, "").strip()
+    if configured == DEFAULT_SECRET_KEY:
+        raise RuntimeError(
+            f"{SECRET_KEY_ENV_VAR} is set to the committed default "
+            f"({DEFAULT_SECRET_KEY!r}), which is public in this repository. "
+            "Set it to a long random value, for example:  "
+            "python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
+    app_secret = getattr(app, "secret_key", None)
+    effective = (
+        app_secret.strip()
+        if isinstance(app_secret, str) and app_secret.strip()
+        else configured
+    )
+    if not effective or effective == DEFAULT_SECRET_KEY:
+        raise RuntimeError(
+            f"{SECRET_KEY_ENV_VAR} is not set. Sessions would be signed with a "
+            "secret that is public in this repository, so anyone could forge a "
+            "signed-in session. Set it in .env to a long random value, for "
+            "example:  python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
+
+
 def run_app(app: Flask) -> None:
     """Run the Flask development server without exposing the debugger.
+
+    Refuses to start unless ``ORBIT_SECRET_KEY`` is set to something other than
+    the committed default -- see ``_require_real_secret_key``. This runs before
+    anything else in here, so a bad launch touches no runtime state and starts
+    no scheduler thread.
 
     Loopback is the safe default for a local run. Set ``ORBIT_HOST=0.0.0.0``
     explicitly when a container or sandbox preview needs an externally reachable
@@ -2703,6 +2754,8 @@ def run_app(app: Flask) -> None:
     was not enough -- and the voice dependencies are logged once, so a recording
     that fails later can be read against what the machine actually had at boot.
     """
+    _require_real_secret_key(app)
+
     host = os.environ.get("ORBIT_HOST", "").strip() or "127.0.0.1"
     raw_port = os.environ.get("PORT", "").strip() or "5000"
     try:

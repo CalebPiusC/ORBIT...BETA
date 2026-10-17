@@ -281,6 +281,34 @@ class GuardTests(unittest.TestCase):
         self.assertIn("How it works", text)
         self.assertIn("visibly disabled", text)  # the unfinished parts say so out loud
 
+    def test_landing_page_claims_only_what_the_app_does_today(self) -> None:
+        """Every capability on the marketing page must exist in this build.
+
+        Each assertion names a claim that used to be false: a GitHub connection
+        that was only a seeded status, code-change drafting that does not exist,
+        file attachments that are never uploaded, and voice presented as
+        shipping when it has not been proven end to end.
+        """
+        _, client, _ = make_client()
+        text = client.get("/landing").get_data(as_text=True)
+
+        # No Git provider is connected, so none may be claimed.
+        self.assertNotIn("GitHub is connected", text)
+        self.assertNotIn("a GitHub connection", text)
+        self.assertIn("No Git provider is connected yet", text)
+        self.assertIn("Coming next", text)
+
+        # The agent plans and narrates; it does not draft code changes yet.
+        self.assertNotIn("drafts changes for your review", text)
+        self.assertIn("Drafting the code changes for your review is coming next", text)
+
+        # Attachments are never uploaded to the model, so they are not offered.
+        self.assertNotIn("Attach files", text)
+
+        # Voice is labelled for what it is.
+        self.assertIn("Voice in testing", text)
+        self.assertNotIn("Hold-to-talk input and spoken replies, plus daily-plan", text)
+
 
 class AuthFlowTests(unittest.TestCase):
     def test_signup_validation_errors_rerender_with_values(self) -> None:
@@ -505,6 +533,17 @@ class SettingsPageTests(unittest.TestCase):
             self.assertIn(section, text)
         self.assertIn("This device", text)
         self.assertIn("does not grant access to any repository", text.replace("&#39;", "'"))
+
+    def test_integrations_reports_nothing_as_connected(self) -> None:
+        """No integration is built, so none may read as connected.
+
+        GitHub used to be seeded as "connected" here while no GitHub code
+        existed anywhere in the app.
+        """
+        text = self.client.get("/settings").get_data(as_text=True)
+        self.assertIn("Not connected — the integration isn't built yet.", text)
+        self.assertNotIn("Connected to your workspace.", text)
+        self.assertEqual(text.count(">Not connected<"), 3)  # GitHub, Linear, Vercel
 
     def test_profile_and_preferences_save(self) -> None:
         self.client.post("/settings/profile", data={"name": "Grace M. Hopper", "workspace": "Compiler crew"})
