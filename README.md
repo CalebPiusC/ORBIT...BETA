@@ -40,7 +40,9 @@ python -m app.server    # web UI on http://localhost:5000
 python run_demo.py      # web UI on the STUB provider — layout only, not your model
 ```
 
-Both web launchers default to `127.0.0.1:5000` with Flask's debugger disabled.
+`python -m app.server` needs `ORBIT_SECRET_KEY` set in `.env` (it signs the session
+cookie); it refuses to start without it. `run_demo.py` does not — it mints a random key
+for the run. Both web launchers default to `127.0.0.1:5000` with Flask's debugger disabled.
 For a container or sandbox preview that needs an external bind, opt in explicitly
 with `ORBIT_HOST=0.0.0.0`; `PORT` can override the port. The debugger remains off.
 
@@ -155,9 +157,10 @@ thinking parts for the configured model.
   the task was approved (`Store.apply_changes` raises otherwise). The note
   "No commits will be pushed without your explicit approval" is therefore the
   actual rule.
-- **GitHub only.** Only GitHub is shown as a connected tool. Linear/Vercel (and
-  any other) render as `not-connected` and are never faked as active until they
-  are real integrations.
+- **No connection is faked.** GitHub, Linear and Vercel all render as
+  `not-connected`, because no integration is built yet. Nothing shows as active
+  until it is a real integration — GitHub used to be seeded as `connected` while
+  no GitHub code existed anywhere in the app.
 
 ### Run it
 
@@ -302,10 +305,10 @@ arguments are written. The user-visible `model_returned_nothing` fallback and pr
 stream failures are also audited for future diagnosis.
 
 Orbit replies have compact copy, regenerate, and rating controls. Send becomes Stop while a
-stream is active. The composer includes an attachment picker and GitHub shortcut. File
-selections are shown locally but are not uploaded to the model yet; the GitHub shortcut
-opens GitHub rather than selecting a repository. The settings/account controls open a
-summary of the current local workspace.
+stream is active. The composer includes an attachment picker. File selections are shown
+locally but are not uploaded to the model yet. There is no GitHub shortcut: the old one was
+a bare link to github.com that read as an integration the app does not have. The
+settings/account controls open a summary of the current local workspace.
 
 ### Reply actions
 
@@ -400,8 +403,12 @@ product's front door. A signed-out visitor lands on a marketing page and a sign-
 wall; everything workspace-side asks for sign-in; the chat, projects and agents
 stay exactly as they were once you are inside. **Any `create_app()` call without a
 store — every test launch — is the single-user app it has always been: no guard, no
-wall, no new chrome.** `ORBIT_SECRET_KEY` sets the session secret (the committed
-default is a dev value).
+wall, no new chrome.** `ORBIT_SECRET_KEY` signs the session cookie and is
+**required**: `run_app` refuses to start when it is unset or still the committed
+default (`orbit-dev-secret`), because that value is public in this repo and would let
+anyone forge a signed-in session. Make one with
+`python -c "import secrets; print(secrets.token_urlsafe(48))"`. `run_demo.py` mints a
+random throwaway key per run instead, so the stub launcher still starts.
 
 What the layer does, honestly:
 

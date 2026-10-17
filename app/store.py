@@ -7,8 +7,8 @@ single source of truth the templates render from, so the two screens show live
 state instead of static strings.
 
 Two rules from Phase 2 are enforced here, not just displayed:
-  * Only GitHub is a real connection. Linear/Vercel are present but explicitly
-    *not* connected, and never faked as active.
+  * No integration is faked as active. GitHub, Linear and Vercel all render
+    *not* connected, because none of them is a real integration yet.
   * A task's proposed changes are never applied/pushed unless ``approved`` is
     set by an explicit approval call. ``apply_changes`` refuses otherwise.
 """
@@ -144,38 +144,31 @@ class User:
     id: str = DEFAULT_USER_ID
 
 
-# GitHub is the only real, built connection. Anything else stays visibly
+# No integration is built yet, so nothing is connected. Every row stays visibly
 # "not connected" until it is a real integration — never faked as active.
 _SEED_CONNECTIONS: list[Connection] = [
-    Connection(name="GitHub", status="connected"),
+    Connection(name="GitHub", status="not_connected"),
     Connection(name="Linear", status="not_connected"),
     Connection(name="Vercel", status="not_connected"),
-]
-
-_SEED_CONVERSATIONS: list[Conversation] = [
-    Conversation(id="c1", title="Add order tracking to WhatsApp bot", group="Today", user_id=DEFAULT_USER_ID),
-    Conversation(id="c2", title="Review portfolio site PR", group="Today", user_id=DEFAULT_USER_ID),
-    Conversation(id="c3", title="Sync SEN106 issues with plan", group="Yesterday", user_id=DEFAULT_USER_ID),
-    Conversation(id="c4", title="Explain this diff before merge", group="Yesterday", user_id=DEFAULT_USER_ID),
-    Conversation(id="c5", title="Run branch tests for ordering bot", group="Previous 7 days", user_id=DEFAULT_USER_ID),
-    Conversation(id="c6", title="Draft pricing page copy", group="Previous 7 days", user_id=DEFAULT_USER_ID),
 ]
 
 _SEED_USER = User(name="Caleb", workspace="Personal space", id=DEFAULT_USER_ID)  # owner\x27s design frames name the workspace
 
 
 def _seed_task() -> Task:
-    """The example task, seeded the way conversations are.
+    """The example task, seeded the way the store seeds its user.
 
     Its request text is the only thing the Agent panel plans from. There are no
     steps, no file diffs and no activity lines here: those used to be seeded
     with invented numbers ("6 files scanned", "orders.py 38 → 61"), which read
-    as progress the agent had made and never had.
+    as progress the agent had made and never had. The breadcrumb names no
+    repository either — no repo is connected, so naming one would be a claim
+    the app cannot back.
     """
     return Task(
         id="T1",
         user_id=DEFAULT_USER_ID,
-        breadcrumb="GitHub / whatsapp-ordering-bot / main",
+        breadcrumb="Example task",
         title="Add order tracking to WhatsApp bot",
         description=(
             "Add a status field to each order in orders.py, expose it through the "
@@ -206,7 +199,10 @@ class Store:
     def __init__(self) -> None:
         self.user = _SEED_USER
         self.connections: list[Connection] = list(_SEED_CONNECTIONS)
-        self.conversations: list[Conversation] = list(_SEED_CONVERSATIONS)
+        # No seeded history: a conversation exists only once the person has
+        # sent something. Invented titles in the rail read as work that
+        # happened when it did not.
+        self.conversations: list[Conversation] = []
         # None is a fresh, empty conversation: the composer is centered and no
         # history item is highlighted. The first send creates one.
         self.active_conversation_id: str | None = None

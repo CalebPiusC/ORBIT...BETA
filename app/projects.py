@@ -8,7 +8,8 @@ from template text. Two honesty rules are enforced here, not displayed:
     file upload) is offered in the creation dialog as a real, discoverable
     choice but is NOT connected. Asking for one raises ``SourceUnavailable``
     and the route answers with an honest notice — the same rule the sidebar
-    connections follow (GitHub connected, others not), applied to imports.
+    connections follow (nothing is connected until the integration is real),
+    applied to imports.
   * ``summary`` exists to hold an AI-generated project summary — which means
     it is written only by the Main Agent, once a workspace conversation
     produced one. Until then a project shows the description its owner typed,

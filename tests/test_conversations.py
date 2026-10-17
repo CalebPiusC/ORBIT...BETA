@@ -197,7 +197,7 @@ class HistoryTitleTests(unittest.TestCase):
         second = _send(client, "second")
         self.assertNotIn("conversation", [k for k, _ in second])
         self.assertEqual(len(store.threads[conv_id]), 4)
-        self.assertEqual(len(store.conversations_grouped()["Today"]), 3)  # 2 seeded + 1 new
+        self.assertEqual(len(store.conversations_grouped()["Today"]), 1)  # only the one this test created
 
 
 class TemplateSyncTests(unittest.TestCase):

@@ -455,6 +455,9 @@ class BootWiringTests(Paths):
         self.addCleanup(restore)
 
         app = create_app(provider=ScriptedProvider([]), store=Store(), heartbeat=self.heartbeat())
+        # run_app refuses to serve on the committed default session secret; a
+        # real launch gets one from ORBIT_SECRET_KEY, this test supplies one.
+        app.secret_key = "test-session-secret-not-the-committed-default"
         self.assertIsNone(app.config["ACTIONS"])
         with mock.patch("heartbeat.start_scheduler") as scheduler, mock.patch.object(app, "run") as run:
             run_app(app)
