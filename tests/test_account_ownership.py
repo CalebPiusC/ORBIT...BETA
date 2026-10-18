@@ -489,6 +489,62 @@ class HttpIsolationTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Agent mode lands on a task the account owns (the /task/T1 regression).
+# ---------------------------------------------------------------------------
+
+
+class AgentModeTaskTests(unittest.TestCase):
+    def test_fresh_signed_in_account_agent_mode_reaches_its_own_task(self) -> None:
+        app, store, projects, accounts = make_accounts_app()
+        grace = oauth_client(app, GRACE_EMAIL, "Grace Hopper")
+        grace_id = accounts.by_email(GRACE_EMAIL)["id"]
+        self.assertEqual(store.for_account(grace_id).tasks_for(), [])
+
+        # This is exactly what the mode toggle does before navigating.
+        resp = grace.post("/api/mode", json={"mode": "agent"})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["mode"], "agent")
+        task_url = body["task_url"]
+        self.assertNotEqual(task_url, "/task/T1")
+
+        page = grace.get(task_url)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Add order tracking", page.get_data(as_text=True))
+
+        view = store.for_account(grace_id)
+        task = view.get_task(body["task_id"])
+        assert task is not None
+        self.assertEqual(task.user_id, grace_id)
+        self.assertEqual(task_url, f"/task/{task.id}")
+
+        # On demand means once: toggling again hands back the same task.
+        again = grace.post("/api/mode", json={"mode": "agent"}).get_json()
+        self.assertEqual(again["task_id"], body["task_id"])
+        self.assertEqual(len(view.tasks_for()), 1)
+
+        # The frontend carries no hardcoded task id any more.
+        app_js = (Path(__file__).resolve().parent.parent / "app" / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn("/task/T1", app_js)
+        self.assertIn("task_url", app_js)
+
+    def test_second_account_still_gets_404_on_the_first_accounts_agent_task(self) -> None:
+        app, store, projects, accounts = make_accounts_app()
+        grace = oauth_client(app, GRACE_EMAIL, "Grace Hopper")
+        body = grace.post("/api/mode", json={"mode": "agent"}).get_json()
+        grace_task_url = body["task_url"]
+        self.assertEqual(grace.get(grace_task_url).status_code, 200)
+
+        ada = oauth_client(app, ADA_EMAIL, "Ada Osei")
+        self.assertEqual(ada.get(grace_task_url).status_code, 404)
+        # Ada's own Agent mode lands on a different task that is hers.
+        ada_body = ada.post("/api/mode", json={"mode": "agent"}).get_json()
+        self.assertNotEqual(ada_body["task_id"], body["task_id"])
+        self.assertEqual(ada.get(ada_body["task_url"]).status_code, 200)
+        self.assertEqual(grace.get(ada_body["task_url"]).status_code, 404)
+
+
+# ---------------------------------------------------------------------------
 # Tool-call ownership: only the proposing account may decide.
 # ---------------------------------------------------------------------------
 

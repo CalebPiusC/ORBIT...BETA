@@ -1359,7 +1359,16 @@ def create_app(
             st.set_mode(mode)
         except ValueError as exc:
             return Response(json.dumps({"error": str(exc)}), status=400, mimetype="application/json")
-        return Response(json.dumps({"mode": st.mode}), mimetype="application/json")
+        body: dict[str, Any] = {"mode": st.mode}
+        if st.mode == "agent":
+            # Agent mode opens a task page. The server names which one —
+            # the account's own example task, created on demand — so the
+            # frontend never hardcodes an id that may be another
+            # account's (the old "/task/T1" 404s for signed-in accounts).
+            task_obj = st.agent_task()
+            body["task_id"] = task_obj.id
+            body["task_url"] = url_for("task", task_id=task_obj.id)
+        return Response(json.dumps(body), mimetype="application/json")
 
     @app.post("/api/thinking-level")
     def set_thinking_level() -> Response:

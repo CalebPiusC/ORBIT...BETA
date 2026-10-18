@@ -168,7 +168,7 @@ _SEED_CONNECTIONS: list[Connection] = [
 _SEED_USER = User(name="Caleb", workspace="Personal space", id=DEFAULT_USER_ID)  # owner's design frames name the workspace
 
 
-def _seed_task() -> Task:
+def _seed_task(user_id: str = DEFAULT_USER_ID, task_id: str = "T1") -> Task:
     """The example task, seeded the way the store seeds its user.
 
     Its request text is the only thing the Agent panel plans from. There are no
@@ -178,13 +178,15 @@ def _seed_task() -> Task:
     repository either — no repo is connected, so naming one would be a claim
     the app cannot back.
 
-    It belongs to the seeded legacy account (``DEFAULT_USER_ID``), so in a
-    launch with real accounts it is visible only in no-accounts mode — a real
-    signed-in account asking for it gets the same 404 as any unknown task.
+    ``T1`` itself belongs to the seeded legacy account (``DEFAULT_USER_ID``):
+    a real signed-in account asking for it gets the same 404 as any unknown
+    task. ``Store.agent_task`` gives every other account its own copy of
+    this example, created on demand — that, not ``T1``, is where Agent
+    mode lands them.
     """
     return Task(
-        id="T1",
-        user_id=DEFAULT_USER_ID,
+        id=task_id,
+        user_id=user_id,
         breadcrumb="Example task",
         title="Add order tracking to WhatsApp bot",
         description=(
@@ -283,6 +285,25 @@ class Store:
 
     def tasks_for(self, *, account_id: str) -> list[Task]:
         return [t for t in self.tasks.values() if t.user_id == account_id]
+
+    def agent_task(self, *, account_id: str) -> Task:
+        """The account's Agent-mode landing task: its example task, found or
+        created on demand.
+
+        The seeded ``T1`` is the legacy account's instance. Any other
+        account gets its own copy the first time it switches to Agent
+        mode, and the same task thereafter — the toggle must land the
+        person on a task they own, never on a hardcoded id that may be
+        another account's (which would now correctly 404).
+        """
+        for task in self.tasks_for(account_id=account_id):
+            if task.breadcrumb == "Example task" and task.project_id is None:
+                return task
+        task = _seed_task(
+            user_id=account_id, task_id=f"t-{uuid.uuid4().hex[:8]}"
+        )
+        self.tasks[task.id] = task
+        return task
 
     def tasks_for_project(self, project_id: str, *, account_id: str) -> list[Task]:
         """The tasks one project's workspace renders, oldest first.
@@ -749,6 +770,9 @@ class AccountView:
     # ----- tasks -----------------------------------------------------------------------
     def tasks_for(self) -> list[Task]:
         return self.store.tasks_for(account_id=self.account_id)
+
+    def agent_task(self) -> Task:
+        return self.store.agent_task(account_id=self.account_id)
 
     def tasks_for_project(self, project_id: str) -> list[Task]:
         return self.store.tasks_for_project(
