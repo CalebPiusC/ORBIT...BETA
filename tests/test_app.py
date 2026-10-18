@@ -11,7 +11,7 @@ from typing import Any
 from providers.base import ChatMessage, StreamChunk
 
 from app.server import create_app
-from app.store import Connection, Store
+from app.store import DEFAULT_USER_ID, Connection, Store
 from tools.registry import AuditLog
 
 
@@ -68,6 +68,7 @@ def parse_sse(raw: str) -> list[tuple[str, str]]:
 class AppRoutesTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store = Store()
+        self.view = self.store.for_account(DEFAULT_USER_ID)
         self.app = create_app(provider=FakeStreamingProvider(), store=self.store)
         self.client = self.app.test_client()
 
@@ -95,7 +96,7 @@ class AppRoutesTests(unittest.TestCase):
     def test_chat_and_agent_turn_prompts_include_lagos_time_context(self):
         home = self.client.post("/api/chat", json={"message": "What time is it?"})
         home.get_data(as_text=True)
-        self.store.set_mode("agent")
+        self.view.set_mode("agent")
         agent = self.client.post("/api/task/T1/stream", json={"initial": True})
         agent.get_data(as_text=True)
         provider = self.app.config["PROVIDER"]
@@ -105,8 +106,8 @@ class AppRoutesTests(unittest.TestCase):
             self.assertIn("Use this as the authoritative current time", call["system_prompt"])
 
     def test_active_conversation_title_is_shown_in_topbar(self):
-        conversation = self.store.start_conversation()
-        self.store.set_title(conversation.id, "Lagos release notes")
+        conversation = self.view.start_conversation()
+        self.view.set_title(conversation.id, "Lagos release notes")
         body = self.client.get("/").get_data(as_text=True)
         self.assertIn('<span class="topbar-name">Lagos release notes</span>', body)
 
@@ -114,14 +115,14 @@ class AppRoutesTests(unittest.TestCase):
         first = self.client.post("/api/chat", json={"message": "Check this answer again."})
         self.assertEqual(first.status_code, 200)
         first.get_data(as_text=True)
-        self.assertEqual(len(self.store.home_thread), 2)
+        self.assertEqual(len(self.view.home_thread), 2)
 
         second = self.client.post("/api/chat", json={"regenerate": True})
         self.assertEqual(second.status_code, 200)
         second.get_data(as_text=True)
-        self.assertEqual(len(self.store.home_thread), 2)
-        self.assertEqual([item.who for item in self.store.home_thread], ["You", "Orbit"])
-        self.assertEqual(self.store.home_thread[0].body, "Check this answer again.")
+        self.assertEqual(len(self.view.home_thread), 2)
+        self.assertEqual([item.who for item in self.view.home_thread], ["You", "Orbit"])
+        self.assertEqual(self.view.home_thread[0].body, "Check this answer again.")
         self.assertEqual(len(self.app.config["PROVIDER"].calls), 2)
 
     def test_favicon_and_wordmark_use_the_shared_svg_mark(self):
@@ -173,7 +174,7 @@ class AppRoutesTests(unittest.TestCase):
 
         store = Store()
         self.assertEqual(store.conversations, [])
-        self.assertEqual(store.conversations_grouped(), {})
+        self.assertEqual(store.for_account(DEFAULT_USER_ID).conversations_grouped(), {})
 
     def test_task_panel_is_planned_from_the_request(self):
         """The checklist comes from this request's wording, not a fixed workflow."""
@@ -198,7 +199,7 @@ class AppRoutesTests(unittest.TestCase):
         """No run means no panel: no standing empty checklist on the screen."""
         from app.store import ChatMessage as StoreChatMessage
 
-        task = self.store.get_task("T1")
+        task = self.view.get_task("T1")
         assert task is not None
         task.chat.append(StoreChatMessage(who="Orbit", time="09:42", body="On it.", is_orbit=True))
         body = self.client.get("/task/T1").get_data(as_text=True)
@@ -224,7 +225,7 @@ class AppRoutesTests(unittest.TestCase):
         """A status that says Orbit is working when it is idle is not a status."""
         from app.store import ChatMessage as StoreChatMessage
 
-        task = self.store.get_task("T1")
+        task = self.view.get_task("T1")
         assert task is not None
         task.chat.append(StoreChatMessage(who="Orbit", time="09:42", body="On it.", is_orbit=True))
         body = self.client.get("/task/T1").get_data(as_text=True)
@@ -241,7 +242,7 @@ class AppRoutesTests(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json()["mode"], "agent")
-        self.assertEqual(self.store.mode, "agent")
+        self.assertEqual(self.view.mode, "agent")
 
     def test_mode_toggle_rejects_invalid(self):
         resp = self.client.post(
@@ -250,7 +251,7 @@ class AppRoutesTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_thinking_level_defaults_to_quick_and_can_be_changed(self):
-        self.assertEqual(self.store.thinking_level, "quick")
+        self.assertEqual(self.view.thinking_level, "quick")
         home = self.client.get("/").get_data(as_text=True)
         self.assertIn('data-thinking-level="quick" aria-pressed="true"', home)
         self.assertIn('data-thinking-level="deep" aria-pressed="false"', home)
@@ -258,19 +259,20 @@ class AppRoutesTests(unittest.TestCase):
         response = self.client.post("/api/thinking-level", json={"thinking_level": "deep"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json(), {"thinking_level": "deep"})
-        self.assertEqual(self.store.thinking_level, "deep")
+        self.assertEqual(self.view.thinking_level, "deep")
         task = self.client.get("/task/T1").get_data(as_text=True)
         self.assertIn('data-thinking-level="deep" aria-pressed="true"', task)
 
     def test_thinking_level_rejects_unknown_values(self):
         response = self.client.post("/api/thinking-level", json={"thinking_level": "extreme"})
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.store.thinking_level, "quick")
+        self.assertEqual(self.view.thinking_level, "quick")
 
 
 class ApprovalGateTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store = Store()
+        self.view = self.store.for_account(DEFAULT_USER_ID)
         self.app = create_app(provider=FakeStreamingProvider(), store=self.store)
         self.client = self.app.test_client()
 
@@ -296,7 +298,7 @@ class ApprovalGateTests(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 400)
         # Task must still be unapproved.
-        self.assertFalse(self.store.get_task("T1").approved)
+        self.assertFalse(self.view.get_task("T1").approved)
 
     def test_explicit_approve_then_apply_succeeds(self):
         resp = self.client.post(
@@ -306,7 +308,7 @@ class ApprovalGateTests(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.get_json()["approved"])
-        self.assertTrue(self.store.get_task("T1").approved)
+        self.assertTrue(self.view.get_task("T1").approved)
 
         resp = self.client.post(
             "/api/task/T1/apply", json={}, content_type="application/json"
@@ -318,6 +320,7 @@ class ApprovalGateTests(unittest.TestCase):
 class StreamingEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store = Store()
+        self.view = self.store.for_account(DEFAULT_USER_ID)
         self.app = create_app(provider=FakeStreamingProvider(), store=self.store)
         self.client = self.app.test_client()
 
@@ -337,7 +340,7 @@ class StreamingEndpointTests(unittest.TestCase):
         answer = "".join(d for k, d in events if k == "answer")
         self.assertIn("Hello from Orbit.", answer)
         # The reply was persisted to the home thread.
-        self.assertTrue(any(m.is_orbit for m in self.store.home_thread))
+        self.assertTrue(any(m.is_orbit for m in self.view.home_thread))
 
     def test_task_stream_streams_thinking_then_answer(self):
         resp = self.client.post(
@@ -357,7 +360,7 @@ class StreamingEndpointTests(unittest.TestCase):
         thinking = "".join(d for k, d in events if k == "thinking")
         self.assertIn("checking the repository", thinking)
         # Persisted as an Orbit chat message.
-        task = self.store.get_task("T1")
+        task = self.view.get_task("T1")
         assert task is not None
         self.assertTrue(any(m.is_orbit for m in task.chat))
         # The panel's state is derived from this run, not seeded: the narration
@@ -396,7 +399,7 @@ class StreamingEndpointTests(unittest.TestCase):
     def test_task_initial_response_can_be_regenerated_without_duplicate_messages(self):
         first = self.client.post("/api/task/T1/stream", json={"initial": True})
         first.get_data(as_text=True)
-        task = self.store.get_task("T1")
+        task = self.view.get_task("T1")
         assert task is not None
         self.assertEqual(len(task.chat), 2)
 
@@ -430,7 +433,7 @@ class StreamingEndpointTests(unittest.TestCase):
             "/api/task/T1/stream", json={"initial": True}, content_type="application/json"
         )
         self.assertIn("event: answer", streamed.get_data(as_text=True))
-        task = self.store.get_task("T1")
+        task = self.view.get_task("T1")
         assert task is not None
         self.assertTrue(any(m.is_orbit for m in task.chat), "opening reply was persisted")
 
@@ -456,7 +459,7 @@ class SilentFailureTests(unittest.TestCase):
             "/api/chat", json={"message": "Hello Orbit"}, content_type="application/json"
         )
         self.assertEqual(resp.status_code, 200)
-        return parse_sse(resp.get_data(as_text=True)), store, audit_path
+        return parse_sse(resp.get_data(as_text=True)), store.for_account(DEFAULT_USER_ID), audit_path
 
     def test_empty_reply_is_reported_instead_of_streaming_nothing(self) -> None:
         class EmptyProvider:
@@ -505,9 +508,10 @@ class ChatBubbleLayoutTests(unittest.TestCase):
         from app.store import ChatMessage as StoreChatMessage
 
         self.store = Store()
+        self.view = self.store.for_account(DEFAULT_USER_ID)
         self.app = create_app(provider=FakeStreamingProvider(), store=self.store)
         self.client = self.app.test_client()
-        self.store.add_chat(
+        self.view.add_chat(
             "T1",
             StoreChatMessage(who="Orbit", time="09:42", body="On it.", is_orbit=True),
         )
@@ -531,7 +535,7 @@ class ChatBubbleLayoutTests(unittest.TestCase):
     def test_user_messages_are_right_aligned_accent_bubbles(self) -> None:
         from app.store import ChatMessage as StoreChatMessage
 
-        self.store.add_chat(
+        self.view.add_chat(
             "T1",
             StoreChatMessage(who="You", time="09:41", body="Add order status tracking", is_orbit=False),
         )
@@ -633,16 +637,17 @@ class ServerMessageTimeTests(unittest.TestCase):
 
     def test_home_chat_stores_hh_mm_for_both_sides(self) -> None:
         store = Store()
+        view = store.for_account(DEFAULT_USER_ID)
         app = create_app(provider=FakeStreamingProvider(), store=store)
         resp = app.test_client().post(
             "/api/chat", json={"message": "Hello Orbit"}, content_type="application/json"
         )
         resp.get_data(as_text=True)
-        self.assertEqual(len(store.home_thread), 2)
-        for msg in store.home_thread:
+        self.assertEqual(len(view.home_thread), 2)
+        for msg in view.home_thread:
             self.assertRegex(msg.time, r"^\d{2}:\d{2}$")
             self.assertNotEqual(msg.time, "now")
-        self.assertEqual(store.home_thread[0].time, store.home_thread[1].time)
+        self.assertEqual(view.home_thread[0].time, view.home_thread[1].time)
 
     def test_now_label_is_local_hh_mm(self) -> None:
         from datetime import datetime
@@ -713,6 +718,7 @@ class PaletteAndBubbleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tokens = _root_tokens(self.ROOT / "app" / "templates" / "layout.html")
         self.store = Store()
+        self.view = self.store.for_account(DEFAULT_USER_ID)
         self.client = create_app(provider=FakeStreamingProvider(), store=self.store).test_client()
 
     def test_accent_is_copper_never_blue(self) -> None:
@@ -761,8 +767,8 @@ class PaletteAndBubbleTests(unittest.TestCase):
     def test_home_thread_renders_every_orbit_message_with_orbital_mark(self) -> None:
         from app.store import ChatMessage as StoreChatMessage
 
-        self.store.start_conversation()
-        self.store.home_thread.extend(
+        self.view.start_conversation()
+        self.view.home_thread.extend(
             [
                 StoreChatMessage(who="You", time="09:41", body="First question", is_orbit=False),
                 StoreChatMessage(who="Orbit", time="09:41", body="First answer", is_orbit=True),
@@ -873,6 +879,7 @@ class WelcomeScreenTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.store = Store()
+        self.view = self.store.for_account(DEFAULT_USER_ID)
         self.app = create_app(provider=FakeStreamingProvider(), store=self.store)
         self.client = self.app.test_client()
 
@@ -900,7 +907,7 @@ class WelcomeScreenTests(unittest.TestCase):
 
     def test_a_returning_conversation_with_history_never_shows_it(self) -> None:
         self.client.post("/api/chat", json={"message": "Hello Orbit"}).get_data(as_text=True)
-        self.assertTrue(self.store.home_thread, "the turn was stored")
+        self.assertTrue(self.view.home_thread, "the turn was stored")
         body = self.client.get("/").get_data(as_text=True)
         self.assertNotIn("Your ideas, in orbit.", body)
         self.assertNotIn("Think it. Build it.", body)
@@ -923,6 +930,7 @@ class FollowupChipTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.store = Store()
+        self.view = self.store.for_account(DEFAULT_USER_ID)
         self.app = create_app(provider=CodeStreamingProvider(), store=self.store)
         self.client = self.app.test_client()
 
@@ -973,6 +981,7 @@ class AgentTaskCreationTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.store = Store()
+        self.view = self.store.for_account(DEFAULT_USER_ID)
         self.app = create_app(provider=FakeStreamingProvider(), store=self.store)
         self.client = self.app.test_client()
 
@@ -980,7 +989,7 @@ class AgentTaskCreationTests(unittest.TestCase):
         resp = self.client.post("/api/tasks", json={"request": "Add a status field to orders.py."})
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
-        task = self.store.get_task(data["id"])
+        task = self.view.get_task(data["id"])
         assert task is not None
         self.assertEqual(task.description, "Add a status field to orders.py.")
         self.assertEqual(task.title, "Add a status field to orders.py.")
@@ -1008,7 +1017,7 @@ class AgentTaskCreationTests(unittest.TestCase):
         first = self.client.post("/api/tasks", json={"request": "One."}).get_json()["id"]
         second = self.client.post("/api/tasks", json={"request": "Two."}).get_json()["id"]
         self.assertNotEqual(first, second)
-        self.assertEqual(len(self.store.tasks_for()), 3)  # the seeded task plus these two
+        self.assertEqual(len(self.view.tasks_for()), 3)  # the seeded task plus these two
 
 
 class TurnStatusLabelTests(unittest.TestCase):
@@ -1084,7 +1093,7 @@ class RouteStreamingTests(unittest.TestCase):
 
     def _client(self, provider, mode: str = "chat"):
         store = Store()
-        store.set_mode(mode)
+        store.for_account(DEFAULT_USER_ID).set_mode(mode)
         return create_app(provider=provider, store=store).test_client()
 
     def test_home_answer_reaches_the_client_piece_by_piece(self) -> None:
@@ -1110,7 +1119,7 @@ class RouteStreamingTests(unittest.TestCase):
         ):
             provider = RecordingProvider(self.PIECES)
             store = Store()
-            store.set_thinking_level("deep")
+            store.for_account(DEFAULT_USER_ID).set_thinking_level("deep")
             client = create_app(provider=provider, store=store).test_client()
             client.post(url, json=payload).get_data(as_text=True)
             self.assertEqual(provider.calls[0]["thinking_level"], "deep")

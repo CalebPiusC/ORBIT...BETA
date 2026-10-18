@@ -32,6 +32,12 @@ class PendingAction:
     tool_name: str
     arguments: dict[str, Any] = field(compare=False)
     summary: str
+    # The account whose conversation proposed this call. Only that account
+    # may approve or decline it — the decide route checks this *before*
+    # anything can run, and answers the same 404 as a spent/unknown id.
+    # Empty only for proposals made outside a request (unit tests of the
+    # queue itself); the chat route always binds it.
+    account_id: str = ""
 
 
 def summarize(tool_name: str, arguments: dict[str, Any]) -> str:
@@ -73,7 +79,9 @@ class PendingActions:
     def registry(self) -> ToolRegistry:
         return self._registry
 
-    def propose(self, tool_name: str, arguments: Any) -> PendingAction:
+    def propose(
+        self, tool_name: str, arguments: Any, *, account_id: str = ""
+    ) -> PendingAction:
         """Queue one model-proposed call. Raises ProposalRejected, and audits it, if it cannot run."""
         problem = self._registry.validate(tool_name, arguments)
         if problem is not None:
@@ -92,12 +100,21 @@ class PendingActions:
             tool_name=tool_name,
             arguments=safe_arguments,
             summary=summarize(tool_name, safe_arguments),
+            account_id=account_id,
         )
         with self._lock:
             self._pending[action.id] = action
         if self._audit is not None:
             self._audit.record_event("tool_proposed", action_id=action.id, tool_name=tool_name)
         return action
+
+    def owner_of(self, action_id: str) -> str | None:
+        """The account that proposed a still-pending call, or ``None`` when
+        the id is not pending. A peek, not a pop: asking must never consume
+        the proposal, because a refused decision leaves it for its owner."""
+        with self._lock:
+            action = self._pending.get(action_id)
+        return action.account_id if action is not None else None
 
     def decide(self, action_id: str, *, approved: bool) -> ToolOutcome:
         """Resolve one queued call. KeyError if it is not pending (already answered, or unknown)."""

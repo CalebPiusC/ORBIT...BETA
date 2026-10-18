@@ -73,10 +73,19 @@ from app.projects import (
     SOURCE_LABELS,
     STATUS_LABELS,
     STATUSES,
+    AccountProjects,
     ProjectStore,
 )
 from app.starters import PROJECT_STARTERS, WELCOME_STARTERS
-from app.store import PLACEHOLDER_TITLE, ActionCard, Activity, Store, now_label
+from app.store import (
+    DEFAULT_USER_ID,
+    PLACEHOLDER_TITLE,
+    AccountView,
+    ActionCard,
+    Activity,
+    Store,
+    now_label,
+)
 from app.summaries import request_summary
 from app.taskplan import (
     FAILED,
@@ -296,6 +305,48 @@ def _history_from_thread(
     return history
 
 
+# ----- route ownership registry --------------------------------------------
+# Every route that takes an id naming a stored record must either perform an
+# ownership check (marked with @ownership_checked, answering 404 — never
+# 403 — for another account's record) or appear here with the reason no
+# ownership check applies. tests/test_account_ownership.py walks
+# app.url_map and fails on any id-taking route in neither set, so adding a
+# route forces the decision to be made explicitly.
+OWNERSHIP_EXEMPTIONS: dict[str, str] = {
+    "static": (
+        "Flask's static-file route; the filename is an asset path, not a "
+        "stored record."
+    ),
+    "select_agent": (
+        "agent_id names a catalog AgentType (app/agents.py), validated by "
+        "get_agent -> 404. The selection itself is stored per account."
+    ),
+    "api_heartbeat_dismiss": (
+        "notice_id belongs to the heartbeat service, which is "
+        "process-global and keeps no per-account records."
+    ),
+    "auth_oauth": (
+        "provider names a sign-in provider catalog entry, validated "
+        "against OAUTH_DEFAULTS -> 404."
+    ),
+}
+
+
+def ownership_checked(*params: str):
+    """Mark a view function as ownership-checking the named id params.
+
+    The checks themselves live in the views (scoped store views plus the
+    ``_owned_*_or_404`` helpers); this marker is what the url_map guard
+    test enumerates. The function is returned unwrapped.
+    """
+
+    def mark(func):
+        func.__ownership_params__ = params  # type: ignore[attr-defined]
+        return func
+
+    return mark
+
+
 def create_app(
     provider: Any | None = None,
     store: Store | None = None,
@@ -482,6 +533,56 @@ def create_app(
         account: dict[str, Any] | None = getattr(g, "account", None)
         return account
 
+    def _current_account_id() -> str:
+        """The account every store read/write in this request is scoped to.
+
+        The signed-in account when accounts are on; otherwise the seeded
+        legacy account (``DEFAULT_USER_ID``) — what the single-user app
+        always used, now resolved per request instead of baked into the
+        store's method defaults.
+        """
+        account = _signed_in_account()
+        if account is not None:
+            return str(account.get("id") or DEFAULT_USER_ID)
+        return DEFAULT_USER_ID
+
+    def _scoped_store() -> AccountView:
+        return app.config["STORE"].for_account(_current_account_id())
+
+    def _scoped_projects() -> AccountProjects:
+        return app.config["PROJECTS"].for_account(_current_account_id())
+
+    # Ownership helpers. Another account's record answers 404 with exactly
+    # the unknown-id body/template — never 403, which would confirm the
+    # record exists. Each returns (record, None) or (None, 404-response).
+    def _owned_project_or_404(project_id: str, *, template: bool = False):
+        project = _scoped_projects().get(project_id)
+        if project is not None:
+            return project, None
+        if template:
+            return None, (
+                render_template("project_not_found.html", project_id=project_id),
+                404,
+            )
+        return None, _json({"error": "unknown project"}, 404)
+
+    def _owned_task_or_404(task_id: str, *, template: bool = False):
+        task_obj = _scoped_store().get_task(task_id)
+        if task_obj is not None:
+            return task_obj, None
+        if template:
+            return None, (
+                render_template("task_not_found.html", task_id=task_id),
+                404,
+            )
+        return None, _json({"error": "unknown task"}, 404)
+
+    def _owned_message_or_404(message_id: str):
+        found = _scoped_store().find_message(message_id)
+        if found is not None:
+            return found, None
+        return None, _json({"error": "no message with that id"}, 404)
+
     @app.before_request
     def _account_guard() -> Response | None:
         store = _accounts()
@@ -538,9 +639,9 @@ def create_app(
         session["sid"] = sid
         g.account = store.by_id(account["id"]) or account
         depth = ((g.account or {}).get("prefs") or {}).get("default_depth", "quick")
-        st: Store = app.config["STORE"]
-        if depth != st.thinking_level:
-            st.set_thinking_level(depth)
+        view = app.config["STORE"].for_account(account["id"])
+        if depth != view.thinking_level:
+            view.set_thinking_level(depth)
 
     def _sign_out() -> None:
         store = _accounts()
@@ -567,7 +668,7 @@ def create_app(
 
     @app.get("/")
     def home() -> str:
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         if _accounts() is not None and _signed_in_account() is None:
             # The product's front door: signed-out visits get the landing page;
             # the chat home belongs to signed-in sessions.
@@ -609,8 +710,8 @@ def create_app(
         store), plus the signed-in account and whether this launch has
         accounts at all — chrome (feedback widget, settings links) keys off
         those two. A page can override any value explicitly."""
-        st: Store | None = app.config.get("STORE")
-        project_store: ProjectStore | None = app.config.get("PROJECTS")
+        raw_store = app.config.get("STORE")
+        raw_projects = app.config.get("PROJECTS")
         account = _signed_in_account()
         prefs = (account or {}).get("prefs") or {}
         base: dict[str, Any] = {
@@ -618,9 +719,9 @@ def create_app(
             "accounts_enabled": _accounts() is not None,
             "beta_updates_off": bool(account) and not prefs.get("beta_updates", True),
         }
-        if st is None or project_store is None:
+        if raw_store is None or raw_projects is None:
             return {**base, "sidebar_projects": [], "active_project_id": ""}
-        recent = project_store.list_for(st.user.id)[:3]
+        recent = raw_projects.for_account(_current_account_id()).list()[:3]
         return {
             **base,
             "sidebar_projects": [{"id": p.id, "name": p.name} for p in recent],
@@ -629,7 +730,7 @@ def create_app(
 
     def _sidebar_context() -> dict[str, Any]:
         """What every page that renders the shared sidebar needs."""
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         return {
             "user": _user_view(),
             "mode": st.mode,
@@ -649,7 +750,7 @@ def create_app(
         except (TypeError, ValueError):
             return ""
 
-    def _project_card_view(project: Any, st: Store) -> dict[str, Any]:
+    def _project_card_view(project: Any, st: AccountView) -> dict[str, Any]:
         """One Projects-overview card, per the design frames.
 
         The description line is the AI summary when the Main Agent has written
@@ -659,7 +760,7 @@ def create_app(
         project last changed.
         """
         card = project.card()
-        tasks = st.tasks_for_project(project.id, st.user.id)
+        tasks = st.tasks_for_project(project.id)
         done, total = progress(tasks)
         newest = latest_task(tasks)
         card["task_title"] = newest.title if newest is not None else ""
@@ -679,8 +780,8 @@ def create_app(
 
     @app.get("/projects")
     def projects_page() -> str:
-        st: Store = app.config["STORE"]
-        project_store: ProjectStore = app.config["PROJECTS"]
+        st = _scoped_store()
+        project_store = _scoped_projects()
         query = request.args.get("q", "").strip()
         status = request.args.get("status", "").strip() or None
         sort = request.args.get("sort", "").strip() or "recent"
@@ -690,10 +791,10 @@ def create_app(
             # A status the filter cannot have produced is ignored, not honoured
             # with an empty grid that looks like lost data.
             status = None
-        cards = project_store.list_for(st.user.id, query=query, status=status)
+        cards = project_store.list(query=query, status=status)
         if sort == "name":
             cards = sorted(cards, key=lambda p: p.name.lower())
-        counts = project_store.counts_for(st.user.id)
+        counts = project_store.counts()
         total = sum(counts.values())
         notice_raw = request.args.get("notice", "").strip()
         notice = None
@@ -729,21 +830,21 @@ def create_app(
         disabled because no repository provider is connected and file import
         is not built — the row says so instead of silently failing later.
         """
-        st: Store = app.config["STORE"]
-        project_store: ProjectStore = app.config["PROJECTS"]
+        st = _scoped_store()
+        project_store = _scoped_projects()
         notice = None
         if request.args.get("notice", "").strip() == "invalid":
             notice = (
                 "A project needs a name (80 characters or fewer). "
                 "The description is optional, up to 600 characters."
             )
-        projects = project_store.list_for(st.user.id)
+        projects = project_store.list()
         latest = projects[0] if projects else None
         # The continue strip: the project you touched last, its newest task,
         # and when it changed. Rendered only when there is a project at all.
         continue_strip = None
         if latest is not None:
-            newest = latest_task(st.tasks_for_project(latest.id, st.user.id))
+            newest = latest_task(st.tasks_for_project(latest.id))
             continue_strip = {
                 "id": latest.id,
                 "name": latest.name,
@@ -762,8 +863,8 @@ def create_app(
 
     @app.post("/projects")
     def create_project() -> Response:
-        st: Store = app.config["STORE"]
-        project_store: ProjectStore = app.config["PROJECTS"]
+        st = _scoped_store()
+        project_store = _scoped_projects()
         # Only the idea path creates anything today: source is always "new",
         # because every import entry point renders disabled on purpose. The
         # four modes are the project's entry story, not different storage:
@@ -774,7 +875,6 @@ def create_app(
         mode = (request.form.get("mode") or "blank").strip()
         try:
             project = project_store.create(
-                user_id=st.user.id,
                 name=request.form.get("name", ""),
                 description=request.form.get("description", ""),
                 source="new",
@@ -808,8 +908,8 @@ def create_app(
 
     @app.get("/agents")
     def agents_page() -> str:
-        st: Store = app.config["STORE"]
-        project_store: ProjectStore = app.config["PROJECTS"]
+        st = _scoped_store()
+        project_store = _scoped_projects()
         query = request.args.get("q", "").strip()
         selected = None
         if st.selected_agent:
@@ -819,7 +919,7 @@ def create_app(
                 # A selection pointing nowhere clears itself rather than
                 # showing a bar that names a specialty that does not exist.
                 st.selected_agent = None
-        assign_targets = [{"id": p.id, "name": p.name} for p in project_store.list_for(st.user.id)]
+        assign_targets = [{"id": p.id, "name": p.name} for p in project_store.list()]
         return render_template(
             "agents.html",
             agents=search_agents(query),
@@ -835,7 +935,7 @@ def create_app(
     @app.post("/agents/<agent_id>/select")
     def select_agent(agent_id: str) -> Response:
         """Mark a specialty as picked — the selection bar follows."""
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         try:
             get_agent(agent_id)
         except KeyError:
@@ -846,23 +946,24 @@ def create_app(
 
     @app.post("/agents/deselect")
     def deselect_agent() -> Response:
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         st.selected_agent = None
         return redirect(url_for("agents_page"), code=303)
 
     @app.post("/agents/<agent_id>/assign")
+    @ownership_checked("agent_id (catalog)", "project_id (form)")
     def assign_agent(agent_id: str) -> Response:
         """Assign the selected specialty to a project: the conversation is
         created and the workspace opens with that specialist's panel."""
-        st: Store = app.config["STORE"]
-        project_store: ProjectStore = app.config["PROJECTS"]
+        st = _scoped_store()
         try:
             agent = get_agent(agent_id)
         except KeyError:
             return _json({"error": f"unknown agent type: {agent_id!r}"}, 404)
         project_id = (request.form.get("project_id") or "").strip()
-        if project_store.get_for(project_id, st.user.id) is None:
-            return _json({"error": "unknown project"}, 404)
+        _, not_owned = _owned_project_or_404(project_id)
+        if not_owned is not None:
+            return not_owned
         st.project_conversation(project_id, create=True, agent_id=agent.id)
         st.selected_agent = None
         _record_event(
@@ -876,23 +977,18 @@ def create_app(
     # ----- the project workspace (map + task details + Main Agent) -----
 
     @app.get("/projects/<project_id>")
+    @ownership_checked("project_id", "task (query)")
     def project_workspace(project_id: str) -> str:
-        st: Store = app.config["STORE"]
-        project_store: ProjectStore = app.config["PROJECTS"]
-        project = project_store.get_for(project_id, st.user.id)
-        if project is None:
-            return (
-                render_template("project_not_found.html", project_id=project_id),
-                404,
-            )
-        tasks = st.tasks_for_project(project_id, st.user.id)
+        st = _scoped_store()
+        project, not_owned = _owned_project_or_404(project_id, template=True)
+        if not_owned is not None:
+            return not_owned
+        tasks = st.tasks_for_project(project_id)
         # Task Details belongs to a task of THIS project; an id that is not
         # one is ignored rather than shown (the map may only open its own).
         selected_id = request.args.get("task", "").strip()
         selected = st.get_task(selected_id) if selected_id else None
-        if selected is not None and (
-            selected.project_id != project_id or selected.user_id != st.user.id
-        ):
+        if selected is not None and selected.project_id != project_id:
             selected = None
         panel = _panel_state(selected) if selected is not None else None
         # Which agent's conversation the rail shows. "main" by default; a
@@ -913,7 +1009,7 @@ def create_app(
         # conversation whose specialty no longer exists simply drops out.
         rail_agents: list[dict[str, str]] = []
         seen: set[str] = set()
-        for conv in st.project_conversations(project_id, st.user.id):
+        for conv in st.project_conversations(project_id):
             cid = conv.agent_id or MAIN_AGENT_ID
             if cid in seen:
                 continue
@@ -977,15 +1073,15 @@ def create_app(
         )
 
     @app.post("/projects/<project_id>/status")
+    @ownership_checked("project_id")
     def project_set_status(project_id: str) -> Response:
-        st: Store = app.config["STORE"]
-        project_store: ProjectStore = app.config["PROJECTS"]
-        project = project_store.get_for(project_id, st.user.id)
-        if project is None:
-            return _json({"error": "unknown project"}, 404)
+        project_store = _scoped_projects()
+        project, not_owned = _owned_project_or_404(project_id)
+        if not_owned is not None:
+            return not_owned
         status = (request.form.get("status") or "").strip()
         try:
-            updated = project_store.set_status(project_id, st.user.id, status)
+            updated = project_store.set_status(project_id, status)
         except ValueError:
             return _json({"error": f"unknown status: {status!r}"}, 400)
         if updated is not None and updated.status != project.status:
@@ -998,11 +1094,12 @@ def create_app(
         return redirect(url_for("project_workspace", project_id=project_id), code=303)
 
     @app.post("/projects/<project_id>/tasks")
+    @ownership_checked("project_id", "builds_on (form)")
     def project_new_task(project_id: str) -> Response:
-        st: Store = app.config["STORE"]
-        project_store: ProjectStore = app.config["PROJECTS"]
-        if project_store.get_for(project_id, st.user.id) is None:
-            return _json({"error": "unknown project"}, 404)
+        st = _scoped_store()
+        _, not_owned = _owned_project_or_404(project_id)
+        if not_owned is not None:
+            return not_owned
         builds_on = (request.form.get("builds_on") or "").strip() or None
         try:
             task = st.create_task(
@@ -1025,14 +1122,18 @@ def create_app(
         )
 
     @app.post("/projects/<project_id>/tasks/<task_id>/complete")
+    @ownership_checked("project_id", "task_id")
     def project_task_complete(project_id: str, task_id: str) -> Response:
         """Toggle completion on a map task. The person's assertion, audited."""
-        st: Store = app.config["STORE"]
-        project_store: ProjectStore = app.config["PROJECTS"]
-        if project_store.get_for(project_id, st.user.id) is None:
-            return _json({"error": "unknown project"}, 404)
-        task = st.get_task(task_id)
-        if task is None or task.project_id != project_id or task.user_id != st.user.id:
+        st = _scoped_store()
+        _, not_owned = _owned_project_or_404(project_id)
+        if not_owned is not None:
+            return not_owned
+        task, not_owned = _owned_task_or_404(task_id)
+        if not_owned is not None:
+            return not_owned
+        assert task is not None
+        if task.project_id != project_id:
             return _json({"error": "unknown task"}, 404)
         updated = st.set_done(task_id, done=not task.done)
         assert updated is not None
@@ -1058,6 +1159,7 @@ def create_app(
         return "Main Agent" if agent_id == MAIN_AGENT_ID else get_agent(agent_id).name
 
     @app.post("/api/project/<project_id>/stream")
+    @ownership_checked("project_id", "task_id (body)")
     def api_project_stream(project_id: str) -> Response:
         """A project conversation, streamed: the Main Agent or an assigned specialty.
 
@@ -1069,11 +1171,11 @@ def create_app(
         the home chat is where the six gated tools live, and a project
         conversation is not where a note/heartbeat card belongs.
         """
-        st: Store = app.config["STORE"]
-        project_store: ProjectStore = app.config["PROJECTS"]
-        project = project_store.get_for(project_id, st.user.id)
-        if project is None:
-            return _json({"error": "unknown project"}, 404)
+        st = _scoped_store()
+        project_store = _scoped_projects()
+        project, not_owned = _owned_project_or_404(project_id)
+        if not_owned is not None:
+            return not_owned
         payload = request.get_json(silent=True) or {}
         message = payload.get("message")
         message = message.strip() if isinstance(message, str) else ""
@@ -1087,8 +1189,9 @@ def create_app(
             except KeyError:
                 return _json({"error": f"unknown agent type: {agent_id!r}"}, 404)
         # Optional task pin: the subject of the discussion. A task of another
-        # project is refused — the "Now discussing" strip may never name work
-        # the map cannot show.
+        # project — or of another account, which the scoped get already
+        # hides — is refused with the same body: the "Now discussing" strip
+        # may never name work this account's map cannot show.
         pinned_id = (payload.get("task_id") or "").strip()
         pinned = st.get_task(pinned_id) if pinned_id else None
         if pinned_id and (pinned is None or pinned.project_id != project_id):
@@ -1110,11 +1213,11 @@ def create_app(
             surface="project",
             project_id=project_id,
             agent_id=agent_id,
-            message_id=st.threads[conv_id][-1].id,
+            message_id=st.thread(conv_id)[-1].id,
             chars=len(message),
         )
-        history = _history_from_thread(st.threads[conv_id])
-        tasks = st.tasks_for_project(project_id, st.user.id)
+        history = _history_from_thread(st.thread(conv_id))
+        tasks = st.tasks_for_project(project_id)
         task_block = ""
         if pinned is not None:
             pin_lines = [
@@ -1145,7 +1248,7 @@ def create_app(
         # ones; the workspace does not fork them.
         think = st.mode == "agent"
         thinking_level = st.thinking_level
-        first_exchange = not any(m.is_orbit for m in st.threads[conv_id])
+        first_exchange = not any(m.is_orbit for m in st.thread(conv_id))
 
         def chunk_source() -> Iterator[StreamChunk]:
             return get_provider().reply_stream(
@@ -1180,7 +1283,7 @@ def create_app(
                         answer,
                     )
                     if summary:
-                        project_store.set_summary(project_id, st.user.id, summary)
+                        project_store.set_summary(project_id, summary)
                         _record_event(
                             "project_summary_written",
                             project_id=project_id,
@@ -1191,7 +1294,7 @@ def create_app(
         def after_done(answer: str) -> list[tuple[str, str]] | None:
             if not answer.strip():
                 return None
-            chips = followups_for(st.threads.get(conv_id, []))
+            chips = followups_for(st.thread(conv_id))
             if not chips:
                 return None
             return [("followups", json.dumps([chip.as_dict() for chip in chips]))]
@@ -1203,11 +1306,13 @@ def create_app(
         )
 
     @app.get("/task/<task_id>")
+    @ownership_checked("task_id")
     def task(task_id: str) -> str:
-        st: Store = app.config["STORE"]
-        task_obj = st.get_task(task_id)
-        if task_obj is None:
-            return render_template("task_not_found.html", task_id=task_id), 404
+        st = _scoped_store()
+        task_obj, not_owned = _owned_task_or_404(task_id, template=True)
+        if not_owned is not None:
+            return not_owned
+        assert task_obj is not None
         # The opening update is a real model call. Re-asking for it on every
         # page load would spend a call per refresh and append a duplicate
         # message to the thread, so it runs only while the task has no Orbit
@@ -1236,7 +1341,7 @@ def create_app(
     @app.post("/api/tasks")
     def api_new_task() -> Response:
         """Create an Agent task from a request the person typed."""
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         payload = request.get_json(silent=True) or {}
         request_text = payload.get("request")
         request_text = request_text.strip() if isinstance(request_text, str) else ""
@@ -1247,7 +1352,7 @@ def create_app(
 
     @app.post("/api/mode")
     def set_mode() -> Response:
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         payload = request.get_json(silent=True) or {}
         mode = payload.get("mode")
         try:
@@ -1258,7 +1363,7 @@ def create_app(
 
     @app.post("/api/thinking-level")
     def set_thinking_level() -> Response:
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         payload = request.get_json(silent=True) or {}
         try:
             st.set_thinking_level(payload.get("thinking_level"))
@@ -1380,13 +1485,14 @@ def create_app(
 
     @app.post("/api/conversations/new")
     def api_new_conversation() -> Response:
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         st.new_conversation()
         return Response(json.dumps({"active_conversation_id": None}), mimetype="application/json")
 
     @app.post("/api/chat")
+    @ownership_checked("message_id (body)")
     def api_chat() -> Response:
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         payload = request.get_json(silent=True) or {}
         regenerate = payload.get("regenerate") is True
         message = payload.get("message")
@@ -1401,7 +1507,7 @@ def create_app(
         in_place_message: Any | None = None
         if regenerate:
             conv_id = st.active_conversation_id
-            thread = st.threads.get(conv_id or "", [])
+            thread = st.thread(conv_id or "")
             requested_id = payload.get("message_id")
             requested_id = requested_id.strip() if isinstance(requested_id, str) else ""
             if requested_id:
@@ -1472,7 +1578,7 @@ def create_app(
                 "chat_message_received",
                 conversation_id=conv_id,
                 surface="home",
-                message_id=st.threads[conv_id][-1].id if st.threads.get(conv_id) else None,
+                message_id=st.thread(conv_id)[-1].id if st.thread(conv_id) else None,
                 chars=len(message),
             )
             # Heartbeat's check-in: a user message counts, a retry does not.
@@ -1488,11 +1594,11 @@ def create_app(
         # new answer is not influenced by what followed it on screen.
         if in_place_message is not None:
             regenerated_index = next(
-                i for i, item in enumerate(st.threads[conv_id]) if item is in_place_message
+                i for i, item in enumerate(st.thread(conv_id)) if item is in_place_message
             )
-            history = _history_from_thread(st.threads[conv_id][:regenerated_index])
+            history = _history_from_thread(st.thread(conv_id)[:regenerated_index])
         else:
-            history = _history_from_thread(st.threads[conv_id])
+            history = _history_from_thread(st.thread(conv_id))
 
         # Tools are offered in Chat mode only, and only when a queue is attached.
         queue: PendingActions | None = app.config["ACTIONS"]
@@ -1540,7 +1646,9 @@ def create_app(
             """Queue the call for approval. Nothing runs here."""
             assert queue is not None
             try:
-                action = queue.propose(proposal.name, dict(proposal.arguments))
+                action = queue.propose(
+                    proposal.name, dict(proposal.arguments), account_id=st.account_id
+                )
             except ProposalRejected as exc:
                 return "notice", str(exc)
             card = ActionCard(id=action.id, summary=action.summary)
@@ -1640,14 +1748,21 @@ def create_app(
         return _json({"status": result["status"], "fired": [n["id"] for n in result["fired"]]})
 
     @app.post("/api/actions/<action_id>/<decision>")
+    @ownership_checked("action_id")
     def api_action_decide(action_id: str, decision: str) -> Response:
         """Approve or decline one proposed tool call. Both outcomes are audited by the registry."""
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         queue: PendingActions | None = app.config["ACTIONS"]
         if queue is None:
             return _json({"error": "tools are not enabled"}, 503)
         if decision not in ("approve", "decline"):
             return _json({"error": "decision must be approve or decline"}, 404)
+        # Ownership before execution: only the account whose conversation
+        # proposed the call may decide it. A foreign id answers like a spent
+        # one and is NOT consumed — the proposal stays its owner's to decide.
+        owner = queue.owner_of(action_id)
+        if owner and owner != st.account_id:
+            return _json({"error": "This request is no longer pending. Nothing ran."}, 404)
         try:
             outcome = queue.decide(action_id, approved=decision == "approve")
         except KeyError:
@@ -1661,6 +1776,7 @@ def create_app(
         return _json({"state": state, "result": text})
 
     @app.post("/api/messages/<message_id>/rating")
+    @ownership_checked("message_id")
     def api_message_rating(message_id: str) -> Response:
         """Record one thumbs up/down against one message. No form, no follow-up.
 
@@ -1668,14 +1784,15 @@ def create_app(
         the log's own timestamp. The client does not re-send the rating that is
         already showing, so switching from up to down leaves one line for each.
         """
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         payload = request.get_json(silent=True) or {}
         rating = payload.get("rating")
         if rating not in RATING_LABELS:
             return _json({"error": "rating must be 'up' or 'down'"}, 400)
-        found = st.find_message(message_id)
-        if found is None:
-            return _json({"error": "no message with that id"}, 404)
+        found, not_owned = _owned_message_or_404(message_id)
+        if not_owned is not None:
+            return not_owned
+        assert found is not None
         owner_id, message = found
         _record_event(
             "message_rated",
@@ -1692,7 +1809,7 @@ def create_app(
     @app.get("/analytics")
     def analytics() -> str:
         """The Analytics view: audit.log read back, nothing tracked separately."""
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         audit: AuditLog | None = app.config["MODEL_AUDIT"]
         # The same file the rest of the app logs to, so the view cannot drift
         # onto a different path from the records it counts.
@@ -1713,11 +1830,13 @@ def create_app(
         )
 
     @app.post("/api/task/<task_id>/stream")
+    @ownership_checked("task_id")
     def api_task_stream(task_id: str) -> Response:
-        st: Store = app.config["STORE"]
-        task_obj = st.get_task(task_id)
-        if task_obj is None:
-            return Response(json.dumps({"error": "unknown task"}), status=404, mimetype="application/json")
+        st = _scoped_store()
+        task_obj, not_owned = _owned_task_or_404(task_id)
+        if not_owned is not None:
+            return not_owned
+        assert task_obj is not None
 
         payload = request.get_json(silent=True) or {}
         message = payload.get("message")
@@ -1893,10 +2012,13 @@ def create_app(
         )
 
     @app.post("/api/task/<task_id>/approve")
+    @ownership_checked("task_id")
     def api_approve(task_id: str) -> Response:
-        st: Store = app.config["STORE"]
-        if st.get_task(task_id) is None:
-            return Response(json.dumps({"error": "unknown task"}), status=404, mimetype="application/json")
+        st = _scoped_store()
+        task_obj, not_owned = _owned_task_or_404(task_id)
+        if not_owned is not None:
+            return not_owned
+        assert task_obj is not None
         payload = request.get_json(silent=True) or {}
         # The gate is explicit: anything other than a literal true is rejected.
         if payload.get("approve") is not True:
@@ -1906,16 +2028,16 @@ def create_app(
                 mimetype="application/json",
             )
         st.approve_task(task_id)
-        task_obj = st.get_task(task_id)
-        assert task_obj is not None
         task_obj.activity.insert(0, Activity(text="You approved the proposed changes.", time="just now"))
         return Response(json.dumps({"approved": True}), mimetype="application/json")
 
     @app.post("/api/task/<task_id>/apply")
+    @ownership_checked("task_id")
     def api_apply(task_id: str) -> Response:
-        st: Store = app.config["STORE"]
-        if st.get_task(task_id) is None:
-            return Response(json.dumps({"error": "unknown task"}), status=404, mimetype="application/json")
+        st = _scoped_store()
+        _, not_owned = _owned_task_or_404(task_id)
+        if not_owned is not None:
+            return not_owned
         try:
             st.apply_changes(task_id)
         except RuntimeError as exc:
@@ -2357,11 +2479,11 @@ def create_app(
         * returning — the account has been here before: the greeting and the
           jump-back-in strip switch to resuming rather than introducing.
         """
-        st: Store = app.config["STORE"]
-        project_store: ProjectStore = app.config["PROJECTS"]
+        st = _scoped_store()
+        project_store = _scoped_projects()
         store = _accounts()
         account = _signed_in_account()
-        projects = project_store.list_for(st.user.id)
+        projects = project_store.list()
         if account is not None and store is not None:
             onboarding = account.get("onboarding") or {}
             returning = bool(onboarding.get("visited_dashboard_at"))
@@ -2384,7 +2506,7 @@ def create_app(
         latest_proj = projects[0] if projects else None
         continue_strip = None
         if latest_proj is not None:
-            newest = latest_task(st.tasks_for_project(latest_proj.id, st.user.id))
+            newest = latest_task(st.tasks_for_project(latest_proj.id))
             continue_strip = {
                 "id": latest_proj.id,
                 "name": latest_proj.name,
@@ -2525,7 +2647,7 @@ def create_app(
         )
         depth = request.form.get("default_depth", "quick")
         store.set_pref(account["id"], "default_depth", depth)
-        st: Store = app.config["STORE"]
+        st = _scoped_store()
         if depth in ("quick", "deep") and depth != st.thinking_level:
             st.set_thinking_level(depth)
         return _settings_redirect(saved="preferences", tab="preferences")

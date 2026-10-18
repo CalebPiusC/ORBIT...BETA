@@ -29,7 +29,7 @@ from providers.base import StreamChunk
 from app.projectmap import UNSTAGED, latest_task, map_stages, next_up, progress, row_state
 from app.projects import ProjectStore
 from app.server import create_app
-from app.store import Store
+from app.store import DEFAULT_USER_ID, Store
 from app.summaries import clean_summary, request_summary
 from app.taskplan import IDLE, FAILED, new_run
 from tools.registry import AuditLog
@@ -82,6 +82,7 @@ class WorkspaceFixture(unittest.TestCase):
         self.audit_path = Path(self.tmp.name) / "audit.log"
         self.projects = ProjectStore(Path(self.tmp.name) / "projects.json")
         self.store = Store()
+        self.view = self.store.for_account(DEFAULT_USER_ID)
         self.provider = ProjectProvider()
         self.app = create_app(
             provider=self.provider,
@@ -110,7 +111,7 @@ class WorkspaceFixture(unittest.TestCase):
 
 class ProjectMapTests(unittest.TestCase):
     def test_row_state_is_derived_and_completion_is_the_persons(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         task = store.create_task("Fix login", project_id="p1")
         self.assertEqual(row_state(task), ("planned", "Planned"))
         task.run = new_run(task.description)  # planned, status RUNNING
@@ -128,7 +129,7 @@ class ProjectMapTests(unittest.TestCase):
         self.assertIsNone(store.set_done("t-nope", True))
 
     def test_stages_group_in_filed_order_with_real_counts(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         a = store.create_task("Fix the crash", project_id="p1", stage="Foundation")
         b = store.create_task("Shape search", project_id="p1", stage="Foundation")
         c = store.create_task("Sort by recent", project_id="p1")  # no stage filed
@@ -149,7 +150,7 @@ class ProjectMapTests(unittest.TestCase):
         self.assertEqual(map_stages([]), [])
 
     def test_next_up_is_within_the_same_stage_and_skips_completion(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         a = store.create_task("One", project_id="p1", stage="S")
         b = store.create_task("Two", project_id="p1", stage="S")
         c = store.create_task("Three", project_id="p1", stage="S")
@@ -165,18 +166,19 @@ class ProjectMapTests(unittest.TestCase):
 
 class ProjectConversationTests(unittest.TestCase):
     def test_find_or_create_is_once_and_scoped(self) -> None:
-        store = Store()
+        raw = Store()
+        store = raw.for_account(DEFAULT_USER_ID)
         self.assertIsNone(store.project_conversation("p-1"))  # GET creates nothing
         conv = store.project_conversation("p-1", create=True)
         again = store.project_conversation("p-1", create=True)
         self.assertIs(conv, again)
         self.assertTrue(conv.titled)  # no naming call for workspace threads
-        self.assertIsNone(store.project_conversation("p-1", user_id="someone-else"))
+        self.assertIsNone(raw.for_account("someone-else").project_conversation("p-1"))
         # project threads never pollute the home history
         self.assertNotIn(conv, store.conversations_for())
 
     def test_project_thread_empty_without_conversation(self) -> None:
-        self.assertEqual(Store().project_thread("p-x"), [])
+        self.assertEqual(Store().for_account(DEFAULT_USER_ID).project_thread("p-x"), [])
 
 
 class SummaryTests(unittest.TestCase):
@@ -209,14 +211,14 @@ class AgentConversationTests(WorkspaceFixture):
             "/agents/code-review/select".replace("code-review", "review")
         )
         self.assertEqual(resp.status_code, 303)
-        self.assertEqual(self.store.selected_agent, "review")
+        self.assertEqual(self.view.selected_agent, "review")
         resp = self.client.post(
             "/agents/review/assign", data={"project_id": self.project.id}
         )
         self.assertEqual(resp.status_code, 303)
         self.assertIn("agent=review", resp.headers["Location"])
-        self.assertIsNone(self.store.selected_agent)  # consumed by the assignment
-        conv = self.store.project_conversation(self.project.id, agent_id="review")
+        self.assertIsNone(self.view.selected_agent)  # consumed by the assignment
+        conv = self.view.project_conversation(self.project.id, agent_id="review")
         self.assertIsNotNone(conv)
         events = [e for e in self.audit_events() if e.get("event") == "agent_specialist_assigned"]
         self.assertEqual(len(events), 1)
@@ -236,14 +238,14 @@ class AgentConversationTests(WorkspaceFixture):
         self.assertIn("Review specialist", self.provider.calls[-1]["prompt"])
         self.assertIn("PROJECT YOU ARE ASSIGNED TO", self.provider.calls[-1]["prompt"])
         self.assertNotIn("Main Agent", self.provider.calls[-1]["prompt"])
-        main = self.store.project_conversation(self.project.id, agent_id="main")
+        main = self.view.project_conversation(self.project.id, agent_id="main")
         self.assertIsNone(main)  # an untouched conversation is not created
-        review = self.store.project_conversation(self.project.id, agent_id="review")
+        review = self.view.project_conversation(self.project.id, agent_id="review")
         thread = self.store.threads[review.id]
         self.assertEqual(thread[-1].speaker, "Review")
 
     def test_task_pin_joins_real_state_to_the_prompt(self) -> None:
-        task = self.store.create_task(
+        task = self.view.create_task(
             "Pin this discussion", project_id=self.project.id, stage="Foundation"
         )
         task.run = new_run(task.description)
@@ -258,7 +260,7 @@ class AgentConversationTests(WorkspaceFixture):
         self.assertIn("Pin this discussion", prompt)
         self.assertIn("[ ]", prompt)  # the real, unchecked plan steps
         # a pin that belongs to another project is refused
-        other_store_task = self.store.create_task("Elsewhere")
+        other_store_task = self.view.create_task("Elsewhere")
         resp = self.client.post(
             f"/api/project/{self.project.id}/stream",
             json={"message": "hi", "task_id": other_store_task.id},
@@ -270,7 +272,7 @@ class AgentConversationTests(WorkspaceFixture):
             f"/api/project/{self.project.id}/stream", json={"message": "Hi"}
         )
         resp.get_data(as_text=True)
-        conv = self.store.project_conversation(self.project.id, agent_id="main")
+        conv = self.view.project_conversation(self.project.id, agent_id="main")
         self.assertEqual(self.store.threads[conv.id][-1].speaker, "Main Agent")
         # and the rendered rail shows it over the agent bubble
         html = self.client.get(f"/projects/{self.project.id}").get_data(as_text=True)
@@ -291,9 +293,9 @@ class WorkspaceRouteTests(WorkspaceFixture):
         self.assertNotIn("All done", html)
 
     def test_map_renders_stages_rows_and_the_add_task_form(self) -> None:
-        done = self.store.create_task("Set up the project", project_id=self.project.id, stage="Foundation")
-        self.store.set_done(done.id, True)
-        open_ = self.store.create_task("Wire the provider", project_id=self.project.id, stage="Foundation")
+        done = self.view.create_task("Set up the project", project_id=self.project.id, stage="Foundation")
+        self.view.set_done(done.id, True)
+        open_ = self.view.create_task("Wire the provider", project_id=self.project.id, stage="Foundation")
         html = self.client.get(f"/projects/{self.project.id}").get_data(as_text=True)
         self.assertIn("Foundation", html)
         self.assertIn("1/2 complete", html)
@@ -305,19 +307,19 @@ class WorkspaceRouteTests(WorkspaceFixture):
         self.assertIn('value="' + open_.id + '"', html)
 
     def test_mark_complete_toggles_and_audits(self) -> None:
-        task = self.store.create_task("Ship the map", project_id=self.project.id)
+        task = self.view.create_task("Ship the map", project_id=self.project.id)
         resp = self.client.post(f"/projects/{self.project.id}/tasks/{task.id}/complete")
         self.assertEqual(resp.status_code, 303)
-        self.assertTrue(self.store.get_task(task.id).done)
+        self.assertTrue(self.view.get_task(task.id).done)
         events = [e for e in self.audit_events() if e.get("event") == "task_completion"]
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["state"], "complete")
         self.assertEqual(events[0]["project_id"], self.project.id)
         # reopen uses the same route, same toggle
         self.client.post(f"/projects/{self.project.id}/tasks/{task.id}/complete")
-        self.assertFalse(self.store.get_task(task.id).done)
+        self.assertFalse(self.view.get_task(task.id).done)
         # a task of another project cannot be toggled through this one
-        other = self.store.create_task("Not yours", project_id=None)
+        other = self.view.create_task("Not yours", project_id=None)
         resp = self.client.post(f"/projects/{self.project.id}/tasks/{other.id}/complete")
         self.assertEqual(resp.status_code, 404)
 
@@ -354,14 +356,14 @@ class WorkspaceRouteTests(WorkspaceFixture):
             data={"request": "Fix the crash in checkout.py"},
         )
         self.assertEqual(resp.status_code, 303)
-        task = self.store.tasks_for_project(self.project.id)[0]
+        task = self.view.tasks_for_project(self.project.id)[0]
         self.assertEqual(task.project_id, self.project.id)
         html = self.client.get(f"/projects/{self.project.id}").get_data(as_text=True)
         self.assertIn("Fix the crash in checkout.py", html)
 
     def test_details_only_open_for_this_projects_task(self) -> None:
-        own = self.store.create_task("Own task", project_id=self.project.id)
-        other = self.store.create_task("Someone else's task")  # no project
+        own = self.view.create_task("Own task", project_id=self.project.id)
+        other = self.view.create_task("Someone else's task")  # no project
         html = self.client.get(f"/projects/{self.project.id}?task={own.id}").get_data(as_text=True)
         self.assertIn("Requirements", html)
         self.assertIn("Own task", html)
@@ -372,8 +374,8 @@ class WorkspaceRouteTests(WorkspaceFixture):
         self.assertNotIn("Requirements", html)
 
     def test_details_render_links_and_run_state(self) -> None:
-        a = self.store.create_task("Foundation task", project_id=self.project.id, stage="Foundation")
-        b = self.store.create_task(
+        a = self.view.create_task("Foundation task", project_id=self.project.id, stage="Foundation")
+        b = self.view.create_task(
             "Follow the orders flow in checkout.py",
             project_id=self.project.id,
             stage="Foundation",
@@ -396,7 +398,7 @@ class WorkspaceRouteTests(WorkspaceFixture):
         self.assertIn("message", kinds)
         self.assertEqual(kinds[-1], "done")
         threads = self.store.threads
-        conv = self.store.project_conversation(self.project.id)
+        conv = self.view.project_conversation(self.project.id)
         self.assertIsNotNone(conv)
         thread = threads[conv.id]
         self.assertEqual(len(thread), 2)
@@ -410,12 +412,12 @@ class WorkspaceRouteTests(WorkspaceFixture):
         self.assertIn("PROJECT CONTEXT", self.provider.calls[0]["prompt"])
 
     def test_stream_agent_mode_narrates(self) -> None:
-        self.store.set_mode("agent")
+        self.view.set_mode("agent")
         events = self.stream("Plan the tasks.")
         kinds = [name for name, _ in events]
         self.assertIn("thinking", kinds)
         self.assertIn("answer", kinds)
-        self.store.set_mode("chat")
+        self.view.set_mode("chat")
 
     def test_stream_requires_message_and_project(self) -> None:
         resp = self.client.post(f"/api/project/{self.project.id}/stream", json={"message": "  "})

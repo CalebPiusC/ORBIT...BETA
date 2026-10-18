@@ -30,7 +30,7 @@ from providers.base import ChatMessage, StreamChunk
 
 from app.analytics import build_analytics
 from app.server import create_app
-from app.store import ChatMessage as StoreChatMessage, Store
+from app.store import DEFAULT_USER_ID, ChatMessage as StoreChatMessage, Store
 from providers.personas import model_persona_map, persona_for_model
 from tools.registry import AuditLog
 
@@ -92,6 +92,7 @@ class ScriptedProvider:
 class AppCase(unittest.TestCase):
     def setUp(self) -> None:
         self.store = Store()
+        self.view = self.store.for_account(DEFAULT_USER_ID)
         self.provider = ScriptedProvider()
         self.temp_dir = tempfile.TemporaryDirectory()
         self.audit_path = Path(self.temp_dir.name) / "audit.log"
@@ -118,14 +119,14 @@ class AppCase(unittest.TestCase):
 
 class MessageIdTests(AppCase):
     def test_stored_messages_get_unique_ids_and_the_row_renders_them(self) -> None:
-        conv = self.store.start_conversation()
-        self.store.append_message(
+        conv = self.view.start_conversation()
+        self.view.append_message(
             conv.id, StoreChatMessage(who="You", time="09:41", body="First question", is_orbit=False)
         )
-        self.store.append_message(
+        self.view.append_message(
             conv.id, StoreChatMessage(who="Orbit", time="09:42", body="First answer", is_orbit=True)
         )
-        ids = [message.id for message in self.store.home_thread]
+        ids = [message.id for message in self.view.home_thread]
         self.assertEqual(len(set(ids)), 2)
         self.assertTrue(all(message_id.startswith("m-") for message_id in ids))
 
@@ -139,14 +140,14 @@ class MessageIdTests(AppCase):
         self.assertIn("message", names)
         # The id line arrives before "done", so a client that saw "done" has it.
         self.assertLess(names.index("message"), names.index("done"))
-        self.assertEqual(self.store.home_thread[-1].id, message_id)
+        self.assertEqual(self.view.home_thread[-1].id, message_id)
 
     def test_task_chat_messages_carry_ids_too(self) -> None:
         events = parse_sse(
             self.client.post("/api/task/T1/stream", json={"initial": True}).get_data(as_text=True)
         )
         stored_id = json.loads([data for name, data in events if name == "message"][-1])["id"]
-        self.assertEqual(self.store.get_task("T1").chat[-1].id, stored_id)
+        self.assertEqual(self.view.get_task("T1").chat[-1].id, stored_id)
 
     def test_find_message_spans_conversations_and_tasks(self) -> None:
         _events, home_id = self.send("Home question")
@@ -155,10 +156,10 @@ class MessageIdTests(AppCase):
         )
         task_id = json.loads([data for name, data in task_events if name == "message"][-1])["id"]
 
-        self.assertEqual(self.store.find_message(home_id)[0], self.store.active_conversation_id)
-        self.assertEqual(self.store.find_message(task_id)[0], "T1")
-        self.assertIsNone(self.store.find_message("m-does-not-exist"))
-        self.assertIsNone(self.store.find_message(""))
+        self.assertEqual(self.view.find_message(home_id)[0], self.view.active_conversation_id)
+        self.assertEqual(self.view.find_message(task_id)[0], "T1")
+        self.assertIsNone(self.view.find_message("m-does-not-exist"))
+        self.assertIsNone(self.view.find_message(""))
 
 
 class RatingTests(AppCase):
@@ -173,7 +174,7 @@ class RatingTests(AppCase):
         self.assertEqual(event["message_id"], message_id)
         self.assertEqual(event["rating"], "up")
         self.assertEqual(event["surface"], "home")
-        self.assertEqual(event["owner_id"], self.store.active_conversation_id)
+        self.assertEqual(event["owner_id"], self.view.active_conversation_id)
         self.assertIn("timestamp", event)
         # A rating is a signal, not a conversation: no message text is recorded.
         self.assertNotIn("Rate me", json.dumps(event))
@@ -217,7 +218,7 @@ class RegenerateTests(AppCase):
     def test_any_reply_can_be_regenerated_in_place_not_only_the_newest(self) -> None:
         _events, first_reply_id = self.send("First question")
         self.send("Second question")
-        before = [(message.who, message.body, message.id) for message in self.store.home_thread]
+        before = [(message.who, message.body, message.id) for message in self.view.home_thread]
 
         response = self.client.post(
             "/api/chat", json={"regenerate": True, "message_id": first_reply_id}
@@ -225,7 +226,7 @@ class RegenerateTests(AppCase):
         self.assertEqual(response.status_code, 200)
         response.get_data(as_text=True)  # drain the stream
 
-        after = [(message.who, message.body, message.id) for message in self.store.home_thread]
+        after = [(message.who, message.body, message.id) for message in self.view.home_thread]
         self.assertEqual(len(after), len(before))
         # The regenerated reply keeps its position and its id; the turns after it
         # are untouched, and no duplicate turn appears.
@@ -262,18 +263,18 @@ class RegenerateTests(AppCase):
 
     def test_the_newest_reply_still_regenerates_without_an_id(self) -> None:
         self.send("First question")
-        before = len(self.store.home_thread)
+        before = len(self.view.home_thread)
 
         response = self.client.post("/api/chat", json={"regenerate": True})
 
         self.assertEqual(response.status_code, 200)
         response.get_data(as_text=True)
-        self.assertEqual(len(self.store.home_thread), before)  # replaced, not appended
-        self.assertEqual(self.store.home_thread[-1].body, "Reply 2")
+        self.assertEqual(len(self.view.home_thread), before)  # replaced, not appended
+        self.assertEqual(self.view.home_thread[-1].body, "Reply 2")
 
     def test_a_user_message_or_unknown_id_is_refused(self) -> None:
         self.send("First question")
-        user_id = self.store.home_thread[0].id
+        user_id = self.view.home_thread[0].id
 
         as_user = self.client.post("/api/chat", json={"regenerate": True, "message_id": user_id})
         as_unknown = self.client.post(
@@ -300,7 +301,7 @@ class RegenerateTests(AppCase):
         )
         first_id = json.loads([data for name, data in events if name == "message"][-1])["id"]
         self.client.post("/api/task/T1/stream", json={"message": "Keep going"}).get_data(as_text=True)
-        before = [(message.who, message.id) for message in self.store.get_task("T1").chat]
+        before = [(message.who, message.id) for message in self.view.get_task("T1").chat]
 
         response = self.client.post(
             "/api/task/T1/stream", json={"regenerate": True, "message_id": first_id}
@@ -308,11 +309,11 @@ class RegenerateTests(AppCase):
         self.assertEqual(response.status_code, 200)
         response.get_data(as_text=True)
 
-        after = [(message.who, message.id) for message in self.store.get_task("T1").chat]
+        after = [(message.who, message.id) for message in self.view.get_task("T1").chat]
         self.assertEqual(after, before)  # replaced in place, nothing appended
         # The reply that carried that id is the one that changed, and the turns
         # after it are untouched.
-        rewritten = next(m for m in self.store.get_task("T1").chat if m.id == first_id)
+        rewritten = next(m for m in self.view.get_task("T1").chat if m.id == first_id)
         self.assertEqual(rewritten.body, f"Reply {self.provider.reply_number}")
         self.assertEqual(after[-1], before[-1])
 
@@ -372,8 +373,9 @@ class AlwaysVisibleActionsTests(unittest.TestCase):
 
     def test_the_four_actions_exist_on_every_orbit_row(self) -> None:
         store = Store()
-        conversation = store.start_conversation()
-        store.append_message(
+        view = store.for_account(DEFAULT_USER_ID)
+        conversation = view.start_conversation()
+        view.append_message(
             conversation.id,
             StoreChatMessage(who="Orbit", time="09:42", body="An answer", is_orbit=True),
         )

@@ -20,7 +20,7 @@ from google.genai import types
 
 from app.actions import PendingActions, ProposalRejected, summarize
 from app.server import create_app
-from app.store import Store
+from app.store import DEFAULT_USER_ID, Store
 from config import HeartbeatSettings
 from heartbeat.schedule import local_time, utc_now
 from heartbeat.service import KIND_PLAN, Heartbeat
@@ -350,7 +350,7 @@ class ChatRouteToolTests(Paths):
             if b"event: done" in seen:
                 break
         # The client has seen "done" and has not read anything after it.
-        cards = [m.action for m in app.config["STORE"].home_thread if m.action is not None]
+        cards = [m.action for m in app.config["STORE"].for_account(DEFAULT_USER_ID).home_thread if m.action is not None]
         response.close()
         self.assertEqual([c.state for c in cards], ["pending"])
 
@@ -412,7 +412,7 @@ class ChatRouteToolTests(Paths):
     def test_agent_mode_offers_no_tools(self) -> None:
         provider = ScriptedProvider([[StreamChunk(kind="answer", text="Plain reply.")]])
         client, app = self.client(provider)
-        app.config["STORE"].set_mode("agent")
+        app.config["STORE"].for_account(DEFAULT_USER_ID).set_mode("agent")
         events = self.chat(client, "Save my plan")
         self.assertFalse(provider.calls[0]["allow_tools"])
         self.assertNotIn("action", [n for n, _ in events])

@@ -2,10 +2,12 @@
 
 These tests pin the behaviour that exists *today*, before any account
 plumbing lands. They are the safety net for step 2 (``Store.for_account``):
-everything here must keep passing with its assertions unchanged, except the
-small ``SharedBucketTodayTests`` class at the bottom, which pins the one
-behaviour step 2 exists to change — with accounts on, every signed-in
-account currently reads and writes the single seeded user's data.
+everything here must keep passing with its assertions unchanged. Step 2
+has since landed: its call sites moved from the old unscoped store API to
+``Store.for_account(...)`` views (assertions untouched), and the one
+behaviour it exists to change — signed-in accounts sharing the seeded
+user's data bucket — is pinned flipped in ``AccountBucketTests`` at the
+bottom, which step 1 had pinned in its shared form.
 
 Focus is the surface step 2 can disturb: the in-memory store's scoping and
 approval gate, and the exact status codes / bodies of every route that
@@ -24,7 +26,7 @@ from providers.base import StreamChunk
 from app.accounts import AccountStore
 from app.projects import ProjectStore, SourceUnavailable
 from app.server import create_app
-from app.store import PLACEHOLDER_TITLE, ChatMessage, Store
+from app.store import DEFAULT_USER_ID, PLACEHOLDER_TITLE, ChatMessage, Store
 
 PASSWORD = "password1"
 
@@ -69,10 +71,11 @@ def msg(body: str, *, orbit: bool = False) -> ChatMessage:
 
 class StoreSeedTests(unittest.TestCase):
     def test_fresh_store_has_only_the_example_task_and_no_history(self) -> None:
-        store = Store()
-        self.assertEqual(list(store.tasks), ["T1"])
-        self.assertEqual(store.conversations, [])
-        self.assertEqual(store.threads, {})
+        raw = Store()
+        store = raw.for_account(DEFAULT_USER_ID)
+        self.assertEqual(list(raw.tasks), ["T1"])
+        self.assertEqual(raw.conversations, [])
+        self.assertEqual(raw.threads, {})
         self.assertIsNone(store.active_conversation_id)
         self.assertEqual(store.home_thread, [])
         task = store.get_task("T1")
@@ -83,7 +86,7 @@ class StoreSeedTests(unittest.TestCase):
         self.assertIsNone(task.run)
 
     def test_connections_are_all_not_connected(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         self.assertEqual(store.connected_count(), 0)
         self.assertEqual(
             [c.name for c in store.connections], ["GitHub", "Linear", "Vercel"]
@@ -91,7 +94,7 @@ class StoreSeedTests(unittest.TestCase):
         self.assertTrue(all(c.status == "not_connected" for c in store.connections))
 
     def test_defaults_are_chat_mode_and_quick_depth(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         self.assertEqual(store.mode, "chat")
         self.assertEqual(store.thinking_level, "quick")
         self.assertIsNone(store.selected_agent)
@@ -99,7 +102,7 @@ class StoreSeedTests(unittest.TestCase):
 
 class StoreConversationTests(unittest.TestCase):
     def test_start_conversation_makes_it_active_with_placeholder_title(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         conv = store.start_conversation()
         self.assertEqual(conv.title, PLACEHOLDER_TITLE)
         self.assertEqual(conv.group, "Today")
@@ -108,7 +111,7 @@ class StoreConversationTests(unittest.TestCase):
         self.assertEqual(store.conversations_grouped()["Today"][0].id, conv.id)
 
     def test_append_message_assigns_a_stable_id_once(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         conv = store.start_conversation()
         message = msg("hello")
         store.append_message(conv.id, message)
@@ -118,17 +121,17 @@ class StoreConversationTests(unittest.TestCase):
         self.assertEqual(message.id, first_id)
 
     def test_new_conversation_clears_active_but_keeps_the_thread(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         conv = store.start_conversation()
         store.append_message(conv.id, msg("kept"))
         store.new_conversation()
         self.assertIsNone(store.active_conversation_id)
         self.assertEqual(store.home_thread, [])
         self.assertIsNotNone(store.get_conversation(conv.id))
-        self.assertEqual([m.body for m in store.threads[conv.id]], ["kept"])
+        self.assertEqual([m.body for m in store.thread(conv.id)], ["kept"])
 
     def test_find_and_replace_message_across_conversations_and_task_chat(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         conv = store.start_conversation()
         home_msg = msg("home reply", orbit=True)
         store.append_message(conv.id, home_msg)
@@ -146,7 +149,7 @@ class StoreConversationTests(unittest.TestCase):
         self.assertFalse(store.replace_message(conv.id, "m-nope", "nope"))
 
     def test_project_conversation_is_find_or_create_and_hidden_from_home(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         self.assertIsNone(store.project_conversation("p-1"))  # a read creates nothing
         conv = store.project_conversation("p-1", create=True)
         assert conv is not None
@@ -155,21 +158,23 @@ class StoreConversationTests(unittest.TestCase):
         self.assertEqual(store.conversations_grouped(), {})
 
     def test_scoping_seams_already_filter_by_user_id_when_asked(self) -> None:
-        store = Store()
+        raw = Store()
+        store = raw.for_account(DEFAULT_USER_ID)
         store.start_conversation()
         store.project_conversation("p-1", create=True)
-        self.assertEqual(store.conversations_for("someone-else"), [])
-        self.assertEqual(store.tasks_for("someone-else"), [])
-        self.assertIsNone(store.project_conversation("p-1", user_id="someone-else"))
-        self.assertEqual(store.project_thread("p-1", user_id="someone-else"), [])
+        someone_else = raw.for_account("someone-else")
+        self.assertEqual(someone_else.conversations_for(), [])
+        self.assertEqual(someone_else.tasks_for(), [])
+        self.assertIsNone(someone_else.project_conversation("p-1"))
+        self.assertEqual(someone_else.project_thread("p-1"), [])
 
     def test_set_title_on_unknown_conversation_is_a_no_op(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         store.set_title("h-nope", "Nothing")  # must not raise
         self.assertIsNone(store.get_conversation("h-nope"))
 
     def test_mode_and_thinking_level_reject_unknown_values(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         with self.assertRaises(ValueError):
             store.set_mode("sideways")
         with self.assertRaises(ValueError):
@@ -178,7 +183,7 @@ class StoreConversationTests(unittest.TestCase):
 
 class StoreTaskTests(unittest.TestCase):
     def test_create_task_titles_from_the_first_sentence_and_seeds_activity(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         task = store.create_task("Fix the login crash. Then deploy it.")
         self.assertEqual(task.title, "Fix the login crash.")
         self.assertEqual(task.user_id, store.user.id)
@@ -187,7 +192,7 @@ class StoreTaskTests(unittest.TestCase):
         self.assertEqual([a.text for a in task.activity], ["Task created from your request."])
 
     def test_create_task_rejects_empty_request_and_dangling_builds_on(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         with self.assertRaises(ValueError):
             store.create_task("   ")
         with self.assertRaises(ValueError) as ctx:
@@ -195,7 +200,7 @@ class StoreTaskTests(unittest.TestCase):
         self.assertIn("builds_on points at an unknown task: t-nope", str(ctx.exception))
 
     def test_approval_gate_is_enforced_by_the_store(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         with self.assertRaises(KeyError):
             store.apply_changes("t-nope")
         with self.assertRaises(RuntimeError) as ctx:
@@ -210,7 +215,7 @@ class StoreTaskTests(unittest.TestCase):
         self.assertTrue(applied.applied)
 
     def test_set_done_records_the_persons_assertion_and_unknown_is_none(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         task = store.create_task("Ship it")
         done = store.set_done(task.id, True)
         assert done is not None
@@ -223,7 +228,7 @@ class StoreTaskTests(unittest.TestCase):
         self.assertIsNone(store.set_done("t-nope", True))
 
     def test_add_chat_and_get_task_on_unknown_ids_are_safe(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         self.assertIsNone(store.get_task("t-nope"))
         store.add_chat("t-nope", msg("lost"))  # must not raise
         self.assertIsNone(store.get_task("t-nope"))
@@ -267,6 +272,7 @@ class ProjectStoreScopingTests(unittest.TestCase):
 class IdRouteTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store = Store()
+        self.view = self.store.for_account(DEFAULT_USER_ID)
         self.projects = ProjectStore()
         self.app = create_app(
             provider=FakeProvider(), store=self.store, projects=self.projects
@@ -274,7 +280,7 @@ class IdRouteTests(unittest.TestCase):
         self.client = self.app.test_client()
 
     def make_project(self, name: str = "Alpha"):
-        return self.projects.create(user_id=self.store.user.id, name=name)
+        return self.projects.create(user_id=self.view.account_id, name=name)
 
     # -- task routes ------------------------------------------------------
 
@@ -304,7 +310,7 @@ class IdRouteTests(unittest.TestCase):
         self.assertEqual(
             resp.get_json(), {"error": "explicit approval required", "approved": False}
         )
-        task = self.store.get_task("T1")
+        task = self.view.get_task("T1")
         assert task is not None
         self.assertFalse(task.approved)
 
@@ -318,7 +324,7 @@ class IdRouteTests(unittest.TestCase):
                 "approved": False,
             },
         )
-        task = self.store.get_task("T1")
+        task = self.view.get_task("T1")
         assert task is not None
         self.assertFalse(task.applied)
 
@@ -339,7 +345,7 @@ class IdRouteTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.get_json()
         self.assertEqual(body["title"], "Fix the login crash.")
-        self.assertIsNotNone(self.store.get_task(body["id"]))
+        self.assertIsNotNone(self.view.get_task(body["id"]))
 
     def test_task_stream_stores_the_exchange_and_plans_the_run(self) -> None:
         resp = self.client.post("/api/task/T1/stream", json={"initial": True})
@@ -347,7 +353,7 @@ class IdRouteTests(unittest.TestCase):
         events = parse_sse(resp.get_data(as_text=True))
         answers = [data.strip() for name, data in events if name == "answer"]
         self.assertEqual(answers, ["Hello from Orbit."])
-        task = self.store.get_task("T1")
+        task = self.view.get_task("T1")
         assert task is not None
         self.assertIsNotNone(task.run)
         self.assertTrue(any(m.is_orbit and m.body == "Hello from Orbit." for m in task.chat))
@@ -380,7 +386,7 @@ class IdRouteTests(unittest.TestCase):
     def test_completing_a_task_from_another_project_is_404(self) -> None:
         alpha = self.make_project("Alpha")
         beta = self.make_project("Beta")
-        task = self.store.create_task("Alpha work", project_id=alpha.id)
+        task = self.view.create_task("Alpha work", project_id=alpha.id)
         resp = self.client.post(
             f"/projects/{beta.id}/tasks/{task.id}/complete", data={}
         )
@@ -390,13 +396,13 @@ class IdRouteTests(unittest.TestCase):
 
     def test_completing_a_task_toggles_done_and_redirects_to_details(self) -> None:
         alpha = self.make_project("Alpha")
-        task = self.store.create_task("Alpha work", project_id=alpha.id)
+        task = self.view.create_task("Alpha work", project_id=alpha.id)
         resp = self.client.post(
             f"/projects/{alpha.id}/tasks/{task.id}/complete", data={}
         )
         self.assertEqual(resp.status_code, 303)
         self.assertIn("#details", resp.headers["Location"])
-        stored = self.store.get_task(task.id)
+        stored = self.view.get_task(task.id)
         assert stored is not None
         self.assertTrue(stored.done)
 
@@ -408,12 +414,12 @@ class IdRouteTests(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 303)
         self.assertIn("#add-task", resp.headers["Location"])
-        self.assertEqual(self.store.tasks_for_project(alpha.id), [])
+        self.assertEqual(self.view.tasks_for_project(alpha.id), [])
 
     def test_project_stream_pins_only_tasks_of_that_project(self) -> None:
         alpha = self.make_project("Alpha")
         beta = self.make_project("Beta")
-        task = self.store.create_task("Alpha work", project_id=alpha.id)
+        task = self.view.create_task("Alpha work", project_id=alpha.id)
         resp = self.client.post(
             f"/api/project/{beta.id}/stream",
             json={"message": "hi", "task_id": task.id},
@@ -435,15 +441,15 @@ class IdRouteTests(unittest.TestCase):
 
     def test_project_stream_creates_the_workspace_conversation_on_first_send(self) -> None:
         alpha = self.make_project("Alpha")
-        self.assertEqual(self.store.project_conversations(alpha.id), [])
+        self.assertEqual(self.view.project_conversations(alpha.id), [])
         resp = self.client.post(
             f"/api/project/{alpha.id}/stream", json={"message": "Plan please"}
         )
         self.assertEqual(resp.status_code, 200)
         resp.get_data(as_text=True)
-        conversations = self.store.project_conversations(alpha.id)
+        conversations = self.view.project_conversations(alpha.id)
         self.assertEqual(len(conversations), 1)
-        thread = self.store.project_thread(alpha.id)
+        thread = self.view.project_thread(alpha.id)
         self.assertEqual([m.body for m in thread], ["Plan please", "Hello from Orbit."])
 
     # -- agents, messages, actions, heartbeat ------------------------------
@@ -506,6 +512,7 @@ class ChatFlowTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.store = Store()
+        self.view = self.store.for_account(DEFAULT_USER_ID)
         self.app = create_app(provider=FakeProvider(), store=self.store)
         self.client = self.app.test_client()
 
@@ -516,21 +523,21 @@ class ChatFlowTests(unittest.TestCase):
         started = [data for name, data in events if name == "conversation"]
         self.assertEqual(len(started), 1)
         conv_id = json.loads(started[0])["id"]
-        self.assertEqual(self.store.active_conversation_id, conv_id)
+        self.assertEqual(self.view.active_conversation_id, conv_id)
         self.assertEqual(
-            [(m.who, m.body) for m in self.store.home_thread],
+            [(m.who, m.body) for m in self.view.home_thread],
             [("You", "Hello there"), ("Orbit", "Hello from Orbit.")],
         )
-        self.assertTrue(all(m.id for m in self.store.home_thread))
+        self.assertTrue(all(m.id for m in self.view.home_thread))
 
     def test_second_send_reuses_the_same_conversation(self) -> None:
         self.client.post("/api/chat", json={"message": "One"}).get_data(as_text=True)
-        conv_id = self.store.active_conversation_id
+        conv_id = self.view.active_conversation_id
         resp = self.client.post("/api/chat", json={"message": "Two"})
         events = parse_sse(resp.get_data(as_text=True))
         self.assertEqual([name for name, _ in events if name == "conversation"], [])
-        self.assertEqual(self.store.active_conversation_id, conv_id)
-        self.assertEqual(len(self.store.home_thread), 4)
+        self.assertEqual(self.view.active_conversation_id, conv_id)
+        self.assertEqual(len(self.view.home_thread), 4)
 
     def test_empty_message_is_400_and_regenerate_without_history_is_409(self) -> None:
         resp = self.client.post("/api/chat", json={"message": "   "})
@@ -542,11 +549,11 @@ class ChatFlowTests(unittest.TestCase):
         self.assertEqual(
             resp.get_json(), {"error": "there is no completed response to regenerate"}
         )
-        self.assertIsNone(self.store.active_conversation_id)
+        self.assertIsNone(self.view.active_conversation_id)
 
     def test_rating_a_stored_reply_is_recorded_with_its_id(self) -> None:
         self.client.post("/api/chat", json={"message": "Rate me"}).get_data(as_text=True)
-        message_id = self.store.home_thread[-1].id
+        message_id = self.view.home_thread[-1].id
         resp = self.client.post(
             f"/api/messages/{message_id}/rating", json={"rating": "up"}
         )
@@ -559,8 +566,8 @@ class ChatFlowTests(unittest.TestCase):
         self.client.post("/api/chat", json={"message": "Hi"}).get_data(as_text=True)
         resp = self.client.post("/api/conversations/new", json={})
         self.assertEqual(resp.get_json(), {"active_conversation_id": None})
-        self.assertIsNone(self.store.active_conversation_id)
-        self.assertEqual(self.store.home_thread, [])
+        self.assertIsNone(self.view.active_conversation_id)
+        self.assertEqual(self.view.home_thread, [])
 
 
 # ---------------------------------------------------------------------------
@@ -626,20 +633,25 @@ class AccountsOnSingleAccountTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# The status quo step 2 exists to change. These tests describe today
-# faithfully: with accounts on, data is still filed under the seeded
-# single user, so accounts can see and mutate each other's work.
-# Step 2 flips exactly these assertions to 404-isolation.
+# The behaviour step 2 changed. Step 1 pinned these four cases in their
+# shared-bucket form (accounts could see and mutate each other's work);
+# they assert 404-isolation now. Exhaustive cross-account coverage lives
+# in tests/test_account_ownership.py.
 # ---------------------------------------------------------------------------
 
 
-class SharedBucketTodayTests(unittest.TestCase):
-    def test_signed_in_account_opens_the_seeded_example_task(self) -> None:
+class AccountBucketTests(unittest.TestCase):
+    """The step-1 pins, flipped by step 2: data is filed under the account
+    that created it, and another account gets 404 — not access."""
+
+    def test_signed_in_account_does_not_get_the_seeded_example_task(self) -> None:
         app, store, projects, accounts = make_accounts_client()
         client = oauth_client(app, "grace@example.dev", "Grace Hopper")
-        self.assertEqual(client.get("/task/T1").status_code, 200)
+        self.assertEqual(client.get("/task/T1").status_code, 404)
+        # The seed itself is untouched — it belongs to the legacy account.
+        self.assertIsNotNone(store.for_account(DEFAULT_USER_ID).get_task("T1"))
 
-    def test_projects_created_while_signed_in_are_filed_under_the_seeded_user(self) -> None:
+    def test_projects_created_while_signed_in_are_filed_under_that_account(self) -> None:
         app, store, projects, accounts = make_accounts_client()
         client = oauth_client(app, "grace@example.dev", "Grace Hopper")
         grace_id = accounts.by_email("grace@example.dev")["id"]
@@ -647,10 +659,10 @@ class SharedBucketTodayTests(unittest.TestCase):
             "/projects",
             data={"name": "Grace project", "description": "", "mode": "blank"},
         )
-        self.assertEqual([p.name for p in projects.list_for(store.user.id)], ["Grace project"])
-        self.assertEqual(projects.list_for(grace_id), [])
+        self.assertEqual([p.name for p in projects.list_for(grace_id)], ["Grace project"])
+        self.assertEqual(projects.list_for(DEFAULT_USER_ID), [])
 
-    def test_a_second_account_sees_the_first_accounts_project(self) -> None:
+    def test_a_second_account_cannot_open_the_first_accounts_project(self) -> None:
         app, store, projects, accounts = make_accounts_client()
         grace = oauth_client(app, "grace@example.dev", "Grace Hopper")
         resp = grace.post(
@@ -660,22 +672,24 @@ class SharedBucketTodayTests(unittest.TestCase):
         project_id = resp.headers["Location"].rstrip("/").rsplit("/", 1)[-1]
 
         ada = oauth_client(app, "ada@example.dev", "Ada Osei")
-        self.assertEqual(ada.get(f"/projects/{project_id}").status_code, 200)
-        self.assertIn("Grace project", ada.get("/dashboard").get_data(as_text=True))
+        self.assertEqual(ada.get(f"/projects/{project_id}").status_code, 404)
+        self.assertNotIn("Grace project", ada.get("/dashboard").get_data(as_text=True))
+        self.assertEqual(grace.get(f"/projects/{project_id}").status_code, 200)
 
-    def test_a_second_account_can_mutate_the_first_accounts_task(self) -> None:
+    def test_a_second_account_cannot_mutate_the_first_accounts_task(self) -> None:
         app, store, projects, accounts = make_accounts_client()
         grace = oauth_client(app, "grace@example.dev", "Grace Hopper")
+        grace_id = accounts.by_email("grace@example.dev")["id"]
         resp = grace.post("/api/tasks", json={"request": "Grace task"})
         task_id = resp.get_json()["id"]
 
         ada = oauth_client(app, "ada@example.dev", "Ada Osei")
-        self.assertEqual(ada.get(f"/task/{task_id}").status_code, 200)
+        self.assertEqual(ada.get(f"/task/{task_id}").status_code, 404)
         approve = ada.post(f"/api/task/{task_id}/approve", json={"approve": True})
-        self.assertEqual(approve.status_code, 200)
-        task = store.get_task(task_id)
+        self.assertEqual(approve.status_code, 404)
+        task = store.for_account(grace_id).get_task(task_id)
         assert task is not None
-        self.assertTrue(task.approved)
+        self.assertFalse(task.approved)
 
 
 if __name__ == "__main__":

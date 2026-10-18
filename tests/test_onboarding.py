@@ -435,11 +435,11 @@ class DashboardStateTests(unittest.TestCase):
         self.assertTrue(account["onboarding"]["personalize_skipped"])
 
     def test_dashboard_adapts_when_projects_exist(self) -> None:
-        app, client, _ = make_client()
+        app, client, accounts = make_client()
         oauth(client)
         projects = app.config["PROJECTS"]
-        st = app.config["STORE"]
-        projects.create(user_id=st.user.id, name="Order bot", description="WhatsApp orders")
+        grace_id = accounts.by_email("grace@example.dev")["id"]
+        projects.create(user_id=grace_id, name="Order bot", description="WhatsApp orders")
         text = client.get("/dashboard").get_data(as_text=True)
         self.assertIn("Order bot", text)
         self.assertIn("Open workspace", text)      # continue strip
@@ -447,10 +447,10 @@ class DashboardStateTests(unittest.TestCase):
         self.assertNotIn("Three ways to start", text)  # zero-state stepped aside
 
     def test_a_second_visit_is_the_returning_state(self) -> None:
-        app, client, _ = make_client()
+        app, client, accounts = make_client()
         oauth(client)
-        st = app.config["STORE"]
-        app.config["PROJECTS"].create(user_id=st.user.id, name="Order bot", description="")
+        grace_id = accounts.by_email("grace@example.dev")["id"]
+        app.config["PROJECTS"].create(user_id=grace_id, name="Order bot", description="")
         client.get("/dashboard")  # first visit marks it
         text = client.get("/dashboard").get_data(as_text=True)
         self.assertIn("Welcome back", text)
@@ -489,9 +489,10 @@ class DashboardStateTests(unittest.TestCase):
 
 class ProjectEntryTests(unittest.TestCase):
     def test_guided_setup_creates_the_project_with_its_first_task(self) -> None:
-        app, client, _ = make_client()
+        app, client, accounts = make_client()
         oauth(client)
-        st = app.config["STORE"]
+        grace_id = accounts.by_email("grace@example.dev")["id"]
+        st = app.config["STORE"].for_account(grace_id)
         resp = client.post("/projects", data={
             "name": "Order bot",
             "description": "WhatsApp ordering",
@@ -500,7 +501,7 @@ class ProjectEntryTests(unittest.TestCase):
         })
         self.assertEqual(resp.status_code, 303)
         self.assertIn("?guided=1", resp.headers["Location"])
-        tasks = [t for t in st.tasks_for(st.user.id) if "Sketch the order flow" in t.description]
+        tasks = [t for t in st.tasks_for() if "Sketch the order flow" in t.description]
         self.assertEqual(len(tasks), 1)
         self.assertIsNotNone(tasks[0].project_id)
 
@@ -557,7 +558,8 @@ class SettingsPageTests(unittest.TestCase):
         account = self.store.by_email("grace@example.dev")
         self.assertEqual(account["profile"]["role"], "Student")
         self.assertEqual(account["prefs"]["default_depth"], "deep")
-        self.assertEqual(self.app.config["STORE"].thinking_level, "deep")  # applied, not just stored
+        grace_id = self.store.by_email("grace@example.dev")["id"]
+        self.assertEqual(self.app.config["STORE"].for_account(grace_id).thinking_level, "deep")  # applied, not just stored
 
     def test_password_change_requires_and_rotates(self) -> None:
         self.client.post("/settings/password", data={"new": "newpassword9", "confirm": "newpassword9"})
