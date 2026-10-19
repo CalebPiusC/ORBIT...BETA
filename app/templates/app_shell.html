@@ -109,15 +109,17 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    height: 52px;
+    height: 50px;
     padding: 0 32px;
-    color: var(--text-1);
+    color: var(--text-2);
     font-size: 15px;
     line-height: 1.4;
     text-decoration: none;
   }
 
   .app-nav__item:hover { background: var(--surface-2); }
+
+  .app-nav__item.is-active { color: var(--text-1); }
 
   .app-nav__item.is-active::before {
     content: "";
