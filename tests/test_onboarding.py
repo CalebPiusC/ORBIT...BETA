@@ -18,6 +18,7 @@ untouched by all of this: an earlier test in this file pins that decision
 from __future__ import annotations
 
 import json
+import os
 import re
 import tempfile
 import unittest
@@ -253,6 +254,28 @@ def make_client() -> tuple:
     app = create_app(provider=FakeProvider(), accounts=store)
     app.config["TESTING"] = True
     return app, app.test_client(), store
+
+
+def make_sqlite_client():
+    """The same app, wired the way production boots: SQLite-backed stores.
+
+    Mirrors ``run_app`` without the server: the chat store, accounts and
+    projects all share one database file, so these tests exercise the store
+    adapter the shipped app actually uses.
+    """
+    from app.sqlite_accounts import SQLiteAccountStore
+    from app.sqlite_projects import SQLiteProjectStore
+    from app.sqlite_store import SQLiteStore
+
+    directory = tempfile.TemporaryDirectory()
+    store = SQLiteStore(os.path.join(directory.name, "orbit.sqlite3"))
+    app = create_app(provider=FakeProvider())
+    app.config["TESTING"] = True
+    app.config["STORE"] = store
+    accounts = SQLiteAccountStore(store.database, iterations=1_000)
+    app.config["ACCOUNTS"] = accounts
+    app.config["PROJECTS"] = SQLiteProjectStore(store.database)
+    return directory, app, app.test_client(), accounts
 
 
 def signup(client, email: str = EMAIL, name: str = "Ada Osei"):
@@ -1033,7 +1056,19 @@ class DashboardDataTests(unittest.TestCase):
     Every figure the route adds is read through the store view bound to the
     signed-in account, so these tests drive two accounts with different work
     and assert that neither screen can see the other's rows.
+
+    The SQLite subclass below re-runs every one of these checks against the
+    production store, so the two implementations cannot drift apart.
     """
+
+    use_sqlite = False
+
+    def _make(self):
+        if not self.use_sqlite:
+            return make_client()
+        directory, app, client, accounts = make_sqlite_client()
+        self.addCleanup(directory.cleanup)
+        return app, client, accounts
 
     @staticmethod
     def _stat(page: str, label: str) -> int | None:
@@ -1061,7 +1096,7 @@ class DashboardDataTests(unittest.TestCase):
         )
 
     def test_counts_read_the_signed_in_accounts_own_records(self) -> None:
-        app, client, accounts = make_client()
+        app, client, accounts = self._make()
         oauth(client)
         account = accounts.by_email("grace@example.dev")
         project = app.config["PROJECTS"].create(
@@ -1085,7 +1120,7 @@ class DashboardDataTests(unittest.TestCase):
         self.assertIn("Fieldnotes · ", page)
 
     def test_one_accounts_dashboard_never_shows_anothers_work(self) -> None:
-        app, client, accounts = make_client()
+        app, client, accounts = self._make()
         oauth(client, email="ada@example.dev", name="Ada A")
         ada = accounts.by_email("ada@example.dev")
         ada_project = app.config["PROJECTS"].create(
@@ -1123,7 +1158,7 @@ class DashboardDataTests(unittest.TestCase):
             self.assertNotIn(leak, ada_page)
 
     def test_empty_states_are_named_not_faked(self) -> None:
-        app, client, accounts = make_client()
+        app, client, accounts = self._make()
         oauth(client)
         account = accounts.by_email("grace@example.dev")
         app.config["PROJECTS"].create(user_id=account["id"], name="A quiet project", description="")
@@ -1134,7 +1169,7 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(self._stat(page, "Tasks completed"), 0)
 
     def test_activity_is_capped_at_ten_and_follows_task_creation(self) -> None:
-        app, client, accounts = make_client()
+        app, client, accounts = self._make()
         oauth(client)
         account = accounts.by_email("grace@example.dev")
         project = app.config["PROJECTS"].create(user_id=account["id"], name="Long list", description="")
@@ -1149,7 +1184,7 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(len(view.recent_activity(limit=50)), 12)
 
     def test_resolving_a_proposal_removes_it_from_the_count(self) -> None:
-        app, client, accounts = make_client()
+        app, client, accounts = self._make()
         oauth(client)
         account = accounts.by_email("grace@example.dev")
         app.config["PROJECTS"].create(user_id=account["id"], name="Resolve project", description="")
@@ -1171,7 +1206,7 @@ class DashboardDataTests(unittest.TestCase):
         would make the dashboard's own "Review proposals" button unable to show
         what the number promised.
         """
-        app, client, accounts = make_client()
+        app, client, accounts = self._make()
         oauth(client)
         account = accounts.by_email("grace@example.dev")
         app.config["PROJECTS"].create(user_id=account["id"], name="Scope project", description="")
@@ -1184,3 +1219,17 @@ class DashboardDataTests(unittest.TestCase):
         page = client.get("/dashboard").get_data(as_text=True)
         self.assertEqual(self._stat(page, "Pending proposals"), 0)
         self.assertIn("No pending approvals.", page)
+
+
+class DashboardDataSQLiteTests(DashboardDataTests):
+    """Every dashboard-data check, run against the SQLite store production uses."""
+
+    use_sqlite = True
+
+    def test_the_harness_really_uses_the_sqlite_store(self) -> None:
+        from app.sqlite_accounts import SQLiteAccountStore
+        from app.sqlite_store import SQLiteStore
+
+        app, _client, accounts = self._make()
+        self.assertIsInstance(app.config["STORE"], SQLiteStore)
+        self.assertIsInstance(accounts, SQLiteAccountStore)

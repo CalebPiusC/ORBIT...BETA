@@ -1,8 +1,15 @@
+import os
 import sqlite3
 
 import pytest
 
 from app.database import Database
+
+# Windows has no POSIX mode bits: there st_mode is a read-only flag and
+# 0o077 is always 0, so a mode assertion would pass without proving anything.
+# Database's chmod calls are best-effort by design, so they are checked only
+# where the operating system reports modes.
+POSIX_MODES = os.name == "posix"
 
 
 def test_migrations_apply_cleanly_to_empty_database(tmp_path):
@@ -90,10 +97,12 @@ def test_migrations_apply_cleanly_to_empty_database(tmp_path):
     # Reopening is idempotent and keeps one record per migration.
     reopened = Database(path)
     assert reopened.current_version == 10
-    assert path.stat().st_mode & 0o077 == 0
+    if POSIX_MODES:
+        assert path.stat().st_mode & 0o077 == 0
     backup = path.with_name(path.name + ".pre-migration.bak")
     assert backup.is_file()
-    assert backup.stat().st_mode & 0o077 == 0
+    if POSIX_MODES:
+        assert backup.stat().st_mode & 0o077 == 0
 
 
 def test_composite_foreign_keys_reject_cross_account_message_owner(tmp_path):

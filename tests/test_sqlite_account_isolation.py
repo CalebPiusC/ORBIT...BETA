@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from datetime import date
 
@@ -17,6 +18,9 @@ from memory.sqlitenotes import SQLiteNoteStore
 from app.store import ChatMessage
 from tools.confirmation import DeferredConfirmationGate
 from tools.registry import AuditLog, ToolRegistry
+
+# See tests/test_database_migrations.py: Windows reports no POSIX mode bits.
+POSIX_MODES = os.name == "posix"
 
 
 def test_account_a_isolated_from_b_through_real_persistent_store_methods(tmp_path):
@@ -148,8 +152,9 @@ def test_insert_with_unknown_account_is_rejected_and_storage_permissions_are_pri
     db = Database(db_path)
     assert db_path.is_file()
     assert db_path.parent.is_dir()
-    assert db_path.parent.stat().st_mode & 0o077 == 0
-    assert db_path.stat().st_mode & 0o077 == 0
+    if POSIX_MODES:
+        assert db_path.parent.stat().st_mode & 0o077 == 0
+        assert db_path.stat().st_mode & 0o077 == 0
 
     with sqlite3.connect(db_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
