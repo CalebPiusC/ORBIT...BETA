@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from tools.registry import ToolRegistry
+from app.database import Database
+from memory.sqlitenotes import SQLiteNoteStore
+from tools.registry import ToolRegistry, current_account_id
 
 DEFAULT_NOTES_PATH = Path(__file__).resolve().parents[1] / "notes.txt"
 
@@ -14,6 +16,7 @@ def register_write_note(
     registry: ToolRegistry,
     *,
     notes_path: str | Path = DEFAULT_NOTES_PATH,
+    database: Database | None = None,
 ) -> None:
     destination = Path(notes_path)
 
@@ -47,7 +50,13 @@ def register_write_note(
             .isoformat(timespec="seconds")
             .replace("+00:00", "Z")
         )
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with destination.open("a", encoding="utf-8", newline="") as note_file:
-            note_file.write(f"{timestamp}\t{content}\n")
+        if database is not None:
+            account_id = current_account_id()
+            if not account_id:
+                raise ValueError("account_id is required to write a note")
+            SQLiteNoteStore(database, account_id).add(content, timestamp)
+        else:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with destination.open("a", encoding="utf-8", newline="") as note_file:
+                note_file.write(f"{timestamp}\t{content}\n")
         return f"Note appended at {timestamp}."

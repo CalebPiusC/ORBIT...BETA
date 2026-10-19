@@ -24,7 +24,7 @@ git config core.hooksPath .githooks
 
 Set `GEMINI_API_KEY` in `.env` to your own key. `GEMINI_MODEL` defaults to `gemini-3-flash-preview` (`config.DEFAULT_GEMINI_MODEL`, checked 2026-10-10) and can be changed in `.env` — never in a provider file.
 
-`GEMINI_FALLBACK_MODEL` defaults to `gemini-3.8-flash` (`config.DEFAULT_GEMINI_FALLBACK_MODEL`). It is tried **once**, and only when the primary fails with 503/504 or a network error, and only before any tool has run. Leave it blank in `.env` to disable it. Every model that answers, and every failed attempt, is written to `audit.log` as a `model_answered` or `model_attempt_failed` line.
+`GEMINI_FALLBACK_MODEL` defaults to `gemini-3.8-flash` (`config.DEFAULT_GEMINI_FALLBACK_MODEL`). It is tried **once**, and only when the primary fails with 503/504 or a network error, and only before any tool has run. Leave it blank in `.env` to disable it. In the production web app and terminal REPL, model events are written to per-account SQLite analytics rows (`analytics_data`); the in-memory test factory retains the file-based audit fallback.
 
 **Optional OpenRouter Deep chain.** Add `OPENROUTER_API_KEY` to `.env` to enable Deep-mode routing. `OPENROUTER_MODEL_1`, `OPENROUTER_MODEL_2`, and `OPENROUTER_MODEL_3` hold the pinned model ids in order; `OPENROUTER_FALLBACK_MODEL` is the final OpenRouter safety net. The example template contains three free-model choices and `openrouter/free`; pinned ids remain environment config so you can replace them as free endpoints change. If OpenRouter is not configured or all its attempts fail before output starts, Deep uses the configured Gemini primary (Europa). Fresh installs copy the updated template; existing `.env` files should add these entries without overwriting existing keys.
 
@@ -32,19 +32,19 @@ Set `GEMINI_API_KEY` in `.env` to your own key. `GEMINI_MODEL` defaults to `gemi
 
 `ORBIT_HTTP_TIMEOUT` (default `60`, seconds) is the deadline for **every** request to the model. Leave it set. Without a deadline the SDK asks httpx to wait forever, so a firewalled or black-holed connection hangs with no reply and no error — "it is thinking" and "it is stuck" become the same thing. Raise it on a slow link; never remove it.
 
-## Two ways to talk to Orbit
+## Local start commands and persistence
 
 ```sh
-python chat.py          # terminal REPL
-python -m app.server    # web UI on http://localhost:5000
-python run_demo.py      # web UI on the STUB provider — layout only, not your model
+python -m app.server    # real-provider web app, SQLite (python app/server.py is equivalent)
+python run_demo.py      # stub-provider web app, SQLite
+python chat.py          # terminal REPL, SQLite
+python chat.py --check  # diagnostics only; does not start a chat or create the DB
+./setup.sh             # setup + offline tests; not an app-start command
 ```
 
-`python -m app.server` needs `ORBIT_SECRET_KEY` set in `.env` (it signs the session
-cookie); it refuses to start without it. `run_demo.py` does not — it mints a random key
-for the run. Both web launchers default to `127.0.0.1:5000` with Flask's debugger disabled.
-For a container or sandbox preview that needs an external bind, opt in explicitly
-with `ORBIT_HOST=0.0.0.0`; `PORT` can override the port. The debugger remains off.
+All three app launch commands use the same database, selected by `ORBIT_DB_PATH`; if unset, it is `~/.orbit/orbit.sqlite3`. The directory is created with owner-only permissions where supported. The app factory `create_app()` remains in-memory for isolated tests; production launchers call `run_app()`, which installs SQLite-backed stores. `setup.sh` configures dependencies and runs tests—it does not start the app.
+
+`python -m app.server` needs `ORBIT_SECRET_KEY` set in `.env` (it signs the session cookie); it refuses to start without it. `run_demo.py` mints a random key for the run. Both web launchers default to `127.0.0.1:5000` with Flask's debugger disabled. For a container or sandbox preview that needs an external bind, set `ORBIT_HOST=0.0.0.0`; `PORT` can override the port.
 
 `chat.py` is a REPL: it keeps the connection open across turns, carries history,
 and a failed turn (bad key, quota, network) prints an error and lets you resend

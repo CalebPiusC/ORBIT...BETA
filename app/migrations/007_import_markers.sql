@@ -1,0 +1,4 @@
+CREATE TABLE data_imports (
+    source TEXT PRIMARY KEY NOT NULL,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

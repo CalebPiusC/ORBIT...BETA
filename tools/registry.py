@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import contextvars
 import json
 import threading
 import time
@@ -19,6 +20,36 @@ from typing import Any, Literal
 from tools.confirmation import ConfirmationGate, ProposedAction
 
 DEFAULT_AUDIT_LOG_PATH = Path(__file__).resolve().parents[1] / "audit.log"
+_AUDIT_ACCOUNT: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "orbit_audit_account", default=None
+)
+
+
+def current_account_id() -> str | None:
+    """Current request/tool account, or None outside an account context."""
+    account_id = _AUDIT_ACCOUNT.get()
+    if account_id:
+        return account_id
+    try:
+        from flask import has_request_context, session
+        if has_request_context():
+            value = session.get("account_id")
+            return value if isinstance(value, str) and value else None
+    except ImportError:
+        pass
+    return None
+
+
+def audit_account_context(account_id: str):
+    """Bind audit and account-aware tools emitted during this operation."""
+    class _Binding:
+        def __enter__(self):
+            self.token = _AUDIT_ACCOUNT.set(account_id)
+            return self
+
+        def __exit__(self, *_exc):
+            _AUDIT_ACCOUNT.reset(self.token)
+    return _Binding()
 # Caps for failure diagnostics: enough for a real traceback, small enough that one
 # failure cannot bloat audit.log.
 MAX_AUDIT_ERROR_CHARS = 2_000
@@ -99,8 +130,18 @@ def _describe_exception(error: BaseException) -> dict[str, Any]:
 class AuditLog:
     """Append one JSON-lines audit event for each dispatched tool call."""
 
-    def __init__(self, path: str | Path = DEFAULT_AUDIT_LOG_PATH) -> None:
+    def __init__(
+        self,
+        path: str | Path = DEFAULT_AUDIT_LOG_PATH,
+        *,
+        database: Any | None = None,
+        account_id: str | None = None,
+    ) -> None:
         self.path = Path(path)
+        self.database = database
+        self.account_id = account_id
+        if account_id is not None and database is None:
+            raise ValueError("account_id requires a SQLite database")
         self._lock = threading.Lock()
 
     def record(
@@ -168,6 +209,19 @@ class AuditLog:
 
     def _write(self, event: Mapping[str, Any]) -> None:
         line = json.dumps(event, ensure_ascii=False, separators=(",", ":"), default=str)
+        if self.database is not None:
+            import uuid
+
+            account_id = self.account_id or current_account_id()
+            if not account_id:
+                raise ValueError("account audit event needs an account context")
+            with self.database.connect() as db:
+                db.execute("INSERT OR IGNORE INTO accounts(id) VALUES (?)", (account_id,))
+                db.execute(
+                    "INSERT INTO analytics_data(id, account_id, payload) VALUES (?, ?, ?)",
+                    (f"event-{uuid.uuid4().hex}", account_id, line),
+                )
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._lock, self.path.open("a", encoding="utf-8") as audit_file:
             audit_file.write(line + "\n")
@@ -186,11 +240,12 @@ class ToolRegistry:
         confirmation_gate: ConfirmationGate,
         *,
         audit_log_path: str | Path = DEFAULT_AUDIT_LOG_PATH,
+        audit_database: Any | None = None,
     ) -> None:
         if confirmation_gate is None:
             raise ValueError("A confirmation gate is required; tools may not run silently.")
         self._confirmation_gate = confirmation_gate
-        self._audit_log = AuditLog(audit_log_path)
+        self._audit_log = AuditLog(audit_log_path, database=audit_database)
         self._tools: dict[str, _RegisteredTool] = {}
 
     @property

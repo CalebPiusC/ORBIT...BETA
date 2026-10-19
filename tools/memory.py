@@ -9,6 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from memory.facts import DEFAULT_FACTS_PATH, FactStore
+from memory.sqlitefacts import SQLiteFactStore
+from app.database import Database
 from tools.registry import ToolRegistry
 
 
@@ -16,8 +18,9 @@ def register_memory_tools(
     registry: ToolRegistry,
     *,
     facts_path: str | Path = DEFAULT_FACTS_PATH,
+    database: Database | None = None,
 ) -> None:
-    store = FactStore(facts_path)
+    store = SQLiteFactStore(database) if database is not None else FactStore(facts_path)
 
     @registry.register(
         name="remember_fact",
