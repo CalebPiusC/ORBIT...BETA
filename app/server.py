@@ -3001,11 +3001,18 @@ def run_app(app: Flask) -> None:
     # the sign-in wall.
     accounts = app.config.get("ACCOUNTS")
     if accounts is None:
-        from app.accounts import AccountStore
+        store_obj = app.config.get("STORE")
+        database = getattr(store_obj, "database", None)
+        if database is not None:
+            from app.sqlite_accounts import SQLiteAccountStore
 
-        app.config["ACCOUNTS"] = AccountStore(
-            Path(os.environ.get("ORBIT_ACCOUNTS_PATH", "runtime/accounts.json"))
-        )
+            app.config["ACCOUNTS"] = SQLiteAccountStore(database)
+        else:
+            from app.accounts import AccountStore
+
+            app.config["ACCOUNTS"] = AccountStore(
+                Path(os.environ.get("ORBIT_ACCOUNTS_PATH", "runtime/accounts.json"))
+            )
 
     if app.config.get("ACTIONS") is None:
         # Browser tools: the same six tools as the terminal, but the decision
