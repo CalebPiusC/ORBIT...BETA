@@ -2,4 +2,4 @@
 set -eu
 
 repo_root=$(git rev-parse --show-toplevel)
-exec python3 "$repo_root/check_secrets.py"
+exec python "$repo_root/check_secrets.py"
