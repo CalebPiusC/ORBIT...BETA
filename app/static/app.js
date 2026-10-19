@@ -801,9 +801,15 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ mode: mode }),
-        }).finally(function () {
-          window.location.href = mode === "agent" ? "/task/T1" : "/";
-        });
+        })
+          .then(function (r) { return r.json().catch(function () { return null; }); })
+          .catch(function () { return null; })
+          .then(function (data) {
+            // The server names the Agent-mode task (this account's own);
+            // without one in the response, home is the safe landing.
+            window.location.href =
+              mode === "agent" && data && data.task_url ? data.task_url : "/";
+          });
       });
     });
   }

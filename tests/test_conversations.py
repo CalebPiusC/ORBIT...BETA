@@ -14,7 +14,7 @@ from pathlib import Path
 from providers.base import StreamChunk
 
 from app.server import create_app
-from app.store import PLACEHOLDER_TITLE, Store
+from app.store import DEFAULT_USER_ID, PLACEHOLDER_TITLE, Store
 from app.titles import UNTITLED
 from tests.test_app import parse_sse
 from tools.registry import AuditLog
@@ -50,7 +50,10 @@ class TitlingProvider:
 
 def _client(provider, store: Store | None = None):
     store = store or Store()
-    return create_app(provider=provider, store=store).test_client(), store
+    client = create_app(provider=provider, store=store).test_client()
+    # Assertions read through the same account view the routes resolve to in
+    # a no-accounts launch.
+    return client, store.for_account(DEFAULT_USER_ID)
 
 
 def _send(client, text: str) -> list[tuple[str, str]]:
@@ -60,12 +63,12 @@ def _send(client, text: str) -> list[tuple[str, str]]:
 
 class StoreConversationTests(unittest.TestCase):
     def test_a_fresh_store_has_no_active_conversation_and_an_empty_thread(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         self.assertIsNone(store.active_conversation_id)
         self.assertEqual(store.home_thread, [])
 
     def test_start_conversation_puts_a_placeholder_at_the_top_of_today(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         conv = store.start_conversation()
         self.assertEqual(store.active_conversation_id, conv.id)
         self.assertEqual(conv.title, PLACEHOLDER_TITLE)
@@ -73,7 +76,7 @@ class StoreConversationTests(unittest.TestCase):
         self.assertFalse(conv.titled)
 
     def test_new_conversation_resets_to_fresh_and_keeps_the_old_thread(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         conv = store.start_conversation()
         store.new_conversation()
         self.assertIsNone(store.active_conversation_id)
@@ -81,15 +84,15 @@ class StoreConversationTests(unittest.TestCase):
         self.assertIsNotNone(store.get_conversation(conv.id))
 
     def test_each_conversation_has_its_own_thread(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         first = store.start_conversation()
         store.append_message(first.id, _msg("hello"))
         store.new_conversation()
         second = store.start_conversation()
         self.assertEqual(store.home_thread, [])
         store.append_message(second.id, _msg("other"))
-        self.assertEqual([m.body for m in store.threads[first.id]], ["hello"])
-        self.assertEqual([m.body for m in store.threads[second.id]], ["other"])
+        self.assertEqual([m.body for m in store.thread(first.id)], ["hello"])
+        self.assertEqual([m.body for m in store.thread(second.id)], ["other"])
 
 
 def _msg(body: str):
@@ -196,7 +199,7 @@ class HistoryTitleTests(unittest.TestCase):
         conv_id = json.loads(next(d for k, d in first if k == "conversation"))["id"]
         second = _send(client, "second")
         self.assertNotIn("conversation", [k for k, _ in second])
-        self.assertEqual(len(store.threads[conv_id]), 4)
+        self.assertEqual(len(store.thread(conv_id)), 4)
         self.assertEqual(len(store.conversations_grouped()["Today"]), 1)  # only the one this test created
 
 

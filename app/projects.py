@@ -142,13 +142,72 @@ def _empty() -> dict[str, Any]:
     return {"version": DATA_VERSION, "projects": []}
 
 
+class AccountProjects:
+    """A ``ProjectStore`` bound to one account — what route code works through.
+
+    Obtained from ``ProjectStore.for_account(account_id)``. The store's own
+    methods already required the owner id (stored as ``user_id``, the
+    persisted field name) on every call; this view supplies it, mirroring
+    ``app.store.AccountView``, so a route cannot read or mutate another
+    account's project by forgetting the argument.
+    """
+
+    def __init__(self, store: ProjectStore, account_id: str) -> None:
+        self.store = store
+        self.account_id = account_id
+
+    def list(
+        self, *, query: str = "", status: str | None = None
+    ) -> list[Project]:
+        return self.store.list_for(
+            self.account_id, query=query, status=status
+        )
+
+    def counts(self) -> dict[str, int]:
+        return self.store.counts_for(self.account_id)
+
+    def get(self, project_id: str) -> Project | None:
+        return self.store.get_for(project_id, self.account_id)
+
+    def create(
+        self,
+        *,
+        name: str,
+        description: str = "",
+        source: str = "new",
+        status: str = "building",
+    ) -> Project:
+        return self.store.create(
+            user_id=self.account_id,
+            name=name,
+            description=description,
+            source=source,
+            status=status,
+        )
+
+    def set_status(self, project_id: str, status: str) -> Project | None:
+        return self.store.set_status(project_id, self.account_id, status)
+
+    def set_summary(self, project_id: str, summary: str) -> Project | None:
+        return self.store.set_summary(project_id, self.account_id, summary)
+
+
 class ProjectStore:
     """The user's projects, persisted as JSON or held in memory.
 
-    All reads go through ``list_for`` / ``get_for`` with a ``user_id``, same
-    scoping seam as ``Store.conversations_for`` / ``tasks_for``: there is one
-    user today, and the seam is what keeps it from being a rewrite later.
+    All reads go through ``list_for`` / ``get_for`` with a ``user_id`` — the
+    owning account's id, under its persisted field name — which every method
+    requires (no default). Route code uses ``for_account(account_id)`` and
+    the :class:`AccountProjects` view instead of passing it per call.
     """
+
+    def for_account(self, account_id: str) -> AccountProjects:
+        """The store as one account sees it. ``account_id`` is required."""
+        if not isinstance(account_id, str) or not account_id.strip():
+            raise ValueError(
+                "account_id is required: project access is always scoped to an account."
+            )
+        return AccountProjects(self, account_id)
 
     def __init__(self, path: str | Path | None = None) -> None:
         self._json: JsonStore | None = None if path is None else JsonStore(path, default=_empty)

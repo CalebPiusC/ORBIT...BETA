@@ -33,7 +33,7 @@ from app.projects import (
     SourceUnavailable,
 )
 from app.server import create_app
-from app.store import Store
+from app.store import DEFAULT_USER_ID, Store
 from tools.registry import AuditLog
 
 
@@ -248,7 +248,7 @@ class ProjectRouteTests(unittest.TestCase):
         # the rendered element is what must be absent)
         self.assertNotIn('class="continue-strip"', html)
         project = self.project_store.create(user_id="caleb", name="Fieldnotes")
-        self.app.config["STORE"].create_task("Sort by recent", project_id=project.id)
+        self.app.config["STORE"].for_account(DEFAULT_USER_ID).create_task("Sort by recent", project_id=project.id)
         html = self.client.get("/create").get_data(as_text=True)
         self.assertIn('class="continue-strip"', html)
         strip = html[html.index('class="continue-strip"'):]
@@ -297,7 +297,7 @@ class ProjectRouteTests(unittest.TestCase):
         self.assertNotIn("sort=zebra", grid)
 
     def test_selecting_and_deselecting_a_specialist(self) -> None:
-        store: Store = self.app.config["STORE"]
+        store = self.app.config["STORE"].for_account(DEFAULT_USER_ID)
         self.assertIsNone(store.selected_agent)
         resp = self.client.post("/agents/debug/select")
         self.assertEqual(resp.status_code, 303)
@@ -317,7 +317,7 @@ class ProjectRouteTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
     def test_agent_assignment_creates_a_project_conversation(self) -> None:
-        store: Store = self.app.config["STORE"]
+        store = self.app.config["STORE"].for_account(DEFAULT_USER_ID)
         project = self.project_store.create(user_id="caleb", name="Fieldnotes")
         resp = self.client.post("/agents/review/assign", data={"project_id": project.id})
         self.assertEqual(resp.status_code, 303)
@@ -353,7 +353,7 @@ class ProjectRouteTests(unittest.TestCase):
 
 class ProjectTaskLinkTests(unittest.TestCase):
     def test_tasks_attach_to_projects(self) -> None:
-        store = Store()
+        store = Store().for_account(DEFAULT_USER_ID)
         project = ProjectStore().create(user_id="caleb", name="bot")
         task = store.create_task("Fix the crash in checkout.py", project_id=project.id)
         store.create_task("Unrelated standalone task")
