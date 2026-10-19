@@ -9,7 +9,7 @@ def test_migrations_apply_cleanly_to_empty_database(tmp_path):
     path = tmp_path / "fresh.sqlite3"
     db = Database(path)
 
-    assert db.current_version == 3
+    assert db.current_version == 4
     with db.connect() as connection:
         applied = connection.execute(
             "SELECT version, name FROM migrations ORDER BY version"
@@ -24,6 +24,7 @@ def test_migrations_apply_cleanly_to_empty_database(tmp_path):
         (1, "001_initial_schema.sql"),
         (2, "002_account_integrity.sql"),
         (3, "003_credentials_consistency.sql"),
+        (4, "004_account_plans.sql"),
     ]
     expected = {
         "accounts",
@@ -35,6 +36,7 @@ def test_migrations_apply_cleanly_to_empty_database(tmp_path):
         "screen_state",
         "heartbeat_reminders",
         "analytics_data",
+        "plans",
     }
     assert expected <= names
 
@@ -78,7 +80,7 @@ def test_migrations_apply_cleanly_to_empty_database(tmp_path):
 
     # Reopening is idempotent and keeps one record per migration.
     reopened = Database(path)
-    assert reopened.current_version == 3
+    assert reopened.current_version == 4
     assert path.stat().st_mode & 0o077 == 0
 
 

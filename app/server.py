@@ -322,8 +322,8 @@ OWNERSHIP_EXEMPTIONS: dict[str, str] = {
         "get_agent -> 404. The selection itself is stored per account."
     ),
     "api_heartbeat_dismiss": (
-        "notice_id belongs to the heartbeat service, which is "
-        "process-global and keeps no per-account records."
+        "notice_id is checked against the signed-in account's heartbeat state; "
+        "foreign or unknown notices both answer 404."
     ),
     "auth_oauth": (
         "provider names a sign-in provider catalog entry, validated "
@@ -395,6 +395,7 @@ def create_app(
     # answerable from audit.log, not only from a console line.
     audit = model_audit if model_audit is not None else AuditLog()
     app.config["MODEL_AUDIT"] = audit
+    app.config["MODEL_AUDIT_INJECTED"] = model_audit is not None
     app.config["VOICE_SERVICE"] = (
         voice_service if voice_service is not None else VoiceService(audit_log=audit)
     )
@@ -407,7 +408,19 @@ def create_app(
         return _json({"error": "Recording is too large. Keep voice clips under 25 MB."}, 413)
 
     def _heartbeat_or_none() -> Any | None:
-        return app.config["HEARTBEAT"]
+        heartbeat = app.config["HEARTBEAT"]
+        if heartbeat is not None and callable(getattr(heartbeat, "for_account", None)):
+            return heartbeat.for_account(_scoped_store().account_id)
+        return heartbeat
+
+    def _audit_for_account(account_id: str | None = None) -> AuditLog | None:
+        audit: AuditLog | None = app.config["MODEL_AUDIT"]
+        store_obj = app.config.get("STORE")
+        database = getattr(store_obj, "database", None)
+        if database is not None and not app.config.get("MODEL_AUDIT_INJECTED"):
+            scoped_id = account_id or _scoped_store().account_id
+            return AuditLog(database=database, account_id=scoped_id)
+        return audit
 
     def _panel_state(task_obj: Any) -> dict[str, Any] | None:
         """The Agent panel's state, or ``None`` when this task has never run.
@@ -449,15 +462,22 @@ def create_app(
             from providers.gemini import GeminiProvider
 
             queue = app.config["ACTIONS"]
+            store_obj = app.config.get("STORE")
+            database = getattr(store_obj, "database", None)
+            provider_audit = (
+                AuditLog(database=database)
+                if database is not None and not app.config.get("MODEL_AUDIT_INJECTED")
+                else _audit_for_account()
+            )
             prov = GeminiProvider(
                 tool_registry=queue.registry if queue is not None else None,
-                audit_log=app.config["MODEL_AUDIT"],
+                audit_log=provider_audit,
             )
             app.config["PROVIDER"] = prov
         return prov
 
     def _record_model_event(event: str, **fields: Any) -> None:
-        audit: AuditLog | None = app.config["MODEL_AUDIT"]
+        audit = _audit_for_account(fields.get("account_id"))
         if audit is None:
             return
         try:
@@ -473,7 +493,7 @@ def create_app(
         message is recorded here rather than in a second store. Fields are ids,
         counts and labels -- never message text.
         """
-        audit: AuditLog | None = app.config["MODEL_AUDIT"]
+        audit = _audit_for_account(fields.get("account_id"))
         if audit is None:
             return
         try:
@@ -491,7 +511,7 @@ def create_app(
         type, message, cause chain and traceback, plus the voice dependencies;
         never the audio, the transcript, or a credential.
         """
-        audit: AuditLog | None = app.config["MODEL_AUDIT"]
+        audit = _audit_for_account(fields.get("account_id"))
         if audit is None:
             return
         try:
@@ -1773,7 +1793,17 @@ def create_app(
         if owner and owner != st.account_id:
             return _json({"error": "This request is no longer pending. Nothing ran."}, 404)
         try:
-            outcome = queue.decide(action_id, approved=decision == "approve")
+            from contextlib import nullcontext
+            from tools.registry import audit_account_context
+
+            manager = app.config.get("HEARTBEAT")
+            heartbeat_scope = (
+                manager.account_context(st.account_id)
+                if callable(getattr(manager, "account_context", None))
+                else nullcontext()
+            )
+            with audit_account_context(st.account_id), heartbeat_scope:
+                outcome = queue.decide(action_id, approved=decision == "approve")
         except KeyError:
             return _json({"error": "This request is no longer pending. Nothing ran."}, 404)
         if decision == "decline":
@@ -1822,8 +1852,13 @@ def create_app(
         audit: AuditLog | None = app.config["MODEL_AUDIT"]
         # The same file the rest of the app logs to, so the view cannot drift
         # onto a different path from the records it counts.
-        log_path = audit.path if audit is not None else DEFAULT_AUDIT_LOG_PATH
-        report = build_analytics(log_path)
+        store_obj = app.config.get("STORE")
+        database = getattr(store_obj, "database", None)
+        if database is not None and not app.config.get("MODEL_AUDIT_INJECTED"):
+            report = build_analytics(database, account_id=st.account_id)
+        else:
+            log_path = audit.path if audit is not None else DEFAULT_AUDIT_LOG_PATH
+            report = build_analytics(log_path)
         return render_template(
             "analytics.html",
             report=report,
@@ -2929,9 +2964,25 @@ def run_app(app: Flask) -> None:
             voice_report.get("model_source"),
         )
 
+    store_obj = app.config.get("STORE")
+    database = getattr(store_obj, "database", None)
+    if database is not None and not app.config.get("MODEL_AUDIT_INJECTED"):
+        voice_service = app.config.get("VOICE_SERVICE")
+        if voice_service is not None and hasattr(voice_service, "_audit_log"):
+            voice_service._audit_log = AuditLog(database=database)
+
     heartbeat = app.config.get("HEARTBEAT")
     if heartbeat is None:
-        heartbeat = Heartbeat(settings=load_heartbeat_settings())
+        store_obj = app.config.get("STORE")
+        database = getattr(store_obj, "database", None)
+        if database is not None:
+            from heartbeat.sqlite_store import SQLiteHeartbeatManager
+
+            heartbeat = SQLiteHeartbeatManager(
+                settings=load_heartbeat_settings(), database=database
+            )
+        else:
+            heartbeat = Heartbeat(settings=load_heartbeat_settings())
         app.config["HEARTBEAT"] = heartbeat
     start_scheduler(heartbeat, interval_seconds=heartbeat.settings.interval_seconds)
 
@@ -2960,8 +3011,14 @@ def run_app(app: Flask) -> None:
         # Browser tools: the same six tools as the terminal, but the decision
         # comes from the card, not a console prompt.
         gate = DeferredConfirmationGate()
-        registry = build_tool_registry(confirmation_gate=gate, heartbeat=heartbeat)
-        app.config["ACTIONS"] = PendingActions(registry, gate, audit=AuditLog())
+        store_obj = app.config.get("STORE")
+        audit_database = getattr(store_obj, "database", None)
+        registry = build_tool_registry(
+            confirmation_gate=gate, heartbeat=heartbeat, audit_database=audit_database
+        )
+        app.config["ACTIONS"] = PendingActions(
+            registry, gate, audit=AuditLog(database=audit_database)
+        )
 
     app.run(host=host, port=port, debug=False)
 

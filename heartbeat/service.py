@@ -74,15 +74,19 @@ class Heartbeat:
         state_path: str | Path = DEFAULT_HEARTBEAT_PATH,
         plans: PlanStore | None = None,
         audit: AuditLog | None = None,
+        state_store: Any | None = None,
     ) -> None:
         self.settings = settings
-        self._store = JsonStore(state_path, _empty_state)
+        self._store = state_store if state_store is not None else JsonStore(state_path, _empty_state)
         self._plans = plans if plans is not None else PlanStore()
         self._audit = audit if audit is not None else AuditLog()
 
     @property
     def state_path(self) -> Path:
-        return self._store.path
+        path = getattr(self._store, "path", None)
+        if path is not None:
+            return Path(path)
+        return Path(self._store.database.path)
 
     # ----- reads -----
     def snapshot(self, now: datetime | None = None) -> dict[str, Any]:

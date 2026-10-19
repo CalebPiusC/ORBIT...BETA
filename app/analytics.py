@@ -163,19 +163,44 @@ def _summarize(
 
 
 def build_analytics(
-    audit_path: str | Path,
+    audit_path: str | Path | Any,
     *,
     now: datetime | None = None,
     window_days: int = WINDOW_DAYS,
+    account_id: str | None = None,
 ) -> AnalyticsReport:
-    """Read the audit log and return the counts the Analytics view shows."""
-    path = Path(audit_path)
+    """Read an audit file, or one account's SQLite analytics rows."""
     moment = now or datetime.now(timezone.utc)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     start_day = moment.date() - timedelta(days=window_days - 1)
     since = datetime.combine(start_day, datetime.min.time(), tzinfo=timezone.utc)
-    events, lines_read, present = _read_events(path, since)
+    database_source = hasattr(audit_path, "connect") and hasattr(audit_path, "path")
+    if database_source:
+        if not account_id:
+            raise ValueError("account_id is required for SQLite analytics")
+        with audit_path.connect() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM analytics_data WHERE account_id = ? ORDER BY rowid",
+                (account_id,),
+            ).fetchall()
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                item = json.loads(row[0])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(item, dict):
+                stamp = _parse_timestamp(item.get("timestamp"))
+                if stamp is None or stamp >= since:
+                    events.append(item)
+        lines_read = len(rows)
+        present = bool(rows)
+        log_label = f"sqlite:{audit_path.path}"
+    else:
+        path = Path(audit_path)
+        events, lines_read, present = _read_events(path, since)
+        log_label = str(path)
 
     messages_by_day: Counter[str] = Counter()
     models: Counter[tuple[str, str | None]] = Counter()
@@ -239,15 +264,22 @@ def build_analytics(
     notes: list[str] = []
     if not present:
         notes.append(
-            "No audit.log yet, so there is nothing to count. It is written on the first "
+            "No analytics records for this account yet. Events are recorded on the first "
+            "message, tool call, rating or reminder."
+            if database_source
+            else "No audit.log yet, so there is nothing to count. It is written on the first "
             "message, tool call, rating or reminder."
         )
     elif not events:
-        notes.append("audit.log has no events in this window yet.")
+        notes.append(
+            "This account has no analytics events in this window yet."
+            if database_source
+            else "audit.log has no events in this window yet."
+        )
 
     return AnalyticsReport(
         window_days=window_days,
-        log_path=str(path),
+        log_path=log_label,
         log_present=present,
         events_read=lines_read,
         messages_total=messages_total,

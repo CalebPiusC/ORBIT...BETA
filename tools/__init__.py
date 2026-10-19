@@ -19,6 +19,7 @@ def build_tool_registry(
     *,
     confirmation_gate: ConfirmationGate | None = None,
     audit_log_path: str | Path = DEFAULT_AUDIT_LOG_PATH,
+    audit_database=None,
     notes_path: str | Path = DEFAULT_NOTES_PATH,
     facts_path: str | Path = DEFAULT_FACTS_PATH,
     plans_path: str | Path = DEFAULT_PLANS_PATH,
@@ -27,7 +28,9 @@ def build_tool_registry(
 ) -> ToolRegistry:
     """Build the initial registry with a mandatory interactive confirmation gate."""
     gate = confirmation_gate if confirmation_gate is not None else ConsoleConfirmationGate()
-    registry = ToolRegistry(gate, audit_log_path=audit_log_path)
+    registry = ToolRegistry(
+        gate, audit_log_path=audit_log_path, audit_database=audit_database
+    )
     register_write_note(registry, notes_path=notes_path)
     register_memory_tools(registry, facts_path=facts_path)
     if heartbeat is None:
@@ -42,7 +45,12 @@ def build_tool_registry(
             plans=PlanStore(plans_path),
             audit=AuditLog(audit_log_path),
         )
-    register_plan_tools(registry, plans=PlanStore(plans_path), heartbeat=heartbeat)
+    scoped_plans = (
+        heartbeat
+        if heartbeat is not None and callable(getattr(heartbeat, "_plans_for_current", None))
+        else PlanStore(plans_path)
+    )
+    register_plan_tools(registry, plans=scoped_plans, heartbeat=heartbeat)
     return registry
 
 
