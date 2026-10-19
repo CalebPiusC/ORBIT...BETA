@@ -9,7 +9,7 @@ def test_migrations_apply_cleanly_to_empty_database(tmp_path):
     path = tmp_path / "fresh.sqlite3"
     db = Database(path)
 
-    assert db.current_version == 5
+    assert db.current_version == 7
     with db.connect() as connection:
         applied = connection.execute(
             "SELECT version, name FROM migrations ORDER BY version"
@@ -26,6 +26,8 @@ def test_migrations_apply_cleanly_to_empty_database(tmp_path):
         (3, "003_credentials_consistency.sql"),
         (4, "004_account_plans.sql"),
         (5, "005_account_records.sql"),
+        (6, "006_account_tombstones.sql"),
+        (7, "007_import_markers.sql"),
     ]
     expected = {
         "accounts",
@@ -38,6 +40,7 @@ def test_migrations_apply_cleanly_to_empty_database(tmp_path):
         "heartbeat_reminders",
         "analytics_data",
         "plans",
+        "data_imports",
     }
     assert expected <= names
 
@@ -45,7 +48,7 @@ def test_migrations_apply_cleanly_to_empty_database(tmp_path):
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 10000
         assert connection.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
-        for table in expected - {"accounts"}:
+        for table in expected - {"accounts", "data_imports"}:
             info = connection.execute(f"PRAGMA table_info({table})").fetchall()
             account_id = next(column for column in info if column[1] == "account_id")
             assert account_id[3] == 1, table
@@ -81,7 +84,7 @@ def test_migrations_apply_cleanly_to_empty_database(tmp_path):
 
     # Reopening is idempotent and keeps one record per migration.
     reopened = Database(path)
-    assert reopened.current_version == 5
+    assert reopened.current_version == 7
     assert path.stat().st_mode & 0o077 == 0
 
 

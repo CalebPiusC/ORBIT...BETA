@@ -3004,9 +3004,19 @@ def run_app(app: Flask) -> None:
         store_obj = app.config.get("STORE")
         database = getattr(store_obj, "database", None)
         if database is not None:
+            from app.accounts import AccountStore
             from app.sqlite_accounts import SQLiteAccountStore
 
-            app.config["ACCOUNTS"] = SQLiteAccountStore(database)
+            sqlite_accounts = SQLiteAccountStore(database)
+            legacy_path = Path(
+                os.environ.get("ORBIT_ACCOUNTS_PATH", "runtime/accounts.json")
+            )
+            if legacy_path.is_file():
+                legacy_accounts = AccountStore(legacy_path)
+                sqlite_accounts.import_legacy_data(
+                    legacy_accounts._read(), source=str(legacy_path.resolve())
+                )
+            app.config["ACCOUNTS"] = sqlite_accounts
         else:
             from app.accounts import AccountStore
 

@@ -1,6 +1,7 @@
 """SQLite-backed authentication/account store for production launches."""
 from __future__ import annotations
 
+import copy
 import json
 import threading
 from typing import Any
@@ -31,13 +32,14 @@ class SQLiteAccountStore(AccountStore):
         # is packed inside its account row, never queried cross-account.
         rows = db.execute(
             "SELECT id, email, password_hash, password_salt, "
-            "email_verification_token_hash, email_verification_expires_at, account_data "
+            "email_verification_token_hash, email_verification_expires_at, account_data, is_active "
             "FROM accounts ORDER BY rowid"
         ).fetchall()
         for row in rows:
-            if not row["email"]:
+            if not row["email"] or not row["is_active"]:
                 # The chat store may have created an ownership-root row for an
-                # account that has not registered through the auth flow.
+                # account that has not registered through the auth flow, or a
+                # tombstone retained to preserve owned workspace data after deletion.
                 continue
             try:
                 stored = json.loads(row["account_data"] or "{}")
@@ -73,6 +75,33 @@ class SQLiteAccountStore(AccountStore):
         with self.database.connect() as db:
             return self._read_connection(db)
 
+    def import_legacy_data(
+        self, legacy_data: dict[str, Any], *, source: str = "legacy-account-store"
+    ) -> None:
+        """Merge a prior JSON AccountStore snapshot once, without plaintext codes."""
+        with self.database.connect() as db:
+            if db.execute("SELECT 1 FROM data_imports WHERE source = ?", (source,)).fetchone():
+                return
+        def merge(data: dict[str, Any]) -> None:
+            existing = {account["id"] for account in data.get("accounts", [])}
+            data.setdefault("accounts", []).extend(
+                copy.deepcopy(account)
+                for account in legacy_data.get("accounts", [])
+                if account.get("id") not in existing
+            )
+            data.setdefault("codes", {}).update(copy.deepcopy(legacy_data.get("codes", {})))
+            feedback_ids = {item.get("id") for item in data.setdefault("feedback", [])}
+            data["feedback"].extend(
+                copy.deepcopy(item)
+                for item in legacy_data.get("feedback", [])
+                if item.get("id") not in feedback_ids
+            )
+        self._update(merge)
+        with self.database.connect() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO data_imports(source) VALUES (?)", (source,)
+            )
+
     def _update(self, change):
         with self._lock, self.database.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -90,7 +119,16 @@ class SQLiteAccountStore(AccountStore):
                 codes = before.get("codes", {})
                 feedback = before.get("feedback", [])
                 for account_id in old_accounts.keys() - accounts.keys():
-                    db.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+                    # Keep the FK ownership root so workspace data remains
+                    # exactly as before account deletion; remove credentials
+                    # and mark the auth identity inactive.
+                    db.execute(
+                        "UPDATE accounts SET email = NULL, password_hash = NULL, "
+                        "password_salt = NULL, email_verification_token_hash = NULL, "
+                        "email_verification_expires_at = NULL, account_data = '{}', "
+                        "is_active = 0 WHERE id = ?",
+                        (account_id,),
+                    )
 
                 for account_id, account in accounts.items():
                     email = account.get("email") or ""
@@ -120,13 +158,14 @@ class SQLiteAccountStore(AccountStore):
                     expiry = verify.get("expires_at") if verify else None
                     db.execute(
                         "INSERT INTO accounts(id, email, password_hash, password_salt, "
-                        "email_verification_token_hash, email_verification_expires_at, account_data) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                        "email_verification_token_hash, email_verification_expires_at, account_data, is_active) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, 1) "
                         "ON CONFLICT(id) DO UPDATE SET email = excluded.email, "
                         "password_hash = excluded.password_hash, password_salt = excluded.password_salt, "
                         "email_verification_token_hash = excluded.email_verification_token_hash, "
                         "email_verification_expires_at = excluded.email_verification_expires_at, "
-                        "account_data = excluded.account_data WHERE accounts.id = excluded.id",
+                        "account_data = excluded.account_data, is_active = 1 "
+                        "WHERE accounts.id = excluded.id",
                         (
                             account_id,
                             email,

@@ -111,7 +111,7 @@ class SQLiteHeartbeatManager:
         """Tick each registered account; state is fetched independently."""
         with self.database.connect() as db:
             account_ids = [
-                row[0] for row in db.execute("SELECT id FROM accounts ORDER BY id").fetchall()
+                row[0] for row in db.execute("SELECT id FROM accounts WHERE is_active = 1 ORDER BY id").fetchall()
             ]
         fired: list[dict[str, Any]] = []
         for account_id in account_ids:
