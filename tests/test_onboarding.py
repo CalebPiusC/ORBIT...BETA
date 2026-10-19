@@ -18,6 +18,7 @@ untouched by all of this: an earlier test in this file pins that decision
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -902,3 +903,100 @@ class ButtonContrastTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DashboardDesignTests(unittest.TestCase):
+    """The Overview screen as drawn in Dashboard · Light/Dark · Desktop/Mobile.
+
+    These pin the promises the frame makes structurally: one primary action,
+    no literal colour in the markup, a rail whose order matches the frame, and
+    an honest treatment for the three destinations this build does not have.
+    """
+
+    def _active(self):
+        app, client, accounts = make_client()
+        oauth(client)
+        account = accounts.by_email("grace@example.dev")
+        project = app.config["PROJECTS"].create(
+            user_id=account["id"], name="Fieldnotes", description="A quieter home for everything you want to read."
+        )
+        view = app.config["STORE"].for_account(account["id"])
+        view.create_task("Save your first article", project_id=project.id)
+        client.get("/dashboard")  # the first visit marks the return
+        return app, client, project
+
+    def test_one_primary_action_on_the_screen(self) -> None:
+        _, client, _ = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertEqual(page.count("o-btn--primary"), 1)
+        self.assertIn("New project", page)
+
+    def test_markup_carries_no_literal_colour_or_inline_style(self) -> None:
+        _, client, _ = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertNotIn('style="', page)
+        self.assertNotIn("rgba(", page)
+        self.assertIsNone(re.search(r"#[0-9A-Fa-f]{3,6}\b", page))
+
+    def test_the_rail_follows_the_frame_order(self) -> None:
+        _, client, _ = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        rail = page[page.index('class="app-nav"'):page.index("</aside>")]
+        order = ["Overview", "Projects", "Agents", "Approvals", "Analytics", "Reminders", "Connected apps", "Settings"]
+        positions = [rail.index(label) for label in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn('class="app-nav__item is-active" href="/dashboard" aria-current="page"', rail)
+
+    def test_unbuilt_destinations_are_disabled_not_dead_links(self) -> None:
+        _, client, _ = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        for path in ("/approvals", "/reminders", "/connected"):
+            self.assertNotIn(f'href="{path}"', page)
+        self.assertEqual(page.count('class="app-nav__item is-soon"'), 3)  # rail
+        self.assertEqual(page.count("app-nav__item app-nav__item--drawer is-soon"), 3)  # drawer
+        self.assertIn('aria-disabled="true"', page)
+
+    def test_the_phone_menu_is_a_real_dialog_with_the_same_rail(self) -> None:
+        _, client, _ = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertIn('id="appDrawer"', page)
+        self.assertIn('aria-controls="appDrawer"', page)
+        self.assertIn('aria-expanded="false"', page)
+        self.assertIn("data-drawer-close", page)
+        drawer = page[page.index('id="appDrawer"'):]
+        self.assertIn('href="/projects"', drawer)
+        self.assertIn('href="/settings"', drawer)
+
+    def test_the_three_states_render(self) -> None:
+        _, client, _ = self._active()
+        loading = client.get("/dashboard?view=loading").get_data(as_text=True)
+        self.assertIn("dash-skel", loading)
+        self.assertIn("Loading your workspace", loading)
+        error = client.get("/dashboard?view=error").get_data(as_text=True)
+        self.assertIn("couldn't load your workspace", error)
+        self.assertIn("Try again", error)
+        self.assertIn("Open projects", error)
+
+    def test_the_project_card_and_strip_name_real_work(self) -> None:
+        _, client, project = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        card_start = page.index("dash-card__project")
+        card = page[card_start:]
+        self.assertIn("Fieldnotes", card)
+        self.assertIn("Open Project Map", card)
+        self.assertIn(f'href="/projects/{project.id}"', card)
+        strip = page[page.index('class="continue-strip"'):]
+        self.assertIn("Fieldnotes", strip)
+        self.assertIn("Open workspace", strip)
+
+    def test_the_drawer_and_rail_share_no_missing_page(self) -> None:
+        _, client, _ = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        # Every href in the chrome resolves to a route this build serves.
+        for href in re.findall(r'href="(/[^"#?]*)"', page):
+            if href.startswith("/projects/") or href.startswith("/static/"):
+                continue
+            self.assertIn(
+                href, {"/dashboard", "/projects", "/agents", "/analytics", "/settings", "/create", "/", "/onboarding"},
+                href,
+            )

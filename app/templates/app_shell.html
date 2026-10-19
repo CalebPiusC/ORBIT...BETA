@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>{% block title %}orbit{% endblock %}</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='orbit-mark.svg') }}" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+<script>
+  // Theme before first paint: a saved choice wins, otherwise the system setting.
+  (function () {
+    try {
+      var saved = window.localStorage.getItem("orbit.theme");
+      var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.theme = saved || (dark ? "dark" : "light");
+    } catch (_error) {
+      document.documentElement.dataset.theme = "light";
+    }
+  })();
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='orbit.css') }}" />
+<style>
+  /* ===========================================================
+     app shell — the rail and the phone bar for every signed-in
+     screen from the dashboard onward.
+
+     Measured from Dashboard · Light/Dark · Desktop (1440) and
+     Mobile (390):
+       rail 224 wide, wordmark inset 32, nav rows 48 tall,
+       active mark 2px × 24 at x16, workspace tile 40 below the
+       wordmark, nav 56 below that;
+       content inset 40, 1136 wide at 1440, 32 between sections,
+       24 between columns;
+       phone bar 56 tall with a hairline under it, 16 gutters.
+
+     Copper in the rail appears once: the active indicator.
+     =========================================================== */
+
+  html { background: var(--bg); }
+
+  body.app-body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text-1);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 224px minmax(0, 1fr);
+    min-height: 100vh;
+  }
+
+  /* ---------------- rail ---------------- */
+  .app-side {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 24px 0 32px;
+    background: var(--surface);
+  }
+
+  .app-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 32px;
+    color: var(--text-1);
+    text-decoration: none;
+  }
+
+  .app-brand__mark { width: 28px; height: 28px; }
+
+  .app-brand__word {
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.01em;
+  }
+
+  .app-ws {
+    display: flex;
+    flex-direction: column;
+    margin-top: 48px;
+    padding: 0 32px;
+  }
+
+  .app-ws__name { font-size: 15px; line-height: 1.45; color: var(--text-1); }
+  .app-ws__meta { font-size: 15px; line-height: 1.45; color: var(--text-2); }
+
+  .app-nav {
+    display: flex;
+    flex-direction: column;
+    margin-top: 52px;
+  }
+
+  .app-nav__item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 52px;
+    padding: 0 32px;
+    color: var(--text-1);
+    font-size: 15px;
+    line-height: 1.4;
+    text-decoration: none;
+  }
+
+  .app-nav__item:hover { background: var(--surface-2); }
+
+  .app-nav__item.is-active::before {
+    content: "";
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    width: 2px;
+    height: 24px;
+    margin-top: -12px;
+    border-radius: 1px;
+    background: var(--copper);
+  }
+
+  .app-nav__item.is-soon {
+    color: var(--text-3);
+    cursor: not-allowed;
+  }
+
+  .app-nav__item.is-soon:hover { background: transparent; }
+
+  .app-nav__soon {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .app-side__foot {
+    display: flex;
+    flex-direction: column;
+    margin-top: 44px;
+    padding: 0 32px;
+  }
+
+  .app-user__name { font-size: 15px; line-height: 1.45; color: var(--text-2); }
+  .app-user__meta { font-size: 15px; line-height: 1.45; color: var(--text-3); }
+
+  /* ---------------- phone bar ---------------- */
+  .app-topbar { display: none; }
+
+  .app-menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin-right: -10px;
+    border: 0;
+    border-radius: var(--r-control);
+    background: transparent;
+    color: var(--text-1);
+    cursor: pointer;
+  }
+
+  .app-menu__glyph {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+
+  .app-menu:hover { background: var(--surface-2); }
+
+  /* The drawer is a real dialog: ESC closes it, and every row in it goes
+     somewhere. It holds the same destinations as the rail. */
+  .app-drawer {
+    position: fixed;
+    inset: 0 0 0 auto;
+    width: min(320px, 86vw);
+    border-radius: 0;
+    max-width: 100%;
+    height: 100%;
+    max-height: 100%;
+    margin: 0 0 0 auto;
+    padding: 0;
+    border: 0;
+    background: var(--surface);
+    color: var(--text-1);
+    box-shadow: var(--shadow-pop);
+  }
+
+  .app-drawer::backdrop { background: var(--scrim); }
+
+  .app-drawer__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 16px 8px 24px;
+  }
+
+  .app-drawer__title {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 500;
+  }
+
+  .app-drawer__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: var(--r-control);
+    background: transparent;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+
+  .app-drawer__close svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+
+  .app-drawer__close:hover { background: var(--surface-2); color: var(--text-1); }
+
+  .app-drawer__nav { display: flex; flex-direction: column; padding: 8px 0; }
+
+  .app-nav__item--drawer { padding: 0 24px; }
+
+  .app-nav__item--drawer.is-active::before { left: 8px; }
+
+  .app-drawer__foot {
+    display: flex;
+    flex-direction: column;
+    margin-top: 16px;
+    padding: 16px 24px 0;
+    border-top: 1px solid var(--border);
+  }
+
+  /* ---------------- page ---------------- */
+  .app-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .app-content { padding: 40px; }
+
+  .app-inner { max-width: 1136px; }
+
+  /* Dark surfaces separate with a hairline where a shadow cannot. */
+  [data-theme="dark"] .app-side { background: var(--surface); }
+
+  @media (max-width: 1100px) {
+    .app-content { padding: 32px 32px 56px; }
+  }
+
+  @media (max-width: 900px) {
+    .app { display: block; }
+
+    .app-side { display: none; }
+
+    .app-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 56px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+
+    .app-brand--mobile { padding: 0; }
+    .app-brand--mobile .app-brand__mark { width: 24px; height: 24px; }
+    .app-brand--mobile .app-brand__word { font-size: 22px; }
+
+    .app-content { padding: 24px 16px 48px; }
+  }
+
+  @media (min-width: 901px) {
+    .app-drawer { display: none; }
+  }
+
+  /* The first-run tour (drawn in onboarding.js) is part of the shell. */
+  .tour-card {
+    position: fixed;
+    z-index: 61;
+    width: min(340px, calc(100vw - 32px));
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-pop);
+  }
+
+  .tour-card[hidden] { display: none; }
+
+  .tour-step-count {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .tour-title {
+    margin: 6px 0;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 1.3;
+  }
+
+  .tour-text {
+    margin: 0 0 16px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  .tour-actions { display: flex; align-items: center; gap: 8px; }
+  .tour-actions .spacer { flex: 1; }
+
+  .tour-skip {
+    padding: 10px 0;
+    border: 0;
+    background: none;
+    color: var(--text-2);
+    font: inherit;
+    font-size: 13px;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+
+  .tour-skip:hover { color: var(--text-1); }
+
+  .tour-next {
+    padding: 11px 18px;
+    border: 0;
+    border-radius: var(--r-control);
+    background: var(--copper);
+    color: var(--copper-ink);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .tour-next:hover { background: var(--copper-hover); }
+
+  .tour-highlight {
+    position: fixed;
+    z-index: 60;
+    pointer-events: none;
+    border: 2px solid var(--text-1);
+    border-radius: var(--r-control);
+    box-shadow: 0 0 0 4000px var(--scrim);
+  }
+
+  .tour-highlight[hidden] { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tour-highlight { transition: none; }
+  }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body class="app-body">
+<a class="o-skip" href="#appMain">Skip to content</a>
+<div class="app">
+  {% include "_app_sidebar.html" %}
+  <div class="app-main">
+    {% include "_app_topbar.html" %}
+    <main class="app-content" id="appMain">
+      <div class="app-inner">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+</div>
+{% block scripts %}
+<script>
+  // The phone menu. A dialog gives ESC and the backdrop for free; every row
+  // inside it is a real destination.
+  (function () {
+    var trigger = document.getElementById("appMenu");
+    var drawer = document.getElementById("appDrawer");
+    if (!trigger || !drawer || typeof drawer.showModal !== "function") return;
+    trigger.addEventListener("click", function () {
+      drawer.showModal();
+      trigger.setAttribute("aria-expanded", "true");
+    });
+    drawer.addEventListener("close", function () {
+      trigger.setAttribute("aria-expanded", "false");
+      trigger.focus();
+    });
+    var closer = drawer.querySelector("[data-drawer-close]");
+    if (closer) closer.addEventListener("click", function () { drawer.close(); });
+    drawer.addEventListener("click", function (event) {
+      if (event.target === drawer) drawer.close();
+    });
+  })();
+</script>
+{% if accounts_enabled %}
+{# The tour and the checklist's ✕ live in onboarding.js; both are part of the
+   chrome from this screen onward. #}
+<script src="{{ url_for('static', filename='onboarding.js') }}"></script>
+<script>
+  if (window.OrbitOnboarding) { window.OrbitOnboarding.boot(); }
+</script>
+{% endif %}
+{% endblock %}
+</body>
+</html>
