@@ -82,10 +82,15 @@ class Database:
                 # transaction, and record its version only after it succeeds.
                 connection.execute("BEGIN IMMEDIATE")
                 try:
-                    statements = migration.read_text(encoding="utf-8").split(";")
-                    for statement in statements:
-                        if statement.strip():
-                            connection.execute(statement)
+                    pending = ""
+                    for line in migration.read_text(encoding="utf-8").splitlines(True):
+                        pending += line
+                        if sqlite3.complete_statement(pending):
+                            if pending.strip():
+                                connection.execute(pending)
+                            pending = ""
+                    if pending.strip():
+                        raise RuntimeError(f"Incomplete SQL in migration {migration.name}")
                     connection.execute(
                         "INSERT INTO migrations(version, name) VALUES (?, ?)",
                         (version, migration.name),

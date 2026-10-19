@@ -2887,6 +2887,13 @@ def run_app(app: Flask) -> None:
     """
     _require_real_secret_key(app)
 
+    # App factories remain fast and isolated in-memory for tests. The actual
+    # server process upgrades that default to durable SQLite before serving.
+    from app.sqlite_store import SQLiteStore
+    from app.store import Store as InMemoryStore
+    if type(app.config.get("STORE")) is InMemoryStore:
+        app.config["STORE"] = SQLiteStore()
+
     host = os.environ.get("ORBIT_HOST", "").strip() or "127.0.0.1"
     raw_port = os.environ.get("PORT", "").strip() or "5000"
     try:
