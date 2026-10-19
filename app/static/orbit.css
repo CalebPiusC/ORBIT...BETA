@@ -45,7 +45,11 @@
   /* ---- derived surfaces ---- */
   --chip-bg: #F1EEE9;           /* "Needs approval" capsule */
   --stage-bg: var(--bg);        /* map tiles inside a card */
-  --ring: var(--text-3);        /* signature arcs, progress rings */
+  /* Decorative hairlines — the orbit arcs, progress rings and rules.
+     Kept at the frame's own values: these are graphics, not text, so the
+     4.5:1 text rule does not apply and deepening them would darken the
+     signature detail. --text-3 stays the AA-compliant text tone. */
+  --ring: #8F8A80;
 
   /* ---- shape ---- */
   --r-control: 12px;            /* inputs, buttons */
@@ -93,7 +97,7 @@
 
   --chip-bg: #0E0E0F;
   --stage-bg: var(--bg);
-  --ring: var(--text-3);
+  --ring: #706D66;
 
   /* Shadows do less work on dark surfaces — darker and softer, and
      components that rely on a shadow edge add a 1px --border. */
@@ -319,3 +323,165 @@ button { font: inherit; color: inherit; }
   white-space: nowrap;
   border: 0;
 }
+
+/* ===========================================================
+   form primitives — shared by auth, onboarding, settings.
+   The frame draws these as a single rounded box with the label
+   inside it, so .o-field carries the border and the label sits
+   on top of the input rather than beside it.
+   =========================================================== */
+
+.o-field {
+  display: block;
+  padding: 10px 16px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.o-field:focus-within {
+  border-color: var(--text-3);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-3) 18%, transparent);
+}
+
+.o-field__label {
+  display: block;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.o-field__input {
+  display: block;
+  width: 100%;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.o-field__input:focus { outline: none; }
+
+.o-field__input::placeholder { color: var(--text-3); }
+
+/* invalid: the field keeps its shape, only the border tone changes */
+.o-field.is-invalid { border-color: var(--danger); }
+
+.o-field-error {
+  display: none;
+  margin: 6px 0 0 2px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--danger);
+}
+
+.o-field-error.is-shown { display: block; }
+
+/* ---- checkbox ---- */
+.o-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.o-check input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: 0 0 18px;
+  border: 1px solid var(--text-3);
+  border-radius: 4px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.o-check input:checked {
+  background: var(--text-2);
+  border-color: var(--text-2);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'><path d='m5 13 4 4L19 7'/></svg>");
+  background-size: 13px 13px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+[data-theme="dark"] .o-check input:checked {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230F0F10' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'><path d='m5 13 4 4L19 7'/></svg>");
+}
+
+/* ---- rule with a word in the middle ---- */
+.o-rule {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.o-rule::before,
+.o-rule::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ---- text action (links that are actions) ---- */
+.o-text-action {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text-1);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.o-text-action:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* ---- small print ---- */
+.o-fineprint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+/* ---- alternative provider rows: same box as an input, centered ---- */
+.o-provider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  color: var(--text-1);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.o-provider:hover { background: var(--surface-2); }
+
+.o-provider svg { width: 18px; height: 18px; flex: 0 0 18px; }

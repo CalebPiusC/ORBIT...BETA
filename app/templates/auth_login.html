@@ -1,55 +1,478 @@
-{% extends "public.html" %}
-{% from "_auth_macros.html" import provider_buttons, error_box, notice_box, off_notice %}
-{% block title %}orbit — Sign in{% endblock %}
-{% block nav %}{% endblock %}
-{% block body %}
-<main class="auth-shell">
-  <section class="auth-card" aria-labelledby="loginTitle">
-    <img class="card-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-    <p class="auth-eyebrow">Welcome back</p>
-    <h1 class="auth-title" id="loginTitle">Sign in to ORBIT</h1>
-    <p class="auth-sub">Your projects, conversations and agents are where you left them.</p>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>orbit — Sign in</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='orbit-mark.svg') }}" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+<script>
+  // Theme before first paint: a saved choice wins, otherwise the system setting.
+  (function () {
+    try {
+      var saved = window.localStorage.getItem("orbit.theme");
+      var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.theme = saved || (dark ? "dark" : "light");
+    } catch (_error) {
+      document.documentElement.dataset.theme = "light";
+    }
+  })();
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='orbit.css') }}" />
+<style>
+  /* ===========================================================
+     sign in — one calm card, one promise beside it.
 
-    {% if accounts_off %}
-    {{ off_notice() }}
-    <form aria-disabled="true">
-      {{ provider_buttons() }}
-      <div class="divider">or with email</div>
-      <div class="field"><label class="field-label">Email</label><input class="text-input" disabled /></div>
-      <div class="field"><label class="field-label">Password</label><input class="text-input" type="password" disabled /></div>
-      <button class="btn-primary btn-block" type="button" disabled>Sign in</button>
-    </form>
-    {% else %}
-    {{ notice_box(notice, "success" if notice.startswith("Your password") else "") }}
-    {{ provider_buttons(next) }}
-    <div class="divider">or with email</div>
+     The frame is a 1440 canvas split into a marketing column and a
+     432-wide card, inset 96 from both edges while the header and
+     footer sit at 48. Mobile drops the marketing column, drops the
+     card surface, and keeps the order of the card's own contents.
 
-    {{ error_box(error) }}
+     Copper appears twice: the logo mark and the single primary
+     button. The card itself is flat — the frame draws no border and
+     no shadow on it, only a surface step, so neither is added.
+     =========================================================== */
 
-    <form method="post" action="/auth/login" data-auth-form="login" novalidate>
-      <input type="hidden" name="next" value="{{ next }}" />
-      <div class="field">
-        <label class="field-label" for="email">Email</label>
-        <input class="text-input" id="email" name="email" type="email" autocomplete="email"
-               placeholder="you@example.com" value="{{ values.get('email', '') }}" required data-validate="email" />
-        <p class="field-error" data-error-for="email">Enter the email you signed up with.</p>
+  html { background: var(--bg); }
+
+  .o-skip {
+    position: absolute;
+    left: 16px;
+    top: -60px;
+    z-index: 30;
+    padding: 10px 16px;
+    border-radius: var(--r-control);
+    background: var(--surface);
+    color: var(--text-1);
+    font-size: 14px;
+    text-decoration: none;
+    box-shadow: var(--shadow-pop);
+  }
+  .o-skip:focus { top: 16px; }
+
+  .auth {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---------------- header ---------------- */
+  .auth-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 48px 48px 0;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    text-decoration: none;
+    color: var(--text-1);
+  }
+
+  .brand__mark { width: 30px; height: 30px; }
+
+  .brand__word {
+    font-family: var(--font-display);
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1;
+  }
+
+  .auth-help {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 44px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-2);
+    text-decoration: none;
+    padding: 8px 0;
+  }
+
+  .auth-help:hover { color: var(--text-1); }
+
+  .auth-help svg { width: 13px; height: 13px; }
+
+  /* ---------------- main ---------------- */
+  .auth-main {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 1344px;
+    margin: 0 auto;
+    padding: 104px 48px 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 432px;
+    gap: 64px;
+    align-items: start;
+  }
+
+  /* ---------------- left column ---------------- */
+  .auth-marketing { padding-top: 58px; }
+
+  .auth-headline {
+    margin-top: 40px;
+    font-family: var(--font-display);
+    font-size: 56px;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+  }
+
+  .auth-lede {
+    margin-top: 42px;
+    max-width: 610px;
+    font-size: 18px;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  .auth-arc {
+    margin-top: 36px;
+    width: 240px;
+    height: 240px;
+    color: var(--ring);
+  }
+
+  .auth-arc path,
+  .auth-arc circle {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1;
+  }
+
+  .auth-arc .auth-arc__dot { fill: currentColor; stroke: none; }
+
+  .auth-note {
+    margin: 41px 0 0 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  /* ---------------- the card ---------------- */
+  .auth-card {
+    padding: 32px;
+    border-radius: var(--r-panel);
+    background: var(--surface);
+  }
+
+  .auth-card__title {
+    margin-top: 24px;
+    font-family: var(--font-display);
+    font-size: 36px;
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+  }
+
+  .auth-card__sub {
+    margin-top: 12px;
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  .auth-providers {
+    margin-top: 27px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .auth-rule { margin-top: 27px; }
+
+  .auth-form { margin-top: 27px; }
+
+  .auth-field + .auth-field { margin-top: 24px; }
+
+  /* public.js marks the input itself; the border lives on the wrapper */
+  .o-field:has(.invalid) { border-color: var(--danger); }
+
+  .o-field-error.show { display: block; }
+
+  .auth-meta {
+    margin-top: 25px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .auth-submit {
+    margin-top: 24px;
+    width: 100%;
+  }
+
+  .auth-submit.is-busy { opacity: 0.7; pointer-events: none; }
+
+  .auth-alt {
+    margin-top: 24px;
+    text-align: center;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  .auth-alt a {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 44px;
+    color: var(--text-1);
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  .auth-alt a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  .auth-alt svg { width: 13px; height: 13px; }
+
+  .auth-divider {
+    margin-top: 29px;
+    border: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .auth-legal {
+    margin-top: 26px;
+    text-align: center;
+    line-height: 1.45;
+  }
+
+  .auth-legal span { color: var(--text-2); }
+
+  /* feedback banners keep the card's shape */
+  .auth-banner {
+    margin-top: 24px;
+    padding: 12px 14px;
+    border-radius: var(--r-control);
+    font-size: 13px;
+    line-height: 1.5;
+    background: var(--surface-2);
+    color: var(--text-1);
+  }
+
+  .auth-banner--error { color: var(--danger); }
+
+  .auth-banner--off {
+    background: var(--surface-2);
+    color: var(--text-2);
+  }
+
+  .auth-banner code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+
+  /* ---------------- footer ---------------- */
+  .auth-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 96px 48px 48px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  /* ---------------- responsive ---------------- */
+  @media (max-width: 1180px) {
+    .auth-main { grid-template-columns: minmax(0, 1fr) 400px; gap: 48px; padding-top: 72px; }
+    .auth-headline { font-size: 46px; }
+    .auth-marketing { padding-top: 32px; }
+  }
+
+  @media (max-width: 980px) {
+    .auth-main {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0;
+      max-width: 560px;
+      padding-top: 48px;
+    }
+    .auth-marketing { display: none; }
+    .auth-card { padding: 32px 0 0; background: transparent; border-radius: 0; }
+    .auth-footer { padding-top: 72px; }
+  }
+
+  @media (max-width: 720px) {
+    .auth-header { padding: 64px 24px 0; }
+    .brand__mark { width: 26px; height: 26px; }
+    .brand__word { font-size: 26px; }
+
+    .auth-main { padding: 66px 24px 0; max-width: none; }
+
+    .auth-card { padding-top: 0; }
+
+    .auth-card__title {
+      margin-top: 20px;
+      font-size: 32px;
+      line-height: 1.2;
+    }
+
+    .auth-card__sub { margin-top: 15px; font-size: 14px; line-height: 1.45; }
+
+    .auth-providers { margin-top: 26px; gap: 24px; }
+
+    .auth-rule { margin-top: 26px; }
+
+    .auth-form { margin-top: 26px; }
+
+    .auth-meta { margin-top: 25px; }
+
+    .auth-submit { margin-top: 24px; }
+
+    .auth-alt { margin-top: 26px; }
+
+    .auth-divider { margin-top: 26px; }
+
+    .auth-legal { margin-top: 26px; }
+
+    .auth-footer {
+      padding: 56px 24px 24px;
+      font-size: 12px;
+    }
+
+    /* every tappable thing clears 44px on a phone */
+    .o-check { min-height: 44px; }
+    .o-text-action { display: inline-flex; align-items: center; min-height: 44px; }
+  }
+</style>
+</head>
+<body>
+<a class="o-skip" href="#signin-form">Skip to the form</a>
+
+<div class="auth">
+  <header class="auth-header">
+    <a class="brand" href="/" aria-label="orbit — home">
+      {# The attached orbit-rings mark, unchanged: same paths, drawn with theme tokens. #}
+      <svg class="brand__mark" viewBox="0 0 64 64" fill="none" aria-hidden="true" focusable="false">
+        <ellipse cx="32" cy="32" rx="27" ry="11" transform="rotate(25 32 32)" stroke="var(--copper)" stroke-width="2" />
+        <ellipse cx="32" cy="32" rx="27" ry="11" transform="rotate(-30 32 32)" stroke="var(--copper-deep)" stroke-width="2" />
+        <circle cx="32" cy="32" r="5" fill="var(--copper-bright)" />
+        <circle cx="55" cy="23" r="2.5" fill="var(--copper)" />
+      </svg>
+      <span class="brand__word">orbit</span>
+    </a>
+
+    <a class="auth-help" href="https://github.com/CalebPiusC/ORBIT...BETA/issues" target="_blank" rel="noopener noreferrer">Need a hand?
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 17 17 7M8 7h9v9" /></svg>
+    </a>
+  </header>
+
+  <main class="auth-main">
+    <div class="auth-marketing">
+      <p class="o-eyebrow">A little clarity goes a long way.</p>
+      <p class="auth-headline">Your ideas have<br />a place here.</p>
+      <p class="auth-lede">Pick up where inspiration left off. Your projects, your specialists, and your next step — all in one calm workspace.</p>
+
+      <svg class="auth-arc" viewBox="0 0 240 240" aria-hidden="true" focusable="false">
+        <circle cx="120" cy="120" r="119" stroke-dasharray="652 96" transform="rotate(33 120 120)" />
+        <circle class="auth-arc__dot" cx="184.75" cy="38.25" r="2.4" />
+      </svg>
+
+      <p class="auth-note">You approve every change. Always.</p>
+    </div>
+
+    <section class="auth-card" aria-labelledby="loginTitle">
+      <p class="o-eyebrow">Welcome back</p>
+      <h1 class="auth-card__title" id="loginTitle">Back in your orbit.</h1>
+      <p class="auth-card__sub">Sign in to your personal workspace.</p>
+
+      {% if accounts_off %}
+      <div class="auth-banner auth-banner--off" role="status">
+        <strong>This launch has accounts off.</strong><br />
+        You’re looking at the local single-user build of ORBIT. Sign-up and sign-in light up on the full server — start it with <code>python -m app.server</code>.
       </div>
-      <div class="field">
-        <div class="auth-foot-row" style="margin:0 0 6px;">
-          <label class="field-label" for="password" style="margin:0;">Password</label>
-          <a href="/auth/forgot">Forgot it?</a>
+      {% else %}
+
+      {% if notice %}
+      <div class="auth-banner" role="status">{{ notice }}</div>
+      {% endif %}
+
+      {% if error %}
+      <div class="auth-banner auth-banner--error" role="alert">{{ error }}</div>
+      {% endif %}
+
+      <div class="auth-providers">
+        <a class="o-provider" href="/auth/oauth/google{% if next %}?next={{ next }}{% endif %}" data-provider="google">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8" /></svg>
+          <span>Continue with Google</span>
+        </a>
+        <a class="o-provider" href="/auth/oauth/github{% if next %}?next={{ next }}{% endif %}" data-provider="github">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" /></svg>
+          <span>Continue with GitHub</span>
+        </a>
+      </div>
+
+      <div class="o-rule auth-rule">or use email</div>
+
+      <form class="auth-form" id="signin-form" method="post" action="/auth/login" data-auth-form="login" novalidate>
+        <input type="hidden" name="next" value="{{ next }}" />
+
+        <div class="auth-field">
+          <div class="o-field">
+            <label class="o-field__label" for="email">Email address</label>
+            <input class="o-field__input" id="email" name="email" type="email" autocomplete="email"
+                   value="{{ values.get('email', '') }}" required data-validate="email" aria-describedby="email-error" />
+          </div>
+          <p class="o-field-error" id="email-error" data-error-for="email">Enter the email you signed up with.</p>
         </div>
-        <input class="text-input" id="password" name="password" type="password" autocomplete="current-password"
-               required data-validate="required" />
-        <p class="field-error" data-error-for="password">Enter your password.</p>
-      </div>
-      <button class="btn-primary btn-block" type="submit" data-busy-label="Signing you in…">
-        <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Sign in</span>
-      </button>
-    </form>
-    {% endif %}
 
-    <p class="auth-alt">New to ORBIT? <a href="/auth/signup">Create your account</a></p>
-  </section>
-</main>
-{% endblock %}
+        <div class="auth-field">
+          <div class="o-field">
+            <label class="o-field__label" for="password">Password</label>
+            <input class="o-field__input" id="password" name="password" type="password" autocomplete="current-password"
+                   required data-validate="required" aria-describedby="password-error" />
+          </div>
+          <p class="o-field-error" id="password-error" data-error-for="password">Enter your password.</p>
+        </div>
+
+        <div class="auth-meta">
+          <label class="o-check">
+            <input type="checkbox" name="remember" value="1" checked />
+            <span>Remember me</span>
+          </label>
+          <a class="o-text-action" href="/auth/forgot">Forgot password?</a>
+        </div>
+
+        <button class="o-btn o-btn--primary auth-submit" type="submit" data-busy-label="Signing you in…">
+          <span class="btn-label">Sign in</span>
+        </button>
+      </form>
+
+      <p class="auth-alt">New to Orbit? <a href="/auth/signup">Create an account
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 17 17 7M8 7h9v9" /></svg>
+      </a></p>
+
+      <hr class="auth-divider" />
+
+      <p class="o-fineprint auth-legal"><span>By continuing, you agree to our Terms of Service and Privacy Policy.<br />Your projects are private by default.</span></p>
+      {% endif %}
+    </section>
+  </main>
+
+  <footer class="auth-footer">
+    <span>© 2026 Orbit</span>
+    <span>A calmer way to build.</span>
+  </footer>
+</div>
+
+{% if not accounts_off %}
+<script src="{{ url_for('static', filename='public.js') }}"></script>
+<script>
+  if (window.OrbitPublic) { window.OrbitPublic.boot(); }
+</script>
+{% endif %}
+</body>
+</html>
