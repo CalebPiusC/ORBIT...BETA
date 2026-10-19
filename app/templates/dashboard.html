@@ -48,7 +48,7 @@
 
   .dash-title {
     font-family: var(--font-display);
-    font-size: 40px;
+    font-size: 36px;
     font-weight: 500;
     line-height: 1.15;
     letter-spacing: -0.02em;
@@ -76,7 +76,7 @@
     flex-direction: column;
     justify-content: space-between;
     min-height: 132px;
-    padding: 22px 24px;
+    padding: 26px 24px;
     border: 1px solid transparent;
     border-radius: var(--r-card);
     background: var(--surface);
@@ -86,7 +86,7 @@
   .dash-stat__line {
     display: flex;
     align-items: baseline;
-    gap: 8px;
+    gap: 6px;
     font-family: var(--font-display);
     font-size: 28px;
     font-weight: 500;
@@ -95,7 +95,7 @@
     color: var(--text-1);
   }
 
-  .dash-stat__sep { color: var(--text-3); font-weight: 400; }
+  .dash-stat__sep { font-weight: 400; }
 
   .dash-stat__caption { font-size: 14px; color: var(--text-2); }
 
@@ -133,7 +133,7 @@
     color: var(--text-1);
   }
 
-  .dash-card__sub { margin-top: 8px; font-size: 14px; color: var(--text-2); }
+  .dash-card__sub { margin-top: 10px; font-size: 15px; line-height: 1.55; color: var(--text-2); }
 
   /* ---------------- project card ---------------- */
   .dash-project { display: flex; flex-direction: column; align-items: flex-start; }
@@ -154,7 +154,7 @@
   .dash-project__name {
     margin-top: 18px;
     font-family: var(--font-display);
-    font-size: 28px;
+    font-size: 30px;
     font-weight: 500;
     line-height: 1.2;
     letter-spacing: -0.01em;
@@ -436,9 +436,9 @@
 
     .dash-card__project { order: 1; }
     .dash-card__approve { order: 2; }
-    .dash-card__check { order: 3; }
-    .dash-card__around { order: 4; }
-    .dash-card__for { order: 5; }
+    .dash-card__around { order: 3; }
+    .dash-card__check { order: 4; }
+    .dash-card__for { order: 4; }
     .dash-paths { order: 0; }
 
     .continue-strip { flex-wrap: wrap; gap: 8px 12px; padding: 14px 16px; }
@@ -663,8 +663,11 @@
         <p class="dash-card__fine">Your files stay exactly as they are until you approve.</p>
       </section>
       {% endif %}
-      {% if state != "new" %}{{ checklist_card() }}{% endif %}
-      {{ for_you() }}
+      {% if state != "new" %}
+        {% if show_checklist %}{{ checklist_card() }}{% else %}{{ for_you() }}{% endif %}
+      {% else %}
+        {{ for_you() }}
+      {% endif %}
     </div>
   </div>
 
