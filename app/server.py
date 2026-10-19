@@ -2512,6 +2512,18 @@ def create_app(
             checklist_hidden = True
             recommendations = recommendations_for({"profile": {}})
             name = st.user.name
+        # Read-only roll-ups for the Overview screen. Everything below is
+        # counted from this account's own records through the store view the
+        # request already holds — no global scan, no write.
+        active_project_count = sum(1 for p in projects if p.status != "archived")
+        account_tasks = st.tasks_for()
+        tasks_done = sum(1 for task in account_tasks if task.done)
+        pending = st.pending_approvals()
+        project_names = {p.id: p.name for p in projects}
+        activity = [
+            {**item, "project": project_names.get(item["project_id"], "")}
+            for item in st.recent_activity(limit=10)
+        ]
         latest_proj = projects[0] if projects else None
         continue_strip = None
         if latest_proj is not None:
@@ -2540,6 +2552,12 @@ def create_app(
             returning=returning,
             projects=[_project_card_view(p, st) for p in projects[:6]],
             project_count=len(projects),
+            active_project_count=active_project_count,
+            tasks_total=len(account_tasks),
+            tasks_done=tasks_done,
+            pending_count=len(pending),
+            pending_preview=pending[:3],
+            activity=activity,
             checklist=checklist,
             checklist_done=checklist_done,
             checklist_hidden=checklist_hidden,

@@ -264,6 +264,22 @@
   .dash-row__title { font-size: 15px; color: var(--text-1); }
   .dash-row__meta { font-size: 13px; color: var(--text-3); }
 
+  .dash-approve__cta { height: 44px; margin-top: 20px; }
+
+  .dash-card__fine {
+    margin-top: 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-3);
+  }
+
+  .dash-empty {
+    margin-top: 14px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
   /* ---------------- recommendations ---------------- */
   .dash-rec {
     display: flex;
@@ -419,9 +435,10 @@
     .dash-col { display: contents; }
 
     .dash-card__project { order: 1; }
-    .dash-card__check { order: 2; }
-    .dash-card__around { order: 3; }
-    .dash-card__for { order: 4; }
+    .dash-card__approve { order: 2; }
+    .dash-card__check { order: 3; }
+    .dash-card__around { order: 4; }
+    .dash-card__for { order: 5; }
     .dash-paths { order: 0; }
 
     .continue-strip { flex-wrap: wrap; gap: 8px 12px; padding: 14px 16px; }
@@ -555,16 +572,16 @@
   {# At a glance. Every figure is counted from the stores this request read. #}
   <section class="dash-stats" aria-label="Workspace at a glance">
     <article class="dash-stat">
-      <p class="dash-stat__line"><span>{{ project_count }}</span><span class="dash-stat__sep">/</span><span>Projects</span></p>
+      <p class="dash-stat__line"><span>{{ active_project_count }}</span><span class="dash-stat__sep">/</span><span>Active projects</span></p>
       <p class="dash-stat__caption">One idea at a time.</p>
     </article>
     <article class="dash-stat">
-      <p class="dash-stat__line"><span>{{ projects | sum(attribute='tasks_done') }}</span><span class="dash-stat__sep">/</span><span>Tasks completed</span></p>
+      <p class="dash-stat__line"><span>{{ tasks_done }}</span><span class="dash-stat__sep">/</span><span>Tasks completed</span></p>
       <p class="dash-stat__caption">Across your projects.</p>
     </article>
     <article class="dash-stat">
-      <p class="dash-stat__line"><span>{{ connected_count or 0 }}</span><span class="dash-stat__sep">/</span><span>Connected apps</span></p>
-      <p class="dash-stat__caption">Linked to your workspace.</p>
+      <p class="dash-stat__line"><span>{{ pending_count }}</span><span class="dash-stat__sep">/</span><span>Pending proposals</span></p>
+      <p class="dash-stat__caption">Nothing applied without you.</p>
     </article>
   </section>
 
@@ -608,20 +625,44 @@
       {% if projects %}
       <section class="dash-card dash-card__around" aria-label="Around your workspace">
         <h2 class="dash-card__title">Around your workspace</h2>
+        {% if activity %}
         <div class="dash-rows">
-          {% for p in projects[:3] %}
+          {% for item in activity %}
           <div class="dash-row">
-            <span class="dash-row__title">{{ p.name }}</span>
-            <span class="dash-row__meta">{{ p.status_label }} · Updated {{ p.age }}</span>
+            <span class="dash-row__title">{{ item.text }}</span>
+            <span class="dash-row__meta">{% if item.project %}{{ item.project }} · {% endif %}{{ item.time }}</span>
           </div>
           {% endfor %}
         </div>
+        {% else %}
+        <p class="dash-empty">No activity yet. Task activity appears here as you work.</p>
+        {% endif %}
       </section>
       {% endif %}
       {% endif %}
     </div>
 
     <div class="dash-col">
+      {% if state != "new" or pending_count %}
+      <section class="dash-card dash-card__approve" aria-label="Approvals">
+        <h2 class="dash-card__title">You're in the driver's seat.</h2>
+        {% if pending_count %}
+        <p class="dash-card__sub">{{ pending_count }} proposal{{ 's' if pending_count != 1 }} waiting. Review what would run, then approve or decline.</p>
+        <div class="dash-rows">
+          {% for item in pending_preview %}
+          <div class="dash-row">
+            <span class="dash-row__title">{{ item.summary }}</span>
+            <span class="dash-row__meta">Proposed in this conversation</span>
+          </div>
+          {% endfor %}
+        </div>
+        <a class="o-btn o-btn--secondary dash-approve__cta" href="/">Review proposals</a>
+        {% else %}
+        <p class="dash-card__sub">No pending approvals. Nothing runs until you say so.</p>
+        {% endif %}
+        <p class="dash-card__fine">Your files stay exactly as they are until you approve.</p>
+      </section>
+      {% endif %}
       {% if state != "new" %}{{ checklist_card() }}{% endif %}
       {{ for_you() }}
     </div>

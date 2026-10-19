@@ -1000,3 +1000,162 @@ class DashboardDesignTests(unittest.TestCase):
                 href, {"/dashboard", "/projects", "/agents", "/analytics", "/settings", "/create", "/", "/onboarding"},
                 href,
             )
+
+
+class DashboardDataTests(unittest.TestCase):
+    """The Overview roll-ups: real counts, honest empties, account isolation.
+
+    Every figure the route adds is read through the store view bound to the
+    signed-in account, so these tests drive two accounts with different work
+    and assert that neither screen can see the other's rows.
+    """
+
+    @staticmethod
+    def _stat(page: str, label: str) -> int | None:
+        match = re.search(
+            r"<span>(\d+)</span><span class=\"dash-stat__sep\">/</span>"
+            r"<span>" + re.escape(label) + r"</span>",
+            page,
+        )
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _proposal(view, summary: str, card_id: str) -> None:
+        from app.store import ActionCard, ChatMessage
+
+        conv = view.start_conversation()
+        view.append_message(
+            conv.id,
+            ChatMessage(
+                who="Orbit",
+                time="09:12",
+                body=summary,
+                is_orbit=True,
+                action=ActionCard(id=card_id, summary=summary),
+            ),
+        )
+
+    def test_counts_read_the_signed_in_accounts_own_records(self) -> None:
+        app, client, accounts = make_client()
+        oauth(client)
+        account = accounts.by_email("grace@example.dev")
+        project = app.config["PROJECTS"].create(
+            user_id=account["id"], name="Fieldnotes", description=""
+        )
+        view = app.config["STORE"].for_account(account["id"])
+        view.create_task("Save your first article", project_id=project.id)
+        second = view.create_task("Build the reading list", project_id=project.id)
+        view.set_done(second.id)
+        self._proposal(view, "Add this line to your notes: “Keep going”", "act-count")
+
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertEqual(self._stat(page, "Active projects"), 1)
+        self.assertEqual(self._stat(page, "Tasks completed"), 1)
+        self.assertEqual(self._stat(page, "Pending proposals"), 1)
+        # The proposal itself is named, and the proposal count is spelled out.
+        self.assertIn("Keep going", page)
+        self.assertIn("1 proposal waiting", page)
+        # The activity feed carries the recorded line and its project.
+        self.assertIn("Task created from your request.", page)
+        self.assertIn("Fieldnotes · ", page)
+
+    def test_one_accounts_dashboard_never_shows_anothers_work(self) -> None:
+        app, client, accounts = make_client()
+        oauth(client, email="ada@example.dev", name="Ada A")
+        ada = accounts.by_email("ada@example.dev")
+        ada_project = app.config["PROJECTS"].create(
+            user_id=ada["id"], name="Alpha project", description=""
+        )
+        ada_view = app.config["STORE"].for_account(ada["id"])
+        ada_task = ada_view.create_task("Build the alpha thing", project_id=ada_project.id)
+        ada_view.set_done(ada_task.id)
+        self._proposal(ada_view, "Alpha proposal: write the alpha note", "act-alpha")
+        client.get("/auth/logout")
+
+        oauth(client, email="bob@example.dev", name="Bob B")
+        bob = accounts.by_email("bob@example.dev")
+        bob_project = app.config["PROJECTS"].create(
+            user_id=bob["id"], name="Beta project", description=""
+        )
+        bob_view = app.config["STORE"].for_account(bob["id"])
+        bob_view.create_task("Build the beta thing", project_id=bob_project.id)
+        self._proposal(bob_view, "Beta proposal: write the beta note", "act-beta")
+
+        bob_page = client.get("/dashboard").get_data(as_text=True)
+        self.assertIn("Beta project", bob_page)
+        self.assertIn("Beta proposal", bob_page)
+        self.assertEqual(self._stat(bob_page, "Tasks completed"), 0)
+        for leak in ("Alpha project", "Alpha proposal", "Build the alpha thing"):
+            self.assertNotIn(leak, bob_page)
+
+        client.get("/auth/logout")
+        oauth(client, email="ada@example.dev", name="Ada A")
+        ada_page = client.get("/dashboard").get_data(as_text=True)
+        self.assertIn("Alpha project", ada_page)
+        self.assertIn("Alpha proposal", ada_page)
+        self.assertEqual(self._stat(ada_page, "Tasks completed"), 1)
+        for leak in ("Beta project", "Beta proposal", "Build the beta thing"):
+            self.assertNotIn(leak, ada_page)
+
+    def test_empty_states_are_named_not_faked(self) -> None:
+        app, client, accounts = make_client()
+        oauth(client)
+        account = accounts.by_email("grace@example.dev")
+        app.config["PROJECTS"].create(user_id=account["id"], name="A quiet project", description="")
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertIn("No pending approvals.", page)
+        self.assertIn("No activity yet.", page)
+        self.assertEqual(self._stat(page, "Pending proposals"), 0)
+        self.assertEqual(self._stat(page, "Tasks completed"), 0)
+
+    def test_activity_is_capped_at_ten_and_follows_task_creation(self) -> None:
+        app, client, accounts = make_client()
+        oauth(client)
+        account = accounts.by_email("grace@example.dev")
+        project = app.config["PROJECTS"].create(user_id=account["id"], name="Long list", description="")
+        view = app.config["STORE"].for_account(account["id"])
+        for index in range(12):
+            view.create_task(f"Task number {index}", project_id=project.id)
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertEqual(page.count("Task created from your request."), 10)
+        # Every row names the task's project; the cap is the feed's, not the store's.
+        self.assertEqual(page.count("Long list · "), 10)
+        self.assertEqual(len(view.recent_activity(limit=10)), 10)
+        self.assertEqual(len(view.recent_activity(limit=50)), 12)
+
+    def test_resolving_a_proposal_removes_it_from_the_count(self) -> None:
+        app, client, accounts = make_client()
+        oauth(client)
+        account = accounts.by_email("grace@example.dev")
+        app.config["PROJECTS"].create(user_id=account["id"], name="Resolve project", description="")
+        view = app.config["STORE"].for_account(account["id"])
+        self._proposal(view, "Add this line to your notes: “Resolve me”", "act-resolve")
+        self.assertEqual(
+            self._stat(client.get("/dashboard").get_data(as_text=True), "Pending proposals"), 1
+        )
+        view.resolve_action("act-resolve", "approved", "ok")
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertEqual(self._stat(page, "Pending proposals"), 0)
+        self.assertIn("No pending approvals.", page)
+
+    def test_a_proposal_the_chat_cannot_show_is_not_counted(self) -> None:
+        """Scope by what the home screen can actually put in front of you.
+
+        The chat shows one conversation and has no switcher, so a card left in
+        an earlier conversation has no Approve control on screen. Counting it
+        would make the dashboard's own "Review proposals" button unable to show
+        what the number promised.
+        """
+        app, client, accounts = make_client()
+        oauth(client)
+        account = accounts.by_email("grace@example.dev")
+        app.config["PROJECTS"].create(user_id=account["id"], name="Scope project", description="")
+        view = app.config["STORE"].for_account(account["id"])
+        self._proposal(view, "Add this line to your notes: “Behind you”", "act-old")
+        self.assertEqual(
+            self._stat(client.get("/dashboard").get_data(as_text=True), "Pending proposals"), 1
+        )
+        view.new_conversation()  # "+" opens a fresh, empty thread
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertEqual(self._stat(page, "Pending proposals"), 0)
+        self.assertIn("No pending approvals.", page)

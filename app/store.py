@@ -32,7 +32,7 @@ import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from app.taskplan import TaskRun, summarize_request
 
@@ -489,6 +489,66 @@ class Store:
                 return True
         return False
 
+    # ----- dashboard roll-ups (read-only, per account) ----------------------
+    def pending_approvals(self, *, account_id: str) -> list[dict[str, Any]]:
+        """The still-pending proposals in the open home conversation, newest first.
+
+        A proposal is a tool call the model asked for in the home chat. The
+        store keeps its card on the message that proposed it, and only the home
+        thread renders the Approve/Decline controls — the project chat offers no
+        tools by design. The home screen shows one conversation at a time and
+        there is no conversation switcher, so the open conversation is exactly
+        the set a person can review right now; counting cards from a thread the
+        chat cannot reach would put a number on the dashboard that its own
+        button could not show.
+
+        Read-only: nothing here decides, queues or expires anything.
+        """
+        ui = self._ui.get(account_id)
+        conv_id = ui.active_conversation_id if ui is not None else None
+        if conv_id is None:
+            return []
+        pending: list[dict[str, Any]] = []
+        for message in self.threads.get(conv_id, []):
+            card = message.action
+            if card is not None and card.state == "pending":
+                pending.append(
+                    {
+                        "id": card.id,
+                        "summary": card.summary,
+                        "conversation_id": conv_id,
+                    }
+                )
+        pending.reverse()  # the last one appended is the most recent
+        return pending
+
+    def recent_activity(self, *, account_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        """The account's most recently recorded task-activity lines.
+
+        Each task keeps its own activity list, newest first, written when the
+        event happened. The store records a clock label, not a date, so items
+        are grouped by task in creation order (newest task first) instead of
+        being merged into a cross-task chronology the data cannot prove.
+
+        Read-only: returns copies, never the stored objects.
+        """
+        items: list[dict[str, Any]] = []
+        tasks = [t for t in self.tasks.values() if t.user_id == account_id]
+        for task in reversed(tasks):
+            for entry in task.activity:
+                items.append(
+                    {
+                        "text": entry.text,
+                        "time": entry.time,
+                        "task": task.title,
+                        "task_id": task.id,
+                        "project_id": task.project_id,
+                    }
+                )
+                if len(items) >= limit:
+                    return items
+        return items
+
     def resolve_action(
         self, action_id: str, state: str, result: str, *, account_id: str
     ) -> bool:
@@ -808,3 +868,10 @@ class AccountView:
 
     def apply_changes(self, task_id: str) -> Task:
         return self.store.apply_changes(task_id, account_id=self.account_id)
+
+    # ----- dashboard roll-ups (read-only) ----------------------------------
+    def pending_approvals(self) -> list[dict[str, Any]]:
+        return self.store.pending_approvals(account_id=self.account_id)
+
+    def recent_activity(self, limit: int = 10) -> list[dict[str, Any]]:
+        return self.store.recent_activity(account_id=self.account_id, limit=limit)
