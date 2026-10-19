@@ -484,4 +484,26 @@ button { font: inherit; color: inherit; }
 
 .o-provider:hover { background: var(--surface-2); }
 
+/* A provider we cannot really reach yet is shown, disabled and labelled.
+   It is a <button disabled>, not a link, so it cannot navigate anywhere. */
+.o-provider--soon {
+  justify-content: flex-start;
+  gap: 10px;
+  color: var(--text-2);
+  cursor: not-allowed;
+}
+
+.o-provider--soon:hover { background: var(--surface); }
+
+.o-provider--soon svg { color: var(--text-3); }
+
+.o-provider__soon {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
 .o-provider svg { width: 18px; height: 18px; flex: 0 0 18px; }

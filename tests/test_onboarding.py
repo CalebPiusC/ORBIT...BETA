@@ -780,8 +780,13 @@ class DerivedAuthScreenTests(unittest.TestCase):
     def test_signup_renders_through_the_sign_in_shell(self) -> None:
         text = self.client.get("/auth/signup").get_data(as_text=True)
         self.shell(text)
+        # Provider rows are drawn, but honestly: no real OAuth exists yet, so
+        # they are disabled buttons marked coming soon, never links.
         self.assertIn("Continue with Google", text)
         self.assertIn("Continue with GitHub", text)
+        self.assertIn("Coming soon", text)
+        self.assertNotIn('href="/auth/oauth/google', text)
+        self.assertNotIn('href="/auth/oauth/github', text)
         self.assertIn("or use email", text)
         # every field the server actually reads
         for field in ('name="name"', 'name="email"', 'name="password"', 'name="confirm"'):
@@ -811,6 +816,22 @@ class DerivedAuthScreenTests(unittest.TestCase):
         for field in ('id="code"', 'id="password"', 'id="confirm"'):
             self.assertIn(field, text)
         self.assertIn("Update password", text)
+
+    def test_no_auth_screen_offers_a_provider_link_that_cannot_work(self) -> None:
+        """No auth screen may link to a provider flow it cannot really perform.
+
+        The /auth/oauth routes still exist and are still honest when visited
+        directly (they say "Demo flow"), but a control labelled "Continue with
+        Google" must not pretend to start one. Each is a disabled <button>.
+        """
+        # Guests only: once signed in, both routes correctly redirect to the app.
+        for path in ("/auth/login", "/auth/signup"):
+            text = self.client.get(path).get_data(as_text=True)
+            with self.subTest(path=path):
+                self.assertNotIn('href="/auth/oauth/', text)
+                self.assertEqual(text.count('class="o-provider o-provider--soon"'), 2)
+                self.assertEqual(text.count('class="o-provider o-provider--soon"'), 2)
+                self.assertEqual(text.count('disabled aria-disabled="true"'), 2)
 
     def test_no_auth_screen_ships_a_dead_legal_link(self) -> None:
         """Terms and Privacy are drawn as text in the frame's footer. There are
