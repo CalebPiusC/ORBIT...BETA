@@ -25,8 +25,23 @@ _AUDIT_ACCOUNT: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 
 
+def current_account_id() -> str | None:
+    """Current request/tool account, or None outside an account context."""
+    account_id = _AUDIT_ACCOUNT.get()
+    if account_id:
+        return account_id
+    try:
+        from flask import has_request_context, session
+        if has_request_context():
+            value = session.get("account_id")
+            return value if isinstance(value, str) and value else None
+    except ImportError:
+        pass
+    return None
+
+
 def audit_account_context(account_id: str):
-    """Bind audit rows emitted during this operation to the active account."""
+    """Bind audit and account-aware tools emitted during this operation."""
     class _Binding:
         def __enter__(self):
             self.token = _AUDIT_ACCOUNT.set(account_id)
@@ -197,14 +212,7 @@ class AuditLog:
         if self.database is not None:
             import uuid
 
-            account_id = self.account_id or _AUDIT_ACCOUNT.get()
-            if not account_id:
-                try:
-                    from flask import has_request_context, session
-                    if has_request_context():
-                        account_id = session.get("account_id")
-                except ImportError:
-                    pass
+            account_id = self.account_id or current_account_id()
             if not account_id:
                 raise ValueError("account audit event needs an account context")
             with self.database.connect() as db:

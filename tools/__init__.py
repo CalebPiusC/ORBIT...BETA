@@ -31,8 +31,8 @@ def build_tool_registry(
     registry = ToolRegistry(
         gate, audit_log_path=audit_log_path, audit_database=audit_database
     )
-    register_write_note(registry, notes_path=notes_path)
-    register_memory_tools(registry, facts_path=facts_path)
+    register_write_note(registry, notes_path=notes_path, database=audit_database)
+    register_memory_tools(registry, facts_path=facts_path, database=audit_database)
     if heartbeat is None:
         # Pause and resume are file-backed, so this works without the web scheduler
         # running: the scheduler re-reads the state file on every tick.

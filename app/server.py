@@ -388,7 +388,9 @@ def create_app(
     app.config["STORE"] = store or Store()
     app.config["ACCOUNTS"] = accounts
     app.config["PROJECTS"] = projects if projects is not None else ProjectStore()
+    app.config["PROJECTS_INJECTED"] = projects is not None
     app.config["FACTS"] = facts if facts is not None else FactStore()
+    app.config["FACTS_INJECTED"] = facts is not None
     app.config["HEARTBEAT"] = heartbeat
     # The audit log is built first so the voice service can record a real model
     # load in it: "did the model actually download and load?" should be
@@ -1789,7 +1791,7 @@ def create_app(
         # Ownership before execution: only the account whose conversation
         # proposed the call may decide it. A foreign id answers like a spent
         # one and is NOT consumed — the proposal stays its owner's to decide.
-        owner = queue.owner_of(action_id)
+        owner = queue.owner_of(action_id, account_id=st.account_id)
         if owner and owner != st.account_id:
             return _json({"error": "This request is no longer pending. Nothing ran."}, 404)
         try:
@@ -1803,7 +1805,9 @@ def create_app(
                 else nullcontext()
             )
             with audit_account_context(st.account_id), heartbeat_scope:
-                outcome = queue.decide(action_id, approved=decision == "approve")
+                outcome = queue.decide(
+                    action_id, approved=decision == "approve", account_id=st.account_id
+                )
         except KeyError:
             return _json({"error": "This request is no longer pending. Nothing ran."}, 404)
         if decision == "decline":
@@ -2981,19 +2985,120 @@ def run_app(app: Flask) -> None:
             heartbeat = SQLiteHeartbeatManager(
                 settings=load_heartbeat_settings(), database=database
             )
+            from heartbeat.service import DEFAULT_HEARTBEAT_PATH, _empty_state
+            from memory.jsonstore import JsonStore
+
+            old_heartbeat_path = Path(
+                os.environ.get("ORBIT_HEARTBEAT_PATH", str(DEFAULT_HEARTBEAT_PATH))
+            )
+            heartbeat_source = f"heartbeat-file:{old_heartbeat_path.resolve()}"
+            with database.connect() as db:
+                was_imported = db.execute(
+                    "SELECT 1 FROM data_imports WHERE source = ?", (heartbeat_source,)
+                ).fetchone()
+            if old_heartbeat_path.is_file() and not was_imported:
+                legacy_state = JsonStore(old_heartbeat_path, _empty_state).read()
+                heartbeat.for_account(DEFAULT_USER_ID)._store.update(
+                    lambda state: state.update(legacy_state)
+                )
+                with database.connect() as db:
+                    db.execute(
+                        "INSERT OR IGNORE INTO data_imports(source) VALUES (?)",
+                        (heartbeat_source,),
+                    )
         else:
             heartbeat = Heartbeat(settings=load_heartbeat_settings())
         app.config["HEARTBEAT"] = heartbeat
     start_scheduler(heartbeat, interval_seconds=heartbeat.settings.interval_seconds)
 
-    # Projects persist across restarts — the same rule the heartbeat state
-    # follows: create_app stays in-memory so tests never touch runtime/, and
-    # the file-backed store only exists once the real server boots.
+    store_obj = app.config.get("STORE")
+    database = getattr(store_obj, "database", None)
     project_store = app.config.get("PROJECTS")
-    if project_store is not None and not project_store.persistent:
+    if database is not None and not app.config.get("PROJECTS_INJECTED"):
+        from app.sqlite_projects import SQLiteProjectStore
+        from app.projects import ProjectStore as LegacyProjectStore
+
+        sqlite_projects = SQLiteProjectStore(database)
+        legacy_path = Path(os.environ.get("ORBIT_PROJECTS_PATH", "runtime/projects.json"))
+        if legacy_path.is_file():
+            sqlite_projects.import_legacy_data(
+                LegacyProjectStore(legacy_path)._read().get("projects", []),
+                source=f"projects-json:{legacy_path.resolve()}",
+            )
+        app.config["PROJECTS"] = sqlite_projects
+    elif project_store is not None and not project_store.persistent:
         app.config["PROJECTS"] = ProjectStore(
             Path(os.environ.get("ORBIT_PROJECTS_PATH", "runtime/projects.json"))
         )
+
+    if database is not None and not app.config.get("FACTS_INJECTED"):
+        from memory.facts import DEFAULT_FACTS_PATH, FactStore as LegacyFactStore
+        from memory.sqlitefacts import SQLiteFactStore
+
+        facts_path = Path(os.environ.get("ORBIT_FACTS_PATH", str(DEFAULT_FACTS_PATH)))
+        sqlite_facts = SQLiteFactStore(database, DEFAULT_USER_ID)
+        with database.connect() as db:
+            imported = db.execute(
+                "SELECT 1 FROM data_imports WHERE source = ?",
+                (f"facts-file:{facts_path.resolve()}",),
+            ).fetchone()
+        if facts_path.is_file() and not imported:
+            for fact in LegacyFactStore(facts_path).load():
+                sqlite_facts.add(fact)
+            with database.connect() as db:
+                db.execute(
+                    "INSERT OR IGNORE INTO data_imports(source) VALUES (?)",
+                    (f"facts-file:{facts_path.resolve()}",),
+                )
+        app.config["FACTS"] = SQLiteFactStore(database)
+
+        # Import the former single-user plan and note files once, attributing
+        # them to the legacy default account rather than broadcasting them.
+        from datetime import date as _date
+        from memory.plans import DEFAULT_PLANS_PATH
+        from memory.sqliteplans import SQLitePlanStore
+        from memory.sqlitenotes import SQLiteNoteStore
+        from tools.notes import DEFAULT_NOTES_PATH
+
+        plans_path = Path(os.environ.get("ORBIT_PLANS_PATH", str(DEFAULT_PLANS_PATH)))
+        plan_source = f"plans-file:{plans_path.resolve()}"
+        with database.connect() as db:
+            plan_imported = db.execute(
+                "SELECT 1 FROM data_imports WHERE source = ?", (plan_source,)
+            ).fetchone()
+        if plans_path.is_file() and not plan_imported:
+            try:
+                legacy_plans = json.loads(plans_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                legacy_plans = []
+            plan_store = SQLitePlanStore(database, DEFAULT_USER_ID)
+            for plan in legacy_plans if isinstance(legacy_plans, list) else []:
+                try:
+                    plan_store.add(
+                        plan["text"], _date.fromisoformat(plan["date"]), plan.get("saved_at", "")
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
+            with database.connect() as db:
+                db.execute("INSERT OR IGNORE INTO data_imports(source) VALUES (?)", (plan_source,))
+
+        notes_path = Path(os.environ.get("ORBIT_NOTES_PATH", str(DEFAULT_NOTES_PATH)))
+        notes_source = f"notes-file:{notes_path.resolve()}"
+        with database.connect() as db:
+            notes_imported = db.execute(
+                "SELECT 1 FROM data_imports WHERE source = ?", (notes_source,)
+            ).fetchone()
+        if notes_path.is_file() and not notes_imported:
+            note_store = SQLiteNoteStore(database, DEFAULT_USER_ID)
+            for line in notes_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                if "\t" in line:
+                    stamp, content = line.split("\t", 1)
+                else:
+                    stamp, content = "", line
+                if content:
+                    note_store.add(content, stamp or "unknown")
+            with database.connect() as db:
+                db.execute("INSERT OR IGNORE INTO data_imports(source) VALUES (?)", (notes_source,))
 
     # Accounts persist the same way: attaching a store here is what turns the
     # whole onboarding flow (landing → sign-up → verify → welcome → dashboard)
@@ -3034,7 +3139,10 @@ def run_app(app: Flask) -> None:
             confirmation_gate=gate, heartbeat=heartbeat, audit_database=audit_database
         )
         app.config["ACTIONS"] = PendingActions(
-            registry, gate, audit=AuditLog(database=audit_database)
+            registry,
+            gate,
+            audit=AuditLog(database=audit_database),
+            database=audit_database,
         )
 
     app.run(host=host, port=port, debug=False)
