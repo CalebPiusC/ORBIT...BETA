@@ -1,69 +1,81 @@
-{% extends "public.html" %}
-{% from "_auth_macros.html" import provider_buttons, error_box, off_notice %}
+{% extends "auth_shell.html" %}
+{# Derived screen: no sign-up frame was supplied, so this is the Sign in frame's
+   shell with its own copy, fields and provider rows. Same card, same rhythm. #}
 {% block title %}orbit — Create your account{% endblock %}
-{% block nav %}{% endblock %}
-{% block body %}
-<main class="auth-shell">
-  <section class="auth-card" aria-labelledby="signupTitle">
-    <img class="card-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-    <p class="auth-eyebrow">Open beta · free</p>
-    <h1 class="auth-title" id="signupTitle">Create your account</h1>
-    <p class="auth-sub">One minute to your workspace. No credit card, no long setup — you can start building right after this.</p>
+{% block eyebrow %}First orbit{% endblock %}
+{% block heading %}Make a place for it.{% endblock %}
+{% block sub %}One minute to a workspace. No card, no long setup.{% endblock %}
+{% block card %}
+{% if error %}
+<div class="auth-banner auth-banner--error" role="alert">{{ error }}</div>
+{% endif %}
 
-    {% if accounts_off %}
-    {{ off_notice() }}
-    <form class="auth-off" aria-disabled="true">
-      {{ provider_buttons() }}
-      <div class="divider">or with email</div>
-      <div class="field"><label class="field-label">What should we call you?</label><input class="text-input" disabled /></div>
-      <div class="field"><label class="field-label">Email</label><input class="text-input" disabled /></div>
-      <div class="field"><label class="field-label">Password</label><input class="text-input" type="password" disabled /></div>
-      <button class="btn-primary btn-block" type="button" disabled>Create account</button>
-    </form>
-    {% else %}
-    {{ provider_buttons(next) }}
-    <div class="divider">or with email</div>
+<div class="auth-providers">
+  <a class="o-provider" href="/auth/oauth/google{% if next %}?next={{ next }}{% endif %}" data-provider="google">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8" /></svg>
+    <span>Continue with Google</span>
+  </a>
+  <a class="o-provider" href="/auth/oauth/github{% if next %}?next={{ next }}{% endif %}" data-provider="github">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" /></svg>
+    <span>Continue with GitHub</span>
+  </a>
+</div>
 
-    {{ error_box(error) }}
+<div class="o-rule auth-rule">or use email</div>
 
-    <form method="post" action="/auth/signup" data-auth-form="signup" novalidate>
-      <input type="hidden" name="next" value="{{ next }}" />
-      <div class="field">
-        <label class="field-label" for="name">What should we call you?</label>
-        <input class="text-input" id="name" name="name" type="text" maxlength="60" autocomplete="name"
-               placeholder="Ada Osei" value="{{ values.get('name', '') }}" required data-validate="name" />
-        <p class="field-error" data-error-for="name">Tell us what to call you — a name or a nickname both work.</p>
-      </div>
-      <div class="field">
-        <label class="field-label" for="email">Email</label>
-        <input class="text-input" id="email" name="email" type="email" autocomplete="email"
-               placeholder="you@example.com" value="{{ values.get('email', '') }}" required data-validate="email" />
-        <p class="field-error" data-error-for="email">That doesn't look like a valid email address.</p>
-      </div>
-      <div class="field">
-        <label class="field-label" for="password">Password <span class="field-hint">at least {{ min_password }} characters</span></label>
-        <input class="text-input" id="password" name="password" type="password" autocomplete="new-password"
-               minlength="{{ min_password }}" required data-validate="password" data-strength-meter="pwMeter" data-strength-note="pwNote" />
-        <div class="pw-meter" id="pwMeter" data-score="0" aria-hidden="true"><span></span><span></span><span></span></div>
-        <p class="pw-note" id="pwNote"></p>
-        <p class="field-error" data-error-for="password">Use at least {{ min_password }} characters, with a letter and a number.</p>
-      </div>
-      <div class="field">
-        <label class="field-label" for="confirm">Confirm password</label>
-        <input class="text-input" id="confirm" name="confirm" type="password" autocomplete="new-password"
-               required data-validate="confirm" data-match="password" />
-        <p class="field-error" data-error-for="confirm">The two passwords don't match yet.</p>
-      </div>
-      <button class="btn-primary btn-block" type="submit" data-busy-label="Creating your account…">
-        <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Create account</span>
-      </button>
-    </form>
-    <p class="field-hint" style="margin:12px 0 0; text-align:center;">
-      Email sign-up asks you to confirm your address with a code. Google and GitHub confirm it for you.
-    </p>
-    {% endif %}
+<form class="auth-form" id="auth-form" method="post" action="/auth/signup" data-auth-form="signup" novalidate>
+  <input type="hidden" name="next" value="{{ next }}" />
 
-    <p class="auth-alt">Already have an account? <a href="/auth/login">Sign in</a></p>
-  </section>
-</main>
+  <div class="auth-field">
+    <div class="o-field">
+      <label class="o-field__label" for="name">What should we call you?</label>
+      <input class="o-field__input" id="name" name="name" type="text" maxlength="60" autocomplete="name"
+             placeholder="Ada Osei" value="{{ values.get('name', '') }}" required data-validate="name" aria-describedby="name-error" />
+    </div>
+    <p class="o-field-error" id="name-error" data-error-for="name">Tell us what to call you — a name or a nickname both work.</p>
+  </div>
+
+  <div class="auth-field">
+    <div class="o-field">
+      <label class="o-field__label" for="email">Email address</label>
+      <input class="o-field__input" id="email" name="email" type="email" autocomplete="email"
+             value="{{ values.get('email', '') }}" required data-validate="email" aria-describedby="email-error" />
+    </div>
+    <p class="o-field-error" id="email-error" data-error-for="email">That doesn't look like a valid email address.</p>
+  </div>
+
+  <div class="auth-field">
+    <div class="o-field">
+      <label class="o-field__label" for="password">Password · at least {{ min_password }} characters</label>
+      <input class="o-field__input" id="password" name="password" type="password" autocomplete="new-password"
+             minlength="{{ min_password }}" required data-validate="password" data-strength-meter="pwMeter" data-strength-note="pwNote" aria-describedby="password-error" />
+    </div>
+    <div class="auth-strength" id="pwMeter" data-score="0" aria-hidden="true"><span></span><span></span><span></span></div>
+    <p class="auth-strength-note" id="pwNote"></p>
+    <p class="o-field-error" id="password-error" data-error-for="password">Use at least {{ min_password }} characters, with a letter and a number.</p>
+  </div>
+
+  <div class="auth-field">
+    <div class="o-field">
+      <label class="o-field__label" for="confirm">Confirm password</label>
+      <input class="o-field__input" id="confirm" name="confirm" type="password" autocomplete="new-password"
+             required data-validate="confirm" data-match="password" aria-describedby="confirm-error" />
+    </div>
+    <p class="o-field-error" id="confirm-error" data-error-for="confirm">The two passwords don't match yet.</p>
+  </div>
+
+  <button class="o-btn o-btn--primary auth-submit" type="submit" data-busy-label="Creating your account…">
+    <span class="btn-label">Create account</span>
+  </button>
+</form>
+
+<p class="auth-hint">Email sign-up asks you to confirm your address with a code. Google and GitHub confirm it for you.</p>
+
+<p class="auth-alt">Already have an account? <a href="/auth/login">Sign in
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 17 17 7M8 7h9v9" /></svg>
+</a></p>
+
+<hr class="auth-divider" />
+
+<p class="o-fineprint auth-legal"><span>By continuing, you agree to our Terms of Service and Privacy Policy.<br />Your projects are private by default.</span></p>
 {% endblock %}

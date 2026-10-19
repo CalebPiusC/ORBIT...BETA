@@ -1,41 +1,37 @@
-{% extends "public.html" %}
-{% from "_auth_macros.html" import error_box, off_notice %}
+{% extends "auth_shell.html" %}
+{# Derived screen: no recovery frame was supplied, so this is the Sign in
+   frame's shell. The privacy rule stays: the page answers the same whether or
+   not an account exists. #}
 {% block title %}orbit — Recover your password{% endblock %}
-{% block nav %}{% endblock %}
-{% block body %}
-<main class="auth-shell">
-  <section class="auth-card" aria-labelledby="forgotTitle">
-    <img class="card-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-    <p class="auth-eyebrow">Recovery</p>
-    <h1 class="auth-title" id="forgotTitle">Forgot your password?</h1>
-    {% if accounts_off %}
-    {{ off_notice() }}
-    {% else %}
-    <p class="auth-sub">
-      Tell us the email on your account. If an account exists, we'll send a
-      6-digit reset code — either way, this page answers the same, for privacy.
-    </p>
+{% block eyebrow %}Recovery{% endblock %}
+{% block heading %}Forgot your password?{% endblock %}
+{% block sub %}Tell us the email on your account. If it exists, a 6-digit reset code follows — the next page answers the same either way.{% endblock %}
+{% block card %}
+{% if errors %}
+<div class="auth-banner auth-banner--error" role="alert">{{ errors[0] }}</div>
+{% endif %}
 
-    {% if errors %}
-    <div class="auth-error" role="alert"><span>{{ errors[0] }}</span></div>
-    {% endif %}
-
-    <form method="post" action="/auth/forgot" data-auth-form="forgot" novalidate>
-      <div class="field">
-        <label class="field-label" for="email">Email</label>
-        <input class="text-input" id="email" name="email" type="email" autocomplete="email"
-               placeholder="you@example.com" value="{{ values.get('email', '') if values else '' }}" required data-validate="email" />
-        <p class="field-error" data-error-for="email">That doesn't look like a valid email address.</p>
-      </div>
-      <button class="btn-primary btn-block" type="submit" data-busy-label="Sending…">
-        <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Send a reset code</span>
-      </button>
-    </form>
-    <div class="demo-chip" role="status">
-      <span><strong>Demo build — no email is sent.</strong><br />In this beta sandbox the reset code is shown on the next screen instead of arriving by mail.</span>
+<form class="auth-form" id="auth-form" method="post" action="/auth/forgot" data-auth-form="forgot" novalidate>
+  <div class="auth-field">
+    <div class="o-field">
+      <label class="o-field__label" for="email">Email address</label>
+      <input class="o-field__input" id="email" name="email" type="email" autocomplete="email"
+             value="{{ values.get('email', '') if values else '' }}" required data-validate="email" aria-describedby="email-error" />
     </div>
-    {% endif %}
-    <p class="auth-alt">Remembered it after all? <a href="/auth/login">Sign in</a></p>
-  </section>
-</main>
+    <p class="o-field-error" id="email-error" data-error-for="email">That doesn't look like a valid email address.</p>
+  </div>
+
+  <button class="o-btn o-btn--primary auth-submit" type="submit" data-busy-label="Sending…">
+    <span class="btn-label">Send a reset code</span>
+  </button>
+</form>
+
+<div class="auth-banner" role="status">
+  <strong>Demo build — no email is sent.</strong><br />
+  In this beta sandbox the reset code is shown on the next screen instead of arriving by mail.
+</div>
+
+<p class="auth-alt">Remembered it after all? <a href="/auth/login">Sign in
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 17 17 7M8 7h9v9" /></svg>
+</a></p>
 {% endblock %}

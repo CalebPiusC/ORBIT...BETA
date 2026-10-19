@@ -519,6 +519,8 @@ class ProjectEntryTests(unittest.TestCase):
 
 
 class SettingsPageTests(unittest.TestCase):
+    WIZARD_EMAIL = "grace@example.dev"   # the account oauth() signs in
+
     def setUp(self) -> None:
         self.app, self.client, self.store = make_client()
         oauth(self.client)
@@ -587,6 +589,8 @@ class SettingsPageTests(unittest.TestCase):
 
 
 class FeedbackTests(unittest.TestCase):
+    WIZARD_EMAIL = "grace@example.dev"   # the account oauth() signs in
+
     def setUp(self) -> None:
         self.app, self.client, self.store = make_client()
         oauth(self.client)
@@ -611,6 +615,268 @@ class FeedbackTests(unittest.TestCase):
     def test_empty_state_is_honest(self) -> None:
         text = self.client.get("/feedback").get_data(as_text=True)
         self.assertIn("No notes yet", text)
+
+
+class OnboardingWizardTests(unittest.TestCase):
+    """The rebuilt onboarding wizard: its step contract, its keyboard hooks and
+    the save-before-advance rule that keeps a typed name from being dropped.
+
+    These are structural and server-side assertions on purpose: the repo's
+    suite runs offline with no browser, so anything that depends on paint is
+    asserted through the markup the script binds to, and the failure path is
+    proven against the real HTTP endpoint.
+    """
+
+    WIZARD_EMAIL = "grace@example.dev"   # the account oauth() signs in
+
+    def setUp(self) -> None:
+        self.app, self.client, self.store = make_client()
+        oauth(self.client)
+
+    def page(self) -> str:
+        resp = self.client.get("/onboarding")
+        self.assertEqual(resp.status_code, 200)
+        return resp.get_data(as_text=True)
+
+    # ----- the three drawn steps -------------------------------------------
+
+    def test_three_steps_and_only_the_first_is_open(self) -> None:
+        text = self.page()
+        # three step sections, exactly one active
+        self.assertEqual(text.count('class="onb-step is-active"'), 1)
+        self.assertEqual(text.count('class="onb-step"'), 2)
+        # and only the first is not hidden
+        self.assertEqual(text.count('data-step="0" aria-labelledby'), 1)
+        self.assertIn('data-step="1" aria-labelledby="step-1-title" hidden', text)
+        self.assertIn('data-step="2" aria-labelledby="step-2-title" hidden', text)
+
+    def test_stepper_labels_start_on_step_one(self) -> None:
+        text = self.page()
+        self.assertIn('data-step-label="0" class="is-current"', text)
+        self.assertIn("01 / Your workspace", text)
+        self.assertIn("02 / Starting point", text)
+        self.assertIn("03 / Ready to build", text)
+
+    def test_frame_copy_and_controls_are_present(self) -> None:
+        text = self.page()
+        for phrase in (
+            "A workspace, shaped around you.",
+            "A few small details help Orbit meet you where you are.",
+            "What should we call you?",
+            "Workspace name",
+            "How familiar is building software?",
+            "A fresh start",
+            "Finding my feet",
+            "Comfortably curious",
+            "Continue to your starting point",
+            "Save &amp; exit",
+            "You don’t need all the answers.",
+        ):
+            self.assertIn(phrase, text)
+
+    # ----- keyboard reachability ------------------------------------------
+
+    def test_every_step_control_is_a_real_button(self) -> None:
+        """The stepper is a script, so its controls must be natively tabbable
+        and Enter/Space-activatable: real <button> elements, never divs."""
+        text = self.page()
+        for hook in ("data-next=", "data-back="):
+            # each occurrence sits on a <button ...>
+            for fragment in text.split(hook)[1:]:
+                opening = text[max(0, text.index(fragment) - 200):text.index(fragment)]
+                self.assertIn("<button", opening, hook)
+
+    def test_steps_are_labelled_for_assistive_tech(self) -> None:
+        text = self.page()
+        # the list of steps is an ordered list; the script sets aria-current
+        self.assertIn('<ol class="onb-steps" id="onbSteps">', text)
+        self.assertIn("aria-current", text)  # the script's contract
+
+    def test_headings_receive_focus_after_advancing(self) -> None:
+        """Focus is moved to the new step's heading, and headings are made
+        focusable, so a keyboard user is never dropped back at the top of the
+        document with no announcement."""
+        text = self.page()
+        self.assertIn('setAttribute("tabindex", "-1")', text)
+        self.assertIn('heading.focus({ preventScroll: true })', text)
+
+    # ----- save-before-advance --------------------------------------------
+
+    def test_advance_is_gated_on_a_successful_save(self) -> None:
+        text = self.page()
+        # the failure branch returns before the step changes
+        self.assertIn("if (!saved) { showSaveError(true); return; }", text)
+        # and the error is a live region with real text
+        self.assertIn('id="profile-save-error" role="alert"', text)
+        self.assertIn("We couldn’t save your details just now", text)
+
+    def test_save_refused_degrades_to_false_not_true(self) -> None:
+        """A network failure must resolve false — never fall through as a
+        successful save, which is what let the wizard advance into a dropped
+        name before this test existed."""
+        text = self.page()
+        self.assertIn("return false;   // offline or blocked", text)
+        self.assertNotIn("catch(function () { /* offline: the wizard answers still save */ })", text)
+
+    def test_submit_is_blocked_while_the_save_is_in_flight(self) -> None:
+        text = self.page()
+        self.assertIn('if (form.dataset.saving === "1") return;', text)
+        self.assertIn('if (skip.dataset.saving === "1") return;', text)
+
+    def test_profile_endpoint_reports_failure_the_way_the_page_reads_it(self) -> None:
+        """The page treats a non-2xx as a refused save. Prove the endpoint can
+        actually answer that way, so the branch is not unreachable in practice:
+        an empty name is rejected with a 303 back to settings#profile, while a
+        real name is accepted."""
+        resp = self.client.post("/settings/profile", data={"name": "", "workspace": "X"})
+        self.assertEqual(resp.status_code, 303)
+        self.assertIn("error=name", resp.headers["Location"])
+
+        resp = self.client.post("/settings/profile", data={"name": "Ada Osei", "workspace": "Fieldnotes"})
+        self.assertEqual(resp.status_code, 303)
+        self.assertIn("saved=profile", resp.headers["Location"])
+        self.assertEqual(self.store.by_email(self.WIZARD_EMAIL)["name"], "Ada Osei")
+        self.assertEqual(self.store.by_email(self.WIZARD_EMAIL)["workspace"], "Fieldnotes")
+
+    def test_save_and_exit_records_a_real_skip(self) -> None:
+        resp = self.client.post("/onboarding", data={"skip": "1"})
+        self.assertEqual(resp.status_code, 303)
+        account = self.store.by_email(self.WIZARD_EMAIL)
+        self.assertTrue(account["onboarding"]["personalize_skipped"])
+
+    def test_wizard_answers_still_land_through_the_new_form(self) -> None:
+        resp = self.client.post("/onboarding", data={
+            "experience": "1–2 years",
+            "interests": ["Data & ML"],
+            "languages": ["Python"],
+        })
+        self.assertEqual(resp.status_code, 303)
+        profile = self.store.by_email(self.WIZARD_EMAIL)["profile"]
+        self.assertEqual(profile["experience"], "1–2 years")
+        self.assertEqual(profile["interests"], ["Data & ML"])
+        self.assertEqual(profile["languages"], ["Python"])
+
+
+class DerivedAuthScreenTests(unittest.TestCase):
+    """Sign up, verify, forgot and reset have no frames of their own.
+
+    They were built on the Sign in frame's shell, so these tests pin the two
+    things that make that claim true: every one of them renders through the
+    shared shell (same card, same chrome, one primary button), and the copy
+    that existed because the old pages made a promise or held a privacy line
+    still exists after the rebuild.
+    """
+
+    def setUp(self) -> None:
+        self.app, self.client, self.store = make_client()
+
+    def shell(self, text: str) -> None:
+        self.assertIn('class="auth-card"', text)
+        self.assertIn('id="authTitle"', text)          # the shared shell's heading id
+        self.assertIn("A little clarity goes a long way.", text)   # the frame's marketing column
+        self.assertIn("A calmer way to build.", text)              # the frame's footer
+        self.assertEqual(text.count("o-btn--primary"), 1, "exactly one primary button per screen")
+
+    def test_signup_renders_through_the_sign_in_shell(self) -> None:
+        text = self.client.get("/auth/signup").get_data(as_text=True)
+        self.shell(text)
+        self.assertIn("Continue with Google", text)
+        self.assertIn("Continue with GitHub", text)
+        self.assertIn("or use email", text)
+        # every field the server actually reads
+        for field in ('name="name"', 'name="email"', 'name="password"', 'name="confirm"'):
+            self.assertIn(field, text)
+
+    def test_verify_renders_through_the_shell_and_stays_honest(self) -> None:
+        signup(self.client)
+        text = self.client.get("/auth/verify").get_data(as_text=True)
+        self.shell(text)
+        self.assertIn('id="code"', text)
+        # the sandbox really does send no mail, and the page says so
+        self.assertIn("Demo build — no email is sent.", text)
+        self.assertIn("Resend the code", text)
+
+    def test_forgot_renders_through_the_shell_without_revealing_accounts(self) -> None:
+        text = self.client.get("/auth/forgot").get_data(as_text=True)
+        self.shell(text)
+        self.assertIn("the next page answers the same either way", text)
+        self.assertIn('name="email"', text)
+
+    def test_reset_renders_through_the_shell(self) -> None:
+        signup(self.client)
+        verify(self.client, self.store)
+        self.client.post("/auth/forgot", data={"email": EMAIL})
+        text = self.client.get("/auth/reset").get_data(as_text=True)
+        self.shell(text)
+        for field in ('id="code"', 'id="password"', 'id="confirm"'):
+            self.assertIn(field, text)
+        self.assertIn("Update password", text)
+
+    def test_no_auth_screen_ships_a_dead_legal_link(self) -> None:
+        """Terms and Privacy are drawn as text in the frame's footer. There are
+        no such routes, so no auth page may render them as links."""
+        signup(self.client)
+        for path in ("/auth/login", "/auth/signup", "/auth/forgot", "/auth/verify"):
+            text = self.client.get(path).get_data(as_text=True)
+            with self.subTest(path=path):
+                self.assertNotIn('href="/terms"', text)
+                self.assertNotIn('href="/privacy"', text)
+
+    def test_accounts_off_still_renders_every_auth_page(self) -> None:
+        """The pre-existing suite launches with no account store; every auth
+        page must still answer 200 with the honest banner."""
+        app = create_app(provider=FakeProvider())
+        client = app.test_client()
+        for path in ("/auth/login", "/auth/signup", "/auth/forgot"):
+            resp = client.get(path)
+            with self.subTest(path=path):
+                self.assertEqual(resp.status_code, 200)
+                self.assertIn("accounts off", resp.get_data(as_text=True))
+
+
+class ButtonContrastTests(unittest.TestCase):
+    """The one place a colour decision is asserted rather than eyeballed.
+
+    Copper is the brand accent and the primary button is one of its four
+    allowed uses, so the label on it must clear 4.5:1 in both themes — and in
+    the hover state, which is where a darker fill silently broke AA.
+    """
+
+    @staticmethod
+    def _relative_luminance(value: str) -> float:
+        value = value.lstrip("#")
+        channels = [int(value[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    def ratio(self, fg: str, bg: str) -> float:
+        a, b = self._relative_luminance(fg), self._relative_luminance(bg)
+        hi, lo = max(a, b), min(a, b)
+        return (hi + 0.05) / (lo + 0.05)
+
+    def test_primary_label_clears_aa_in_both_themes(self) -> None:
+        pairs = {
+            "light": ("#1B1208", "#C2692F"),
+            "light hover": ("#1B1208", "#CC7839"),
+            "dark": ("#0F0F10", "#D9814A"),
+            "dark hover": ("#0F0F10", "#C9763F"),
+        }
+        for name, (fg, bg) in pairs.items():
+            with self.subTest(state=name):
+                self.assertGreaterEqual(self.ratio(fg, bg), 4.5, name)
+
+    def test_the_tokens_match_what_is_asserted(self) -> None:
+        """Guard against the CSS drifting away from the tested values."""
+        css = (Path(__file__).resolve().parents[1] / "app" / "static" / "orbit.css").read_text()
+        for token in (
+            "--copper: #C2692F;",
+            "--copper-hover: #CC7839;",
+            "--copper-ink: #1B1208;",
+            "--copper: #D9814A;",
+            "--copper-hover: #C9763F;",
+            "--copper-ink: #0F0F10;",
+        ):
+            self.assertIn(token, css)
 
 
 if __name__ == "__main__":

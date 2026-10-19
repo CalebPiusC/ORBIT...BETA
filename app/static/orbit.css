@@ -32,7 +32,7 @@
 
   /* ---- brand ---- */
   --copper: #C2692F;
-  --copper-hover: #B25D28;      /* one step deeper, hover/pressed only */
+  --copper-hover: #CC7839;      /* one step lighter: dark ink needs a lighter fill (5.55:1) */
   --copper-ink: #1B1208;        /* dark ink on copper: white was 3.9:1 */
   --copper-deep: #7C5326;       /* second ring of the mark, from the mark file */
   --copper-bright: #E2A97A;     /* centre dot of the mark, from the mark file */

@@ -167,6 +167,9 @@
   /* public.js marks the input itself; the border lives on the wrapper */
   .o-field:has(.invalid) { border-color: var(--danger); }
   .o-field-error.show { display: block; }
+  .onb-save-error[hidden] { display: none; }
+  .onb-save-error { display: block; }
+  .is-busy { opacity: 0.7; pointer-events: none; }
   .onb-field + .onb-field { margin-top: 16px; }
 
   .onb-hint {
@@ -532,6 +535,9 @@
                      value="{{ account.get('name', '') if account else '' }}" required data-validate="name" aria-describedby="name-error" />
             </div>
             <p class="o-field-error" id="name-error" data-error-for="name">Add a name so Orbit knows what to call you.</p>
+            <p class="o-field-error onb-save-error" id="profile-save-error" role="alert" hidden>
+              We couldn’t save your details just now. Check your connection and try again — nothing you typed is lost.
+            </p>
           </div>
 
           <div class="onb-field">
@@ -671,10 +677,14 @@
     /* The profile fields the wizard collects, saved through the settings
        endpoint that already owns them. No new route, no new server logic;
        if this fails the wizard still submits its own answers. */
+    /* Saves the two profile fields through the endpoint that owns them.
+       Resolves true only on a real save: the caller must not advance, and
+       must not leave the page, when the name never reached the server. */
     function saveProfile() {
       var name = form.querySelector("#name");
       var workspace = form.querySelector("#workspace");
-      if (!name || !workspace || !name.value.trim()) return Promise.resolve();
+      if (!name || !workspace) return Promise.resolve(true);
+      if (!name.value.trim()) return Promise.resolve(false);
       var body = new URLSearchParams();
       body.set("name", name.value.trim());
       body.set("workspace", workspace.value.trim());
@@ -684,7 +694,45 @@
         body: body.toString(),
         credentials: "same-origin",
         redirect: "follow"
-      }).catch(function () { /* offline: the wizard answers still save */ });
+      }).then(function (response) {
+        // /settings/profile redirects on success; a 4xx/5xx is a real failure.
+        return response.ok;
+      }).catch(function () {
+        return false;   // offline or blocked: treated exactly like a rejection
+      });
+    }
+
+    function showSaveError(show) {
+      var box = document.getElementById("profile-save-error");
+      if (!box) return;
+      if (show) box.removeAttribute("hidden");
+      else box.setAttribute("hidden", "");
+      var field = form.querySelector("#name");
+      if (field) field.setAttribute("aria-invalid", show ? "true" : "false");
+    }
+
+    /* Advance only after the profile is safely saved. While the request is
+       in flight the button is busy and the step stays put. */
+    function advance(target, trigger) {
+      var nameInput = form.querySelector("#name");
+      var nameError = form.querySelector("#name-error");
+      var blank = !nameInput || !nameInput.value.trim();
+      if (nameInput) nameInput.classList.toggle("invalid", blank);
+      if (nameError) nameError.classList.toggle("show", blank);
+      showSaveError(false);
+      if (blank) { if (nameInput) nameInput.focus(); return; }
+
+      if (trigger) trigger.classList.add("is-busy");
+      saveProfile().then(function (saved) {
+        if (trigger) trigger.classList.remove("is-busy");
+        if (!saved) { showSaveError(true); return; }
+        current = Math.min(steps.length - 1, target);
+        if (current === 2) summarise();
+        paint();
+        var heading = steps[current].querySelector("h2");
+        if (heading) heading.focus({ preventScroll: true });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
     }
 
     function summarise() {
@@ -712,23 +760,7 @@
       var back = event.target.closest("[data-back]");
       if (next) {
         event.preventDefault();
-        // Step 01 cannot move on without a name: the profile field is the only
-        // required answer in the wizard, and it is saved before advancing.
-        if (current === 0) {
-          var nameInput = form.querySelector("#name");
-          var nameError = form.querySelector("#name-error");
-          var blank = !nameInput || !nameInput.value.trim();
-          if (nameInput) nameInput.classList.toggle("invalid", blank);
-          if (nameError) nameError.classList.toggle("show", blank);
-          if (blank) { if (nameInput) nameInput.focus(); return; }
-          saveProfile();
-        }
-        current = Math.min(steps.length - 1, parseInt(next.getAttribute("data-next"), 10) || 0);
-        if (current === 2) summarise();
-        paint();
-        var heading = steps[current].querySelector("h2");
-        if (heading) heading.focus({ preventScroll: true });
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        advance(parseInt(next.getAttribute("data-next"), 10) || 0, next);
       }
       if (back) {
         event.preventDefault();
@@ -738,14 +770,37 @@
       }
     });
 
-    form.addEventListener("submit", function () {
-      saveProfile();
+    form.addEventListener("submit", function (event) {
+      // The last step saves the profile too. If that save is refused, stop the
+      // navigation and say so on the step instead of silently dropping the name.
+      if (form.dataset.saving === "1") return;
+      event.preventDefault();
+      var button = form.querySelector('[type="submit"]');
+      if (button) button.classList.add("is-busy");
+      saveProfile().then(function (saved) {
+        if (button) button.classList.remove("is-busy");
+        if (!saved) { showSaveError(true); return; }
+        form.dataset.saving = "1";
+        form.submit();
+      });
     });
 
     var skip = document.querySelector("[data-onb-skip]");
     if (skip) {
-      skip.addEventListener("submit", function () {
-        saveProfile();
+      // "Save & exit" saves first, then leaves. A refused save keeps the person
+      // on the step with the same visible error, rather than exiting as if the
+      // name had been stored.
+      skip.addEventListener("submit", function (event) {
+        if (skip.dataset.saving === "1") return;
+        event.preventDefault();
+        var button = skip.querySelector("button");
+        if (button) button.classList.add("is-busy");
+        saveProfile().then(function (saved) {
+          if (button) button.classList.remove("is-busy");
+          if (!saved) { showSaveError(true); return; }
+          skip.dataset.saving = "1";
+          skip.submit();
+        });
       });
     }
 
