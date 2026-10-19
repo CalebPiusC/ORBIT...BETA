@@ -97,13 +97,14 @@ class SQLiteStore(Store):
             db.execute("DELETE FROM screen_state WHERE account_id = ?", (account_id,))
             for conv in conversations:
                 db.execute(
-                    "INSERT INTO conversations(id, account_id, payload) VALUES (?, ?, ?)",
-                    (conv.id, account_id, self._dump(conv)),
+                    "INSERT INTO conversations(id, account_id, payload, project_id) VALUES (?, ?, ?, ?)",
+                    (conv.id, account_id, self._dump(conv), conv.project_id),
                 )
             for task in tasks:
                 db.execute(
-                    "INSERT INTO tasks(id, account_id, payload) VALUES (?, ?, ?)",
-                    (task.id, account_id, self._dump(task)),
+                    "INSERT INTO tasks(id, account_id, payload, project_id, builds_on_id) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (task.id, account_id, self._dump(task), task.project_id, task.builds_on),
                 )
             for conv in conversations:
                 for message in self.threads.get(conv.id, []):

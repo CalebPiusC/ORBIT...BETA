@@ -1,8 +1,7 @@
 """SQLite database bootstrap and ordered schema migrations.
 
-Importing this module does not create a database. Construct :class:`Database`
-when database access is explicitly needed; the application is not wired to it
-in this step.
+Importing this module does not create a database. Production launchers construct
+:class:`Database` during startup; in-memory app factories do not.
 """
 
 from __future__ import annotations
