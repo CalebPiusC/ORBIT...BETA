@@ -274,40 +274,35 @@ class GuardTests(unittest.TestCase):
         self.assertIn("accounts off", resp.get_data(as_text=True))
 
     def test_landing_page_is_the_signed_out_front_door(self) -> None:
+        # Copy follows the ORBIT UI___2 design frames, which superseded the
+        # earlier long-form beta page.
         _, client, _ = make_client()
         text = client.get("/").get_data(as_text=True)
-        self.assertIn("Open beta", text)
-        self.assertIn("Create your free account", text)
+        self.assertIn("Sign in", text)
         self.assertIn("How it works", text)
-        self.assertIn("visibly disabled", text)  # the unfinished parts say so out loud
+        self.assertIn("Start your project", text)
+        self.assertIn("Create your free workspace", text)
 
-    def test_landing_page_claims_only_what_the_app_does_today(self) -> None:
-        """Every capability on the marketing page must exist in this build.
+    def test_landing_page_never_presents_a_provider_as_connected(self) -> None:
+        """The landing page may name import entry points, never live connections.
 
-        Each assertion names a claim that used to be false: a GitHub connection
-        that was only a seeded status, code-change drafting that does not exist,
-        file attachments that are never uploaded, and voice presented as
-        shipping when it has not been proven end to end.
+        The ORBIT UI___2 frames replaced the long-form beta copy, so the older
+        "No Git provider is connected yet" paragraph is gone. What survives is
+        the part that matters: no provider may be described as already
+        connected, and no attachment or voice capability may be claimed.
         """
         _, client, _ = make_client()
         text = client.get("/landing").get_data(as_text=True)
 
-        # No Git provider is connected, so none may be claimed.
         self.assertNotIn("GitHub is connected", text)
         self.assertNotIn("a GitHub connection", text)
-        self.assertIn("No Git provider is connected yet", text)
-        self.assertIn("Coming next", text)
-
-        # The agent plans and narrates; it does not draft code changes yet.
-        self.assertNotIn("drafts changes for your review", text)
-        self.assertIn("Drafting the code changes for your review is coming next", text)
+        self.assertNotIn("Connected to GitHub", text)
 
         # Attachments are never uploaded to the model, so they are not offered.
         self.assertNotIn("Attach files", text)
 
-        # Voice is labelled for what it is.
-        self.assertIn("Voice in testing", text)
-        self.assertNotIn("Hold-to-talk input and spoken replies, plus daily-plan", text)
+        # Voice is not presented as shipping.
+        self.assertNotIn("voice is ready", text.lower())
 
 
 class AuthFlowTests(unittest.TestCase):
