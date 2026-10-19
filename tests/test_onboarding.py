@@ -1067,7 +1067,19 @@ class DashboardDataTests(unittest.TestCase):
         if not self.use_sqlite:
             return make_client()
         directory, app, client, accounts = make_sqlite_client()
+        store = app.config["STORE"]
+
+        def _release_database() -> None:
+            # addCleanup is LIFO, so this runs before the directory is removed.
+            # A store call must leave no connection behind: on Windows a live
+            # handle makes the temp directory undeletable, which is how these
+            # tests failed there. Closing is a no-op when nothing leaked; the
+            # count is what catches a regression.
+            self.assertEqual(store.database.open_connection_count, 0)
+            store.database.close()
+
         self.addCleanup(directory.cleanup)
+        self.addCleanup(_release_database)
         return app, client, accounts
 
     @staticmethod

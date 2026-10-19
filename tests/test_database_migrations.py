@@ -88,11 +88,10 @@ def test_migrations_apply_cleanly_to_empty_database(tmp_path):
                 ("plaintext-account", '{"password":"not allowed"}'),
             )
 
-    first_connection = db.connect()
-    second_connection = db.connect()
-    assert first_connection is not second_connection
-    first_connection.close()
-    second_connection.close()
+    with db.connect() as first_connection, db.connect() as second_connection:
+        # One connection per caller, never a shared one across request threads.
+        assert first_connection is not second_connection
+    assert db.open_connection_count == 0
 
     # Reopening is idempotent and keeps one record per migration.
     reopened = Database(path)
@@ -103,6 +102,75 @@ def test_migrations_apply_cleanly_to_empty_database(tmp_path):
     assert backup.is_file()
     if POSIX_MODES:
         assert backup.stat().st_mode & 0o077 == 0
+
+
+def test_a_connection_is_closed_when_its_block_ends(tmp_path):
+    """``with sqlite3.connect(...)`` does not close; Database.connect must."""
+    db = Database(tmp_path / "closed.sqlite3")
+    assert db.open_connection_count == 0
+
+    with db.connect() as connection:
+        assert connection.execute("SELECT 1").fetchone()[0] == 1
+        assert db.open_connection_count == 1
+
+    assert db.open_connection_count == 0
+    with pytest.raises(sqlite3.ProgrammingError):
+        # Closed, not merely unreferenced: the object refuses to work.
+        connection.execute("SELECT 1")
+
+
+def test_store_operations_leave_no_connection_open(tmp_path):
+    """After real store work the file is free, so Windows can delete it.
+
+    The dashboard tests failed on Windows while removing their temp directory:
+    every store call had left its connection open, and an open handle makes the
+    file undeletable there. POSIX happily unlinks an open file, so only the
+    platform where the check means something performs it; the connection count
+    is the check that holds everywhere.
+    """
+    from app.sqlite_accounts import SQLiteAccountStore
+    from app.sqlite_projects import SQLiteProjectStore
+    from app.sqlite_store import SQLiteStore
+    from app.store import ActionCard, ChatMessage
+
+    path = tmp_path / "released.sqlite3"
+    store = SQLiteStore(str(path))
+    database = store.database
+    accounts = SQLiteAccountStore(database, iterations=1_000)
+    projects = SQLiteProjectStore(database)
+
+    view = store.for_account("release-check")
+    conversation = view.start_conversation()
+    view.append_message(
+        conversation.id,
+        ChatMessage(
+            who="Orbit",
+            time="09:00",
+            body="Add this line to your notes",
+            is_orbit=True,
+            action=ActionCard(id="act-release", summary="Review the proposal"),
+        ),
+    )
+    view.create_task("Release the database file")
+    assert view.pending_approvals()
+    assert view.recent_activity()
+
+    project = projects.for_account("release-check").create(
+        name="Released", description="", source="new"
+    )
+    assert project.id
+
+    account = accounts.register_email("Release Check", "release@example.test", "password-123")
+    assert account["id"]
+
+    assert database.open_connection_count == 0
+    database.close()  # belt and braces; must already be a no-op
+    assert database.open_connection_count == 0
+
+    if os.name == "nt":
+        # Windows refuses to delete a file with a live handle.
+        path.unlink()
+        assert not path.exists()
 
 
 def test_composite_foreign_keys_reject_cross_account_message_owner(tmp_path):
