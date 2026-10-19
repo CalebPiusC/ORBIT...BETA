@@ -28,12 +28,12 @@
   /* ---- text: exactly three tones ---- */
   --text-1: #1B1A18;
   --text-2: #5E5A52;
-  --text-3: #8F8A80;
+  --text-3: #6F6A61;   /* frame #8F8A80 is 3.1:1 — deepened to clear AA */
 
   /* ---- brand ---- */
   --copper: #C2692F;
   --copper-hover: #B25D28;      /* one step deeper, hover/pressed only */
-  --copper-ink: #FFFFFF;        /* text on a copper fill */
+  --copper-ink: #1B1208;        /* dark ink on copper: white was 3.9:1 */
   --copper-deep: #7C5326;       /* second ring of the mark, from the mark file */
   --copper-bright: #E2A97A;     /* centre dot of the mark, from the mark file */
 
@@ -79,7 +79,7 @@
 
   --text-1: #F2F0EC;
   --text-2: #A6A29A;
-  --text-3: #706D66;
+  --text-3: #8D897F;   /* frame #706D66 is 3.5:1 — lightened to clear AA */
 
   --copper: #D9814A;
   --copper-hover: #C9763F;
