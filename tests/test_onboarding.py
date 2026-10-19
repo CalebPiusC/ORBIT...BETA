@@ -192,12 +192,37 @@ class AccountStoreTests(unittest.TestCase):
             path = Path(tmp) / "accounts.json"
             store = AccountStore(path, iterations=1_000)
             account = store.register_email("Ada", EMAIL, PASSWORD)
-            store.verify_email(EMAIL, store.demo_code(EMAIL, "verify"))
+            code = store.demo_code(EMAIL, "verify")
+            persisted = json.loads(path.read_text(encoding="utf-8"))
+            code_record = persisted["codes"][f"verify:{EMAIL}"]
+            self.assertNotIn("code", code_record)
+            self.assertTrue(code_record["token_hash"])
+            self.assertTrue(code_record["salt"])
+            self.assertEqual(store.verify_email(EMAIL, code), "ok")
             store.add_feedback(account["id"], "general", "Nice", "It is nice")
             reopened = AccountStore(path, iterations=1_000)
             self.assertTrue(reopened.by_id(account["id"])["email_verified"])
             self.assertEqual(len(reopened.feedback_for(account["id"])), 1)
             self.assertTrue(reopened.check_password(account["id"], PASSWORD))
+
+    def test_reopen_hashes_legacy_plaintext_verification_codes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "accounts.json"
+            store = AccountStore(path, iterations=1_000)
+            store.register_email("Ada", EMAIL, PASSWORD)
+            legacy_code = store.demo_code(EMAIL, "verify")
+            data = json.loads(path.read_text(encoding="utf-8"))
+            entry = data["codes"][f"verify:{EMAIL}"]
+            entry.pop("salt", None)
+            entry.pop("token_hash", None)
+            entry["code"] = legacy_code
+            path.write_text(json.dumps(data), encoding="utf-8")
+
+            reopened = AccountStore(path, iterations=1_000)
+            migrated = json.loads(path.read_text(encoding="utf-8"))["codes"][f"verify:{EMAIL}"]
+            self.assertNotIn("code", migrated)
+            self.assertIn("token_hash", migrated)
+            self.assertEqual(reopened.verify_email(EMAIL, legacy_code), "ok")
 
     def test_delete_account_scrubs_account_codes_and_feedback(self) -> None:
         store = make_store()

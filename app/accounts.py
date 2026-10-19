@@ -36,6 +36,7 @@ import hashlib
 import hmac
 import re
 import secrets
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -70,6 +71,13 @@ MAX_FEEDBACK_BODY_CHARS = 2000
 CODE_TTL_MINUTES = 10
 CODE_MAX_ATTEMPTS = 6
 DEFAULT_ITERATIONS = 120_000
+CODE_HASH_ITERATIONS = 120_000
+
+
+def _hash_code(code: str, salt_hex: str) -> str:
+    return hashlib.pbkdf2_hmac(
+        "sha256", code.encode("utf-8"), bytes.fromhex(salt_hex), CODE_HASH_ITERATIONS
+    ).hex()
 
 # ----- personalization options: one list per question, shared by the --------
 # onboarding wizard, the settings page and the dashboard recommendations.
@@ -194,6 +202,27 @@ class AccountStore:
         self._json: JsonStore | None = None if path is None else JsonStore(path, default=_empty)
         self._memory: dict[str, Any] = _empty()
         self.iterations = max(1_000, int(iterations))
+        # Demo codes are shown to the user in the current process but are never
+        # written to persistent storage. The durable record contains only a
+        # salted PBKDF2 hash and expiry.
+        self._demo_codes: dict[str, tuple[str, str]] = {}
+        self._demo_codes_lock = threading.RLock()
+        if self._json is not None:
+            self._migrate_legacy_codes()
+
+    def _migrate_legacy_codes(self) -> None:
+        """Hash any codes written in clear by older beta versions."""
+        assert self._json is not None
+
+        def migrate(data: dict[str, Any]) -> None:
+            for entry in data.get("codes", {}).values():
+                legacy = entry.pop("code", None)
+                if isinstance(legacy, str):
+                    salt = secrets.token_hex(16)
+                    entry["salt"] = salt
+                    entry["token_hash"] = _hash_code(legacy, salt)
+
+        self._json.update(migrate)
 
     @property
     def persistent(self) -> bool:
@@ -315,17 +344,21 @@ class AccountStore:
 
     # ----- verification & reset codes ----------------------------------------
     def _issue_code(self, data: dict[str, Any], email: str, purpose: str) -> str:
-        """Mint a code for ``purpose`` ("verify" | "reset"). Stored in the clear
-        because the demo shows it on screen — the file is local runtime state,
-        gitignored like the rest of ``runtime/``."""
+        """Mint a code and retain its clear value only in process memory."""
         code = f"{secrets.randbelow(1_000_000):06d}"
-        data.setdefault("codes", {})[f"{purpose}:{clean_email(email)}"] = {
-            "code": code,
+        key = f"{purpose}:{clean_email(email)}"
+        salt = secrets.token_hex(16)
+        expires_at = (_utcnow() + timedelta(minutes=CODE_TTL_MINUTES)).isoformat(timespec="seconds")
+        data.setdefault("codes", {})[key] = {
+            "token_hash": _hash_code(code, salt),
+            "salt": salt,
             "purpose": purpose,
             "email": clean_email(email),
-            "expires_at": (_utcnow() + timedelta(minutes=CODE_TTL_MINUTES)).isoformat(timespec="seconds"),
+            "expires_at": expires_at,
             "attempts_left": CODE_MAX_ATTEMPTS,
         }
+        with self._demo_codes_lock:
+            self._demo_codes[key] = (code, expires_at)
         return code
 
     def _check_code(self, data: dict[str, Any], email: str, purpose: str, code: str) -> str:
@@ -343,9 +376,16 @@ class AccountStore:
             return "locked"
         entry["attempts_left"] = int(entry["attempts_left"]) - 1
         submitted = re.sub(r"\s", "", code or "")
-        if not hmac.compare_digest(submitted, str(entry.get("code", ""))):
+        salt = entry.get("salt")
+        token_hash = entry.get("token_hash")
+        if not isinstance(salt, str) or not isinstance(token_hash, str):
+            return "no-code"
+        candidate = _hash_code(submitted, salt)
+        if not hmac.compare_digest(candidate, token_hash):
             return "wrong"
         data["codes"].pop(key, None)
+        with self._demo_codes_lock:
+            self._demo_codes.pop(key, None)
         return "ok"
 
     def attempts_left(self, email: str, purpose: str) -> int | None:
@@ -353,10 +393,21 @@ class AccountStore:
         return None if entry is None else int(entry.get("attempts_left", 0))
 
     def demo_code(self, email: str, purpose: str) -> str | None:
-        """The code the demo pages display next to the 'no email is sent in
-        this beta sandbox' label. Tests read this rather than scraping HTML."""
-        entry = self._read().get("codes", {}).get(f"{purpose}:{clean_email(email)}")
-        return None if entry is None else str(entry.get("code"))
+        """Return the current-process demo code, never a persisted secret."""
+        key = f"{purpose}:{clean_email(email)}"
+        entry = self._read().get("codes", {}).get(key)
+        with self._demo_codes_lock:
+            held = self._demo_codes.get(key)
+        if entry is None or held is None:
+            return None
+        try:
+            if datetime.fromisoformat(entry["expires_at"]) < _utcnow():
+                with self._demo_codes_lock:
+                    self._demo_codes.pop(key, None)
+                return None
+        except (KeyError, ValueError):
+            return None
+        return held[0]
 
     def verify_email(self, email: str, code: str) -> str:
         """Confirm the verification code. Returns "ok" or a reason."""
