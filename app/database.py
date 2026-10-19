@@ -27,9 +27,23 @@ class Database:
 
     def __init__(self, path: str | os.PathLike[str] | None = None) -> None:
         self.path = Path(path).expanduser().resolve() if path is not None else default_database_path()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            self.path.parent.chmod(0o700)
+        except OSError:
+            pass
         self._backup_before_migration()
         self.migrate()
+        self._secure_file(self.path)
+        with self.connect() as connection:
+            connection.execute("PRAGMA journal_mode = WAL")
+
+    @staticmethod
+    def _secure_file(path: Path) -> None:
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
 
     def _backup_before_migration(self) -> None:
         # Keep a byte-for-byte backup alongside an existing database before
@@ -37,11 +51,15 @@ class Database:
         if self.path.is_file() and self.path.stat().st_size:
             backup = self.path.with_name(self.path.name + ".pre-migration.bak")
             shutil.copy2(self.path, backup)
+            self._secure_file(backup)
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path)
+        # A fresh connection is returned to each caller; no connection is
+        # retained/shared across Flask request threads.
+        connection = sqlite3.connect(self.path, timeout=10.0)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 10000")
         return connection
 
     def migrate(self) -> None:
