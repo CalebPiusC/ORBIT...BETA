@@ -25,6 +25,10 @@ state/
 notes.txt
 *.state
 *.state.json
+# ORBIT's local SQLite database and pre-migration backups
+orbit.sqlite3
+orbit.sqlite3.pre-migration.bak
 *.db
 *.sqlite
 *.sqlite3
+*.pre-migration.bak

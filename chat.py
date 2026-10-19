@@ -70,6 +70,8 @@ def run_session(
     read: Callable[[str], str] = input,
     write: Callable[[str], None] = print,
     facts: FactStore | None = None,
+    account_view: Any | None = None,
+    analytics_audit: Any | None = None,
 ) -> int:
     """Drive the prompt/reply loop. Returns a process exit code.
 
@@ -79,6 +81,7 @@ def run_session(
     """
     history: list[ChatMessage] = []
     fact_store = facts if facts is not None else FactStore()
+    conversation_id: str | None = None
     write(HELP)
 
     while True:
@@ -97,6 +100,9 @@ def run_session(
             continue
         if prompt == "/reset":
             history.clear()
+            conversation_id = None
+            if account_view is not None:
+                account_view.new_conversation()
             write("(history cleared)")
             continue
 
@@ -122,6 +128,26 @@ def run_session(
             continue
 
         history.append(ChatMessage(role="assistant", content=answer))
+        if account_view is not None:
+            from app.store import ChatMessage as StoredMessage, now_label
+
+            if conversation_id is None:
+                conversation = account_view.start_conversation()
+                conversation_id = conversation.id
+            stamped = now_label()
+            account_view.append_message(
+                conversation_id,
+                StoredMessage(who="You", time=stamped, body=prompt, is_orbit=False),
+            )
+            account_view.append_message(
+                conversation_id,
+                StoredMessage(who="Orbit", time=stamped, body=answer, is_orbit=True),
+            )
+            if analytics_audit is not None:
+                analytics_audit.record_event(
+                    "chat_message_received", conversation_id=conversation_id,
+                    surface="terminal", chars=len(prompt),
+                )
         used = getattr(provider, "last_model_used", None)
         if used and used != getattr(provider, "model", None):
             write(f"(answered by fallback {used}; primary {provider.model} failed)")
@@ -382,13 +408,38 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_CONFIG
 
     try:
-        provider = GeminiProvider(tool_registry=build_tool_registry())
+        from app.database import Database
+        from app.sqlite_store import SQLiteStore
+        from app.store import DEFAULT_USER_ID
+        from config import load_heartbeat_settings
+        from heartbeat.sqlite_store import SQLiteHeartbeatManager
+        from memory.sqlitefacts import SQLiteFactStore
+        from tools.registry import AuditLog, audit_account_context
+
+        database = Database()
+        view = SQLiteStore(str(database.path)).for_account(DEFAULT_USER_ID)
+        heartbeat = SQLiteHeartbeatManager(
+            settings=load_heartbeat_settings(), database=database
+        )
+        registry = build_tool_registry(
+            heartbeat=heartbeat, audit_database=database
+        )
+        provider = GeminiProvider(
+            tool_registry=registry,
+            audit_log=AuditLog(database=database, account_id=DEFAULT_USER_ID),
+        )
     except RuntimeError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
 
     print(f"ORBIT · {provider.model} · chat mode (tools are gated by the confirmation prompt)")
-    return run_session(provider)
+    with audit_account_context(DEFAULT_USER_ID), heartbeat.account_context(DEFAULT_USER_ID):
+        return run_session(
+            provider,
+            facts=SQLiteFactStore(database, DEFAULT_USER_ID),
+            account_view=view,
+            analytics_audit=AuditLog(database=database, account_id=DEFAULT_USER_ID),
+        )
 
 
 if __name__ == "__main__":
