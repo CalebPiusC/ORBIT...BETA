@@ -36,10 +36,21 @@
 
      Every vertical gap below is a clamp() on viewport height, so the
      frame's rhythm holds on a tall window and tightens on a short one
-     (1280x720 is the target: a laptop at 150% scaling). The left panel
-     is sticky at 100vh and its arc is sized in vh, so the whole arc
-     stays inside the panel and is never clipped at any height. Below
-     980px the panel is dropped and the form stacks on its own.
+     (1280x720 is the target: a laptop at 150% scaling).
+
+     Scroll model on desktop (>=1001px): the page itself does not scroll.
+     The header and footer are fixed bands and the form column between
+     them is the only scroller, so the form can never slide under the
+     panel, the panel can never slide over the header or the footer, and
+     no element overlaps another at any width. The left panel occupies
+     its own grid cell for the full height of that band, centred.
+
+     The card keeps the frame's 432px: the grid column is 432 plus the
+     page gutter, and that spare gutter is where the column's scrollbar
+     lands, so nothing shifts when it appears.
+
+     At 1000px and below both columns no longer fit: the panel is
+     dropped, the page scrolls normally and nothing is sticky.
 
      Copper appears twice per screen: the logo mark and the single
      primary button.
@@ -73,6 +84,7 @@
        top of the page to be centred in the viewport, and only the card may
        be pushed down. */
     --auth-gap: clamp(24px, 8vh, 104px);
+    --auth-gutter: clamp(24px, 3.5vw, 48px);
   }
 
   /* ---------------- header ---------------- */
@@ -124,32 +136,31 @@
     width: 100%;
     max-width: 1344px;
     margin: 0 auto;
-    padding: 0 clamp(24px, 3.5vw, 48px);
+    padding: 0 var(--auth-gutter);
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 432px;
+    /* 432 for the card, plus a gutter for the column's scrollbar. */
+    grid-template-columns: minmax(0, 1fr) calc(432px + var(--auth-gutter));
     gap: clamp(24px, 3.5vw, 64px);
     align-items: start;
   }
 
   /* ---------------- left column ----------------
-     Sticky inside its own grid cell, so it can never sit over the form:
-     the cell is at most the free column and the panel never leaves it.
-     Centred content, sized in vh, so nothing is cut at the top or the
-     bottom on a short window. */
+     The panel is its own grid cell and never leaves it. On desktop that
+     cell is exactly the band between the fixed header and footer, so the
+     panel is fixed by construction rather than by sticking — a sticky
+     panel in a scrolling page is what slid over the header and the footer.
+     "safe" keeps the top edge reachable if the content is ever taller than
+     the band. */
   .auth-marketing {
-    position: sticky;
-    top: 0;
-    align-self: start;
+    align-self: stretch;
     display: flex;
     flex-direction: column;
     justify-content: center;
-    /* "safe" keeps the top edge reachable if the panel content is ever
-       taller than the window; browsers that do not know it keep center. */
     justify-content: safe center;
-    height: 100vh;
-    height: 100svh;
     min-width: 0;
-    padding: clamp(8px, 2vh, 24px) 0;
+    min-height: 0;
+    padding: 0;
+    overflow-y: auto;
   }
 
   .auth-headline {
@@ -194,8 +205,17 @@
     color: var(--text-2);
   }
 
-  /* ---------------- the card ---------------- */
+  /* ---------------- the form column ----------------
+     The one scrolling element on a desktop auth screen. The card keeps its
+     drawn width; the column's spare gutter holds the scrollbar. */
+  .auth-card-col {
+    min-width: 0;
+    min-height: 0;
+    max-width: calc(432px + var(--auth-gutter));
+  }
+
   .auth-card {
+    max-width: 432px;
     margin-top: var(--auth-gap);
     padding: clamp(24px, 3vh, 32px);
     border-radius: var(--r-panel);
@@ -399,28 +419,70 @@
   }
 
   /* ---------------- responsive ---------------- */
-  @media (max-width: 1180px) {
+
+  /* Both columns fit: the page is a fixed frame and only the form column
+     scrolls inside it. */
+  @media (min-width: 1001px) {
+    .auth {
+      height: 100vh;
+      height: 100svh;
+      overflow: hidden;
+    }
+
+    .auth-header,
+    .auth-footer { flex: 0 0 auto; }
+
+    .auth-main {
+      flex: 1 1 auto;
+      min-height: 0;
+      /* No right padding: the form column's gutter runs to the edge of the
+         centred page, which is where its scrollbar sits. */
+      padding-right: 0;
+      align-items: stretch;
+      overflow: hidden;
+    }
+
+    .auth-card-col {
+      height: 100%;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      /* room at the end of the scroll so the card's bottom edge is not
+         glued to the footer */
+      padding-bottom: clamp(16px, 3vh, 32px);
+    }
+  }
+
+  @media (min-width: 1001px) and (max-width: 1180px) {
     .auth {
       --auth-gap: clamp(24px, 7vh, 72px);
     }
     .auth-main {
-      grid-template-columns: minmax(0, 1fr) 400px;
+      grid-template-columns: minmax(0, 1fr) calc(400px + var(--auth-gutter));
       gap: clamp(24px, 3.5vw, 48px);
     }
     .auth-headline { font-size: clamp(30px, 4vw, 46px); }
-    .auth-marketing { padding: clamp(16px, 3vh, 32px) 0; }
+    .auth-card { max-width: 400px; }
   }
 
-  @media (max-width: 980px) {
+  /* Both columns no longer fit: one column, the page scrolls normally and
+     nothing is sticky or reserves space for a panel. */
+  @media (max-width: 1000px) {
     .auth { --auth-gap: clamp(24px, 6vh, 48px); }
     .auth-main {
       grid-template-columns: minmax(0, 1fr);
       gap: 0;
       max-width: 560px;
+      padding: 0 var(--auth-gutter);
+    }
+    .auth-card-col {
+      height: auto;
+      overflow: visible;
+      max-width: none;
     }
     /* One column: nothing is sticky, nothing is reserved for a panel. */
     .auth-marketing { display: none; }
     .auth-card {
+      max-width: none;
       padding: clamp(24px, 4vh, 32px) 0 0;
       background: transparent;
       border-radius: 0;
@@ -508,6 +570,8 @@
       <p class="auth-note">You approve every change. Always.</p>
     </div>
 
+    {# The form column: the only scrolling element on a desktop auth screen. #}
+    <div class="auth-card-col">
     <section class="auth-card" aria-labelledby="authTitle">
       <p class="o-eyebrow">{% block eyebrow %}Welcome back{% endblock %}</p>
       <h1 class="auth-card__title" id="authTitle">{% block heading %}Back in your orbit.{% endblock %}</h1>
@@ -522,6 +586,7 @@
         {% block card %}{% endblock %}
       {% endif %}
     </section>
+    </div>
   </main>
 
   <footer class="auth-footer">
