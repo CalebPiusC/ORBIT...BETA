@@ -9,7 +9,10 @@ from __future__ import annotations
 import os
 import shutil
 import sqlite3
+import threading
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 MIGRATIONS_DIR = Path(__file__).with_name("migrations")
 
@@ -26,6 +29,8 @@ class Database:
 
     def __init__(self, path: str | os.PathLike[str] | None = None) -> None:
         self.path = Path(path).expanduser().resolve() if path is not None else default_database_path()
+        self._live: set[sqlite3.Connection] = set()
+        self._live_lock = threading.Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         try:
             self.path.parent.chmod(0o700)
@@ -52,14 +57,62 @@ class Database:
             shutil.copy2(self.path, backup)
             self._secure_file(backup)
 
-    def connect(self) -> sqlite3.Connection:
-        # A fresh connection is returned to each caller; no connection is
-        # retained/shared across Flask request threads.
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        """Open a connection for one block, then close it.
+
+        ``with sqlite3.connect(...) as connection`` closes nothing: it only
+        commits or rolls back on the way out, and the file handle stays alive
+        until garbage collection. Every store here opens a connection per
+        operation, so that pattern leaked one handle per call. On Windows a
+        live handle locks the database file, which is why a temporary
+        directory holding it failed to delete after the dashboard tests.
+
+        So: a fresh connection per caller (never shared across request
+        threads), committed on success, rolled back on error, and always
+        closed when the block ends.
+        """
         connection = sqlite3.connect(self.path, timeout=10.0)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 10000")
-        return connection
+        with self._live_lock:
+            self._live.add(connection)
+        try:
+            yield connection
+            connection.commit()
+        except BaseException:
+            try:
+                connection.rollback()
+            except sqlite3.Error:
+                pass
+            raise
+        finally:
+            with self._live_lock:
+                self._live.discard(connection)
+            connection.close()
+
+    @property
+    def open_connection_count(self) -> int:
+        """Connections this database has open right now; zero between operations."""
+        with self._live_lock:
+            return len(self._live)
+
+    def close(self) -> None:
+        """Close any connection still open. A no-op between operations.
+
+        The per-operation context manager already closes everything; this is
+        the belt-and-braces exit for a shutdown hook, and it lets a test prove
+        the file is releasable before deleting it on Windows.
+        """
+        with self._live_lock:
+            live = list(self._live)
+            self._live.clear()
+        for connection in live:
+            try:
+                connection.close()
+            except sqlite3.Error:
+                pass
 
     def migrate(self) -> None:
         with self.connect() as connection:

@@ -105,6 +105,25 @@ from memory.facts import FactStore
 from memory.time_context import with_current_time
 from tools.registry import DEFAULT_AUDIT_LOG_PATH, AuditLog
 
+from config import ENV_FILE
+from dotenv import load_dotenv
+
+# Read the project's .env before anything below looks at the environment.
+#
+# Without this, the first load happened deep inside VoiceService.__init__,
+# which is *after* create_app() has copied ORBIT_SECRET_KEY into
+# app.secret_key. A key that existed only in .env was therefore still missing
+# when the app was built, app.secret_key fell back to the committed default,
+# and _require_real_secret_key() refused to serve -- from a "fresh terminal"
+# that had never exported the variable. (An exported variable always worked,
+# which is why the launch command in the README seemed fine.)
+#
+# ENV_FILE is this checkout's root (config.py resolves it from __file__), so
+# the directory the server is launched from makes no difference. override=False
+# keeps a real environment variable ahead of the file, and the value is never
+# logged or printed -- only the variable's presence matters.
+load_dotenv(dotenv_path=ENV_FILE, override=False)
+
 log = logging.getLogger("orbit.server")
 
 # The session-signing secret's fallback. It is committed, so it is public: any
@@ -2551,6 +2570,18 @@ def create_app(
             checklist_hidden = True
             recommendations = recommendations_for({"profile": {}})
             name = st.user.name
+        # Read-only roll-ups for the Overview screen. Everything below is
+        # counted from this account's own records through the store view the
+        # request already holds — no global scan, no write.
+        active_project_count = sum(1 for p in projects if p.status != "archived")
+        account_tasks = st.tasks_for()
+        tasks_done = sum(1 for task in account_tasks if task.done)
+        pending = st.pending_approvals()
+        project_names = {p.id: p.name for p in projects}
+        activity = [
+            {**item, "project": project_names.get(item["project_id"], "")}
+            for item in st.recent_activity(limit=10)
+        ]
         latest_proj = projects[0] if projects else None
         continue_strip = None
         if latest_proj is not None:
@@ -2579,6 +2610,12 @@ def create_app(
             returning=returning,
             projects=[_project_card_view(p, st) for p in projects[:6]],
             project_count=len(projects),
+            active_project_count=active_project_count,
+            tasks_total=len(account_tasks),
+            tasks_done=tasks_done,
+            pending_count=len(pending),
+            pending_preview=pending[:3],
+            activity=activity,
             checklist=checklist,
             checklist_done=checklist_done,
             checklist_hidden=checklist_hidden,

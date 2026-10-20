@@ -1,159 +1,793 @@
-{% extends "public.html" %}
-{# The marketing front door. Two honesty rules from the product carry over
-   here: every capability named below exists in the app today, and anything
-   that does not is labelled for what it is ("in testing", "coming next") —
-   never presented as working. The beta is presented as what it is: an early,
-   working product with clearly marked edges, not a fake 1.0. #}
-{% block title %}orbit — an AI workspace for building software{% endblock %}
-{% block body %}
-<main>
-  <section class="hero">
-    <div>
-      <div class="hero-eyebrow">
-        <span class="beta-pill">Open beta</span>
-        <span class="note">Free while we build · your feedback shapes what ships</span>
-      </div>
-      <h1>Think it. Plan it with agents. <span class="mark">Build it</span> — with your approval at every step.</h1>
-      <p class="hero-sub">
-        ORBIT is an AI development workspace. Describe what you want in plain words, plan it
-        with the Main Agent and a bench of specialists, and watch the work happen — knowing
-        that nothing runs without your explicit yes.
-      </p>
-      <div class="hero-actions">
-        {% if account %}
-        <a class="btn-primary btn-lg" href="/dashboard">Open your workspace</a>
-        <a class="btn-ghost btn-lg" href="/create">Start a project</a>
-        {% else %}
-        <a class="btn-primary btn-lg" href="/auth/signup">Create your free account</a>
-        <a class="btn-ghost btn-lg" href="/auth/login">Sign in</a>
-        {% endif %}
-      </div>
-      <p class="hero-micro"><span class="dot"></span>Working today: chat, agent tasks, project workspaces and reminders. Voice is in testing; Git imports are coming next.</p>
-    </div>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>{% block title %}orbit — big ideas, clear next steps{% endblock %}</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='orbit-mark.svg') }}" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+<script>
+  // Theme before first paint: a saved choice always wins; otherwise the
+  // system setting decides. Nothing is written to storage until the person
+  // actually chooses, so a system-theme change still follows through.
+  (function () {
+    try {
+      var saved = window.localStorage.getItem("orbit.theme");
+      var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.theme = saved || (dark ? "dark" : "light");
+    } catch (_error) {
+      document.documentElement.dataset.theme = "light";
+    }
+  })();
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='orbit.css') }}" />
+<style>
+  /* ===========================================================
+     landing — the marketing front door.
 
-    <div class="hero-preview" role="img" aria-label="A preview of the ORBIT home screen: a chat composer, a conversation, and a sidebar of projects.">
-      <div class="hp-topbar">
-        <span class="win" aria-hidden="true"><span></span><span></span><span></span></span>
-        <span>orbit — home</span>
-      </div>
-      <div class="hp-body">
-        <div class="hp-rail" aria-hidden="true">
-          <div class="hp-rail-item hot"></div>
-          <div class="hp-rail-item"></div>
-          <div class="hp-rail-item" style="width:75%"></div>
-          <div class="hp-rail-item" style="width:60%"></div>
-          <div class="hp-rail-item" style="width:80%"></div>
-        </div>
-        <div class="hp-main">
-          <div class="hp-bubble">Good evening. What are we building today?</div>
-          <div class="hp-bubble user">Add order tracking to my WhatsApp ordering bot.</div>
-          <div class="hp-bubble">
-            <span class="thinkline">Reading orders.py and bot.py… I’d add a status field, expose it through the lookup command, and keep everything on your branch.</span>
-            Here’s my plan — review the proposed changes, then approve.
+     Bands alternate page background and surface:
+       hero (bg) · how it works (surface) · your control (bg)
+       · the agents (surface) · closing note (bg) · footer (bg)
+
+     All colour comes from orbit.css tokens. Copper appears on exactly
+     two elements here: the logo mark and the one primary button.
+     =========================================================== */
+
+  html { background: var(--bg); }
+
+  .o-skip {
+    position: absolute;
+    left: 16px;
+    top: -60px;
+    z-index: 30;
+    padding: 10px 16px;
+    border-radius: var(--r-control);
+    background: var(--surface);
+    color: var(--text-1);
+    font-size: 14px;
+    text-decoration: none;
+    box-shadow: var(--shadow-pop);
+  }
+  .o-skip:focus { top: 16px; }
+
+  /* ---------------- header ---------------- */
+  .site-header { padding: 32px 0 24px; }
+
+  .site-header__in {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    text-decoration: none;
+    color: var(--text-1);
+  }
+
+  .brand__mark { width: 30px; height: 30px; }
+
+  .brand__word {
+    font-family: var(--font-display);
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1;
+  }
+
+  .site-nav {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    margin: 0 auto;
+  }
+
+  .site-nav a {
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-2);
+    text-decoration: none;
+    padding: 6px 0;
+  }
+
+  .site-nav a:hover { color: var(--text-1); }
+
+  .site-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .site-actions .o-link { color: var(--text-1); font-size: 13px; }
+
+  /* ---------------- hero ---------------- */
+  .hero { padding: 64px 0 80px; }
+
+  .hero__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 632px;
+    gap: 64px;
+    align-items: start;
+  }
+
+  .hero__copy { padding-top: 20px; }
+
+  .hero h1 {
+    margin-top: 32px;
+    font-family: var(--font-display);
+    font-size: 72px;
+    font-weight: 500;
+    line-height: 1.06;
+    letter-spacing: -0.028em;
+    color: var(--text-1);
+  }
+
+  .hero__sub {
+    margin-top: 24px;
+    max-width: 590px;
+    font-size: 18px;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  .hero__actions { margin-top: 24px; }
+
+  .hero__link { margin-top: 20px; }
+
+  .hero__micro {
+    margin-top: 24px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  .hero__foot {
+    margin-top: 30px;
+    font-size: 11px;
+    line-height: 1.6;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+
+  /* ---------------- project-map preview card ---------------- */
+  .preview {
+    position: relative;
+    padding: 32px 24px 40px;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .preview__kicker {
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-2);
+  }
+
+  .preview__title {
+    margin-top: 40px;
+    padding-right: 112px;
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .preview__arc {
+    position: absolute;
+    top: 73px;
+    right: 24px;
+    width: 56px;
+    height: 56px;
+  }
+
+  .stages {
+    margin-top: 27px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .stage {
+    padding: 26px 24px;
+    border-radius: var(--r-control);
+    background: var(--stage-bg);
+  }
+
+  .stage__title {
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .stage__desc {
+    margin-top: 24px;
+    font-size: 15px;
+    line-height: 1.45;
+    color: var(--text-2);
+  }
+
+  .stage__meta {
+    margin-top: 16px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-3);
+  }
+
+  .preview .o-capsule { margin-top: 20px; }
+
+  /* ---------------- sections ---------------- */
+  .section { padding: 82px 0 84px; }
+  #control { padding-top: 88px; }
+  .section--surface { background: var(--surface); }
+
+  .section__title {
+    margin-top: 40px;
+    font-family: var(--font-display);
+    font-size: 48px;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+  }
+
+  .section__sub {
+    margin-top: 40px;
+    max-width: 920px;
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  .feature-grid {
+    margin-top: 48px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+  }
+
+  .feature h3 {
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .feature p {
+    margin-top: 16px;
+    max-width: 392px;
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--text-2);
+  }
+
+  /* ---------------- your control (split) ---------------- */
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 632px;
+    gap: 64px;
+    align-items: start;
+  }
+
+  .split__copy { padding-top: 10px; }
+
+  .checklist {
+    margin-top: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .checklist li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  .checklist .o-icon {
+    width: 16px;
+    height: 16px;
+    margin-top: 3px;
+  }
+
+  /* ---------------- approval card ---------------- */
+  .approval-card {
+    padding: 24px;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .approval-card__title {
+    margin-top: 28px;
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .diff { margin-top: 26px; }
+
+  .diff__label {
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.4;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .diff__text {
+    margin-top: 6px;
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  .approval-card__meta {
+    margin-top: 28px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-3);
+  }
+
+  .approval-card__btn {
+    margin-top: 20px;
+    width: 100%;
+  }
+
+  .approval-card__note {
+    margin-top: 24px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  /* ---------------- the agents ---------------- */
+  .agent-grid {
+    margin-top: 48px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+  }
+
+  .agent-group h3 {
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .agent { margin-top: 32px; }
+  .agent + .agent { margin-top: 24px; }
+
+  .agent__role {
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.4;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .agent__desc {
+    margin-top: 4px;
+    max-width: 392px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
+  /* ---------------- closing note ---------------- */
+  .cta {
+    padding: 96px 0;
+    text-align: center;
+  }
+
+  .cta__arc {
+    width: 88px;
+    height: 88px;
+    margin: 0 auto;
+  }
+
+  .cta h2 {
+    margin-top: 32px;
+    font-family: var(--font-display);
+    font-size: 60px;
+    font-weight: 500;
+    line-height: 1.1;
+    letter-spacing: -0.028em;
+    color: var(--text-1);
+  }
+
+  .cta__sub {
+    margin-top: 24px;
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  .cta__actions { margin-top: 20px; }
+
+  .cta__micro {
+    margin-top: 26px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  /* ---------------- footer ---------------- */
+  .site-footer {
+    border-top: 1px solid var(--border);
+    padding: 40px 0 36px;
+  }
+
+  .site-footer__in {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .site-footer .brand__mark { width: 26px; height: 26px; }
+
+  .site-footer .brand__word { font-size: 24px; }
+
+  .site-footer__links {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 40px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-2);
+  }
+
+  .site-footer__links a { text-decoration: none; }
+  .site-footer__links a:hover { color: var(--text-1); }
+
+  .site-footer__plain { color: var(--text-2); }
+
+  .site-footer__links svg { display: inline-block; vertical-align: -3px; }
+
+  /* ---------------- responsive ---------------- */
+  @media (max-width: 1240px) {
+    .hero__grid,
+    .split { grid-template-columns: minmax(0, 1fr) 480px; gap: 48px; }
+
+    .hero h1 { font-size: 60px; }
+    .section__title { font-size: 42px; }
+    .cta h2 { font-size: 50px; }
+  }
+
+  @media (max-width: 1100px) {
+    .hero__grid,
+    .split { grid-template-columns: minmax(0, 1fr); gap: 48px; }
+
+    .hero { padding: 48px 0 72px; }
+    .hero__copy { padding-top: 0; }
+    .split__copy { padding-top: 0; }
+
+    .hero h1 { font-size: 54px; }
+    .section__title { font-size: 38px; }
+    .cta h2 { font-size: 44px; }
+
+    .feature-grid,
+    .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; }
+  }
+
+  @media (max-width: 900px) {
+    .site-nav { display: none; }
+  }
+
+  @media (max-width: 720px) {
+    .site-header { padding: 32px 0 8px; }
+    .brand__mark { width: 26px; height: 26px; }
+    .brand__word { font-size: 26px; }
+    .site-footer__links .site-footer__opt { display: none; }
+    .site-footer__links { gap: 20px; }
+
+    .hero { padding: 56px 0 72px; }
+    .hero h1 { margin-top: 24px; font-size: 48px; line-height: 1.08; }
+    .hero__sub { margin-top: 24px; font-size: 16px; line-height: 1.75; }
+    .hero__actions { margin-top: 24px; }
+    .hero__foot { margin-top: 32px; }
+
+    .preview { padding: 24px 20px 32px; }
+    .preview__title { font-size: 22px; margin-top: 24px; padding-right: 112px; }
+    .preview__arc { width: 48px; height: 48px; top: 58px; right: 20px; }
+    .stages { margin-top: 24px; }
+    .stage { padding: 26px 20px; }
+    .stage__title { font-size: 20px; }
+    .stage__desc { margin-top: 26px; }
+    .stage__meta { margin-top: 16px; }
+
+    .section { padding: 56px 0; }
+    #control { padding-top: 56px; }
+    .section__title { margin-top: 28px; font-size: 34px; line-height: 1.2; }
+    .section__sub { margin-top: 28px; font-size: 15px; line-height: 1.7; }
+    .feature-grid { margin-top: 40px; grid-template-columns: minmax(0, 1fr); gap: 32px; }
+    .feature p { margin-top: 10px; }
+
+    .split { gap: 40px; }
+    .checklist { margin-top: 28px; }
+    .approval-card { padding: 20px; }
+    .approval-card__title { margin-top: 24px; font-size: 22px; }
+
+    .agent-grid { margin-top: 40px; grid-template-columns: minmax(0, 1fr); gap: 32px; }
+    .agent { margin-top: 24px; }
+    .agent + .agent { margin-top: 20px; }
+
+    .cta { padding: 64px 0; }
+    .cta h2 { margin-top: 28px; font-size: 36px; line-height: 1.15; }
+    .cta__sub { margin-top: 20px; font-size: 15px; }
+
+    .site-footer { padding: 28px 0; }
+  }
+</style>
+</head>
+<body>
+<a class="o-skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="o-container site-header__in">
+    <a class="brand" href="/" aria-label="orbit — home">
+      {# The attached orbit-rings mark, unchanged: same paths, drawn with theme tokens. #}
+      <svg class="brand__mark" viewBox="0 0 64 64" fill="none" aria-hidden="true" focusable="false">
+        <ellipse cx="32" cy="32" rx="27" ry="11" transform="rotate(25 32 32)" stroke="var(--copper)" stroke-width="2" />
+        <ellipse cx="32" cy="32" rx="27" ry="11" transform="rotate(-30 32 32)" stroke="var(--copper-deep)" stroke-width="2" />
+        <circle cx="32" cy="32" r="5" fill="var(--copper-bright)" />
+        <circle cx="55" cy="23" r="2.5" fill="var(--copper)" />
+      </svg>
+      <span class="brand__word">orbit</span>
+    </a>
+
+    <nav class="site-nav" aria-label="Sections">
+      <a href="#how">How it works</a>
+      <a href="#agents">The agents</a>
+      <a href="#control">Your control</a>
+    </nav>
+
+    <div class="site-actions">
+      {% if account %}
+      <a class="o-link" href="/dashboard">Open your workspace
+        <svg class="o-icon o-icon--sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 17 17 7M8 7h9v9" /></svg>
+      </a>
+      {% else %}
+      <a class="o-link" href="/auth/login">Sign in
+        <svg class="o-icon o-icon--sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 17 17 7M8 7h9v9" /></svg>
+      </a>
+      {% endif %}
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============ hero ============ -->
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="o-container">
+      <div class="hero__grid">
+        <div class="hero__copy">
+          <p class="o-eyebrow">A calmer way to build software</p>
+          <h1 id="hero-title">Big ideas.<br />Clear next<br />steps.</h1>
+          <p class="hero__sub">Meet the AI workspace that turns your software idea into a plan, and your plan into progress. A team of specialists. One shared map. You in control.</p>
+
+          <div class="hero__actions">
+            <a class="o-btn o-btn--primary" href="{% if account %}/dashboard{% else %}/auth/signup{% endif %}">Start your project</a>
           </div>
-          <div class="hp-composer">Message Orbit… <span class="hp-send">➤</span></div>
+
+          <a class="o-link hero__link" href="#how">See how it works
+            <svg class="o-icon o-icon--sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 17 17 7M8 7h9v9" /></svg>
+          </a>
+
+          <p class="hero__micro">Start free. No card required. No coding experience needed.</p>
+        </div>
+
+        <aside class="preview" aria-label="Project Map preview: a project split into three stages, with one change waiting for approval.">
+          <p class="preview__kicker">Fieldnotes / Project Map</p>
+          <p class="preview__title">A little more clarity.</p>
+          <svg class="o-orbit-arc preview__arc" viewBox="0 0 56 56" aria-hidden="true" focusable="false">
+            <circle cx="28" cy="28" r="26" stroke-dasharray="140 24" transform="rotate(-38 28 28)" />
+            <circle class="o-satellite" cx="43" cy="11" r="1.9" />
+          </svg>
+
+          <ol class="stages">
+            <li class="stage">
+              <p class="stage__title">01 / Understand</p>
+              <p class="stage__desc">The idea, made tangible.</p>
+              <p class="stage__meta">Project brief · 4 tasks</p>
+            </li>
+            <li class="stage">
+              <p class="stage__title">02 / Build</p>
+              <p class="stage__desc">Bring your reading list to life.</p>
+              <p class="stage__meta">Save an article · 6 tasks</p>
+            </li>
+            <li class="stage">
+              <p class="stage__title">03 / Refine</p>
+              <p class="stage__desc">Small details. Better experiences.</p>
+              <p class="stage__meta">Quality checks · 3 tasks</p>
+            </li>
+          </ol>
+
+          <p class="o-capsule"><span class="o-capsule__dot" aria-hidden="true"></span>Needs approval · Nothing changes without you</p>
+        </aside>
+      </div>
+
+      <p class="hero__foot">For first ideas, side projects, and the next big thing.</p>
+    </div>
+  </section>
+
+  <!-- ============ 01 · how it works ============ -->
+  <section class="section section--surface" id="how" aria-labelledby="how-title">
+    <div class="o-container">
+      <p class="o-eyebrow">01 / From possibility to a plan</p>
+      <h2 class="section__title" id="how-title">Less figuring out. More moving forward.</h2>
+      <p class="section__sub">You don’t need to know where every piece fits. Orbit helps you see the whole project and bring the right specialist along.</p>
+
+      <div class="feature-grid">
+        <div class="feature">
+          <h3>Bring your starting point</h3>
+          <p>Import a folder, upload a ZIP, connect GitHub, or begin with an idea. Your project stays yours.</p>
+        </div>
+        <div class="feature">
+          <h3>Find your bearings</h3>
+          <p>A stage-by-stage Project Map makes the work understandable. No tangled graphs. No mystery.</p>
+        </div>
+        <div class="feature">
+          <h3>Build with a specialist</h3>
+          <p>Ask, explore, and make a plan. Review every proposed change before it happens.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="land-section" id="how">
-    <p class="land-eyebrow">How it works</p>
-    <h2 class="land-title">From first question to reviewed change, in three moves.</h2>
-    <p class="land-sub">ORBIT is built around one idea: the AI does the legwork, you keep the decisions. The approval gate isn’t a setting — it’s the product.</p>
-    <div class="step-grid">
-      <div class="step-card">
-        <span class="step-num">1</span>
-        <h3>Describe it</h3>
-        <p>Tell Orbit what you want in the home chat — Quick for fast answers, Deep when you want it to think harder. Hold-to-talk voice input is in testing.</p>
-      </div>
-      <div class="step-card">
-        <span class="step-num">2</span>
-        <h3>Plan it together</h3>
-        <p>Every project gets a workspace: a Main Agent that knows the goal, a task map you organize by stage, and specialists — Coding, Research, Debug, Review, Testing, Documentation — you assign where they fit.</p>
-      </div>
-      <div class="step-card">
-        <span class="step-num">3</span>
-        <h3>Approve before it runs</h3>
-        <p>When Orbit wants to run a tool — save a note, remember a fact, save today’s plan, pause reminders — the request waits on a card until you click Approve. Declines are recorded too. Approving proposed code changes comes with the Git integration.</p>
-      </div>
-    </div>
-  </section>
+  <!-- ============ 02 · your control ============ -->
+  <section class="section" id="control" aria-labelledby="control-title">
+    <div class="o-container split">
+      <div class="split__copy">
+        <p class="o-eyebrow">02 / Your project. Your call.</p>
+        <h2 class="section__title" id="control-title">AI can propose.<br />Only you can approve.</h2>
+        <p class="section__sub">No silent edits. No unexpected commits. Understand what will change, why it matters, and what it touches — in plain language.</p>
 
-  <section class="land-section" id="capabilities">
-    <p class="land-eyebrow">What’s inside</p>
-    <h2 class="land-title">A real workspace, not a chat box.</h2>
-    <p class="land-sub">Everything below is live in the beta today, except what is labelled otherwise — because pretending otherwise is how products lose your trust.</p>
-    <div class="cap-grid">
-      <div class="cap-card">
-        <h3>Chat &amp; Agent modes</h3>
-        <span class="cap-tag live">Working today</span>
-        <p>One toggle switches between conversation and an agent that plans a task and works a checklist from your request. Drafting the code changes for your review is coming next.</p>
-      </div>
-      <div class="cap-card">
-        <h3>Project workspaces</h3>
-        <span class="cap-tag live">Working today</span>
-        <p>Each project has a map of tasks by stage, a detail view, and its own Main Agent thread with the project’s full context.</p>
-      </div>
-      <div class="cap-card">
-        <h3>Agent specialists</h3>
-        <span class="cap-tag live">Working today</span>
-        <p>Six specialties — Coding, Research, Debug, Review, Testing, Documentation — each with its own brief, assignable to any project.</p>
-      </div>
-      <div class="cap-card">
-        <h3>The approval gate</h3>
-        <span class="cap-tag live">Working today</span>
-        <p>Every tool call queues behind an explicit Approve, and every decision — including declines — is written to an audit log. Approving proposed code changes arrives with the Git integration.</p>
-      </div>
-      <div class="cap-card">
-        <h3>Voice &amp; reminders</h3>
-        <span class="cap-tag coming">Voice in testing</span>
-        <p>Reminders work today: daily-plan check-ins with quiet hours, and phone push if you want it. Hold-to-talk input and spoken replies are built and in testing — clips are processed locally and never stored.</p>
-      </div>
-      <div class="cap-card">
-        <h3>Git providers &amp; imports</h3>
-        <span class="cap-tag coming">Coming next</span>
-        <p>No Git provider is connected yet — GitHub included. The GitHub, GitLab, Bitbucket and file/ZIP entry points are visible in the app and visibly disabled until they are real.</p>
-      </div>
-    </div>
-  </section>
-
-  <section class="land-section" id="beta">
-    <div class="beta-band">
-      <div>
-        <p class="land-eyebrow">The beta promise</p>
-        <h2>Early, honest, and built with you.</h2>
-        <p>ORBIT is in open beta. That means the core loop is real and daily-usable, the edges are clearly marked, and your feedback goes straight into what gets built next. Here’s exactly where things stand:</p>
-        <ul class="beta-lists">
-          <li><span class="ok">✓</span><span><strong>Working daily:</strong> chat and agent modes, project workspaces, specialists and reminders — with a streaming reply that never leaves you guessing.</span></li>
-          <li><span class="soon">◐</span><span><strong>In testing:</strong> hold-to-talk voice and spoken replies. Built, not yet proven on every machine — tell us when it fails.</span></li>
-          <li><span class="soon">◐</span><span><strong>Visibly unfinished:</strong> connecting any Git provider — GitHub included — and importing from files. The entry points are there, disabled and labelled, never faked as working.</span></li>
-          <li><span class="ok">✓</span><span><strong>Never unfinished:</strong> the approval gate. No tool call runs without your yes, on day one, forever.</span></li>
+        <ul class="checklist">
+          <li>
+            <svg class="o-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 13 4 4L19 7" /></svg>
+            <span>A clear before and after</span>
+          </li>
+          <li>
+            <svg class="o-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 13 4 4L19 7" /></svg>
+            <span>A small, understandable scope</span>
+          </li>
+          <li>
+            <svg class="o-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 13 4 4L19 7" /></svg>
+            <span>Approve, reject, or ask for a revision</span>
+          </li>
         </ul>
       </div>
-      <div>
-        <p style="margin-top:0">Found a rough edge? Missing something you need? The beta runs on exactly that signal.</p>
-        <div class="hero-actions">
-          {% if account %}
-          <a class="btn-primary" href="/feedback">Send feedback</a>
-          {% else %}
-          <a class="btn-primary" href="/auth/signup">Join the beta</a>
-          {% endif %}
-          <a class="btn-ghost" href="/auth/login">Sign in</a>
+
+      <article class="approval-card">
+        <p class="o-capsule"><span class="o-capsule__dot" aria-hidden="true"></span>Needs approval</p>
+        <h3 class="approval-card__title">Keep saved articles between visits</h3>
+
+        <div class="diff">
+          <p class="diff__label">Before</p>
+          <p class="diff__text">Your list resets when the page refreshes.</p>
+        </div>
+        <div class="diff">
+          <p class="diff__label">After</p>
+          <p class="diff__text">Your articles stay saved on this device.</p>
+        </div>
+
+        <p class="approval-card__meta">2 files · No new dependencies · Not applied</p>
+        <a class="o-btn o-btn--secondary approval-card__btn" href="/projects">Open change review</a>
+        <p class="approval-card__note">Your project stays unchanged until you approve.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ 03 · the agents ============ -->
+  <section class="section section--surface" id="agents" aria-labelledby="agents-title">
+    <div class="o-container">
+      <p class="o-eyebrow">03 / The right mind for the moment</p>
+      <h2 class="section__title" id="agents-title">A small team. A wider perspective.</h2>
+      <p class="section__sub">Six specialists, each with a clear role. Start a conversation whenever you need a hand.</p>
+
+      <div class="agent-grid">
+        <div class="agent-group">
+          <h3>Explore &amp; build</h3>
+          <div class="agent">
+            <p class="agent__role">Research</p>
+            <p class="agent__desc">Explore possibilities before you commit.</p>
+          </div>
+          <div class="agent">
+            <p class="agent__role">Coding</p>
+            <p class="agent__desc">Turn a task into a thoughtful proposal.</p>
+          </div>
+        </div>
+        <div class="agent-group">
+          <h3>Notice &amp; refine</h3>
+          <div class="agent">
+            <p class="agent__role">Debug</p>
+            <p class="agent__desc">Find the cause, not just a quick fix.</p>
+          </div>
+          <div class="agent">
+            <p class="agent__role">Review</p>
+            <p class="agent__desc">A second set of eyes on the details.</p>
+          </div>
+        </div>
+        <div class="agent-group">
+          <h3>Check &amp; explain</h3>
+          <div class="agent">
+            <p class="agent__role">Testing</p>
+            <p class="agent__desc">Make sure the important things work.</p>
+          </div>
+          <div class="agent">
+            <p class="agent__role">Documentation</p>
+            <p class="agent__desc">Make your project easy to understand.</p>
+          </div>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="final-cta">
-    <h2>Your ideas are already orbiting. Bring them in.</h2>
-    {% if account %}
-    <p>You're signed in — your workspace is waiting.</p>
-    <a class="btn-primary btn-lg" href="/dashboard">Open your workspace</a>
-    {% else %}
-    <p>Create an account in under a minute. Free during the beta.</p>
-    <a class="btn-primary btn-lg" href="/auth/signup">Create your free account</a>
-    {% endif %}
+  <!-- ============ closing note ============ -->
+  <section class="cta" aria-labelledby="cta-title">
+    <div class="o-container">
+      <svg class="o-orbit-arc cta__arc" viewBox="0 0 96 96" aria-hidden="true" focusable="false">
+        <circle cx="48" cy="48" r="44" stroke-dasharray="238 38" transform="rotate(-38 48 48)" />
+        <circle class="o-satellite" cx="75" cy="17" r="2.6" />
+      </svg>
+      <h2 id="cta-title">Make room for your next idea.</h2>
+      <p class="cta__sub">Bring the spark. We’ll help with the next step.</p>
+      <div class="cta__actions">
+        <a class="o-btn o-btn--secondary" href="{% if account %}/dashboard{% else %}/auth/signup{% endif %}">Create your free workspace</a>
+      </div>
+      <p class="cta__micro">Private by default. Yours at every stage.</p>
+    </div>
   </section>
 </main>
-{% endblock %}
+
+<footer class="site-footer">
+  <div class="o-container site-footer__in">
+    <span class="brand" aria-label="orbit">
+      <svg class="brand__mark" viewBox="0 0 64 64" fill="none" aria-hidden="true" focusable="false">
+        <ellipse cx="32" cy="32" rx="27" ry="11" transform="rotate(25 32 32)" stroke="var(--copper)" stroke-width="2" />
+        <ellipse cx="32" cy="32" rx="27" ry="11" transform="rotate(-30 32 32)" stroke="var(--copper-deep)" stroke-width="2" />
+        <circle cx="32" cy="32" r="5" fill="var(--copper-bright)" />
+        <circle cx="55" cy="23" r="2.5" fill="var(--copper)" />
+      </svg>
+      <span class="brand__word">orbit</span>
+    </span>
+
+    <div class="site-footer__links">
+      <span class="site-footer__plain">© 2026 Orbit</span>
+      <span class="site-footer__plain site-footer__opt">Privacy</span>
+      <span class="site-footer__plain site-footer__opt">Terms</span>
+      <a class="site-footer__plain site-footer__opt" href="https://github.com/CalebPiusC/ORBIT...BETA" target="_blank" rel="noopener noreferrer">Get in touch
+        <svg class="o-icon o-icon--sm" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 17 17 7M8 7h9v9" /></svg>
+      </a>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,176 +1,699 @@
-{% extends "layout.html" %}
+{% extends "app_shell.html" %}
 {#
-  The adaptive dashboard — one page, three honest states.
-    new       → no projects yet: guidance leads (checklist + start paths).
-    active    → projects exist: the work leads (jump-back-in + cards).
-    returning → visited before: the greeting and strip switch to resuming.
-  Every number and row on the page is rendered from the stores; nothing is a
-  decorative placeholder.
+  Overview — the first screen after sign-in.
+
+  Drawn from Dashboard · Light/Dark · Desktop and Mobile. The frame shows a
+  workspace with three projects, an approval card, an activity list and a
+  reminder; this page renders the same shapes from what the dashboard route
+  actually knows. Where the frame names something the route does not carry
+  (a pending-proposal count, an activity log, a scheduled reminder), the slot
+  holds the nearest real thing and the change is called out in the report —
+  no figure on this page is invented.
+
+  States:
+    new       → no projects: the three start paths lead, then the checklist.
+    active    → projects exist: the work leads.
+    returning → visited before: the greeting resumes rather than introduces.
+    ?view=loading / ?view=error → the skeleton and failure states, for review.
 #}
-{% block title %}orbit — Dashboard{% endblock %}
-{% block body_class %}v2{% endblock %}
-{% block body %}
-<div class="screen screen--active" id="screen-dashboard"{% if tour_autostart %} data-tour-autostart="1"{% endif %}>
-{% include "_sidebar.html" %}
+{% block title %}orbit — Overview{% endblock %}
 
-  <main class="page-main">
-    {% include "_topbar.html" %}
-    <div class="page-wrap">
+{% block head %}
+<style>
+  /* ===========================================================
+     Overview. Measurements from the frame at 1440:
+       content inset 40, 1136 wide; header 40/8/24 rhythm;
+       three stat cards 362 wide, 132 tall, 24 apart;
+       two columns 556 wide, 24 apart; 32 between stacked cards;
+       card radius 16, padding 24.
+     Short windows (the 1280x720 laptop case): the section rhythm and the
+     stat band's height are clamp()s on viewport height, so the page keeps
+     the frame's proportions on a tall monitor and loses height rather than
+     pushing the work below the fold on a short one. The shell's own
+     gutter does the same — see app_shell.html.
+     =========================================================== */
 
-      <div class="page-topline">
-        <nav class="page-crumb" aria-label="Breadcrumb"><span class="crumb-workspace">{{ user.workspace }}</span><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Dashboard</span></nav>
-        <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
-      </div>
+  .dash { display: flex; flex-direction: column; gap: clamp(24px, 3.6vh, 32px); }
 
-      {% if notice %}
-      <div class="notice-bar" role="status">
-        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v5M12 16h.01"/></svg>
-        <span>{{ notice }}</span>
-      </div>
-      {% endif %}
+  .dash-notice {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: 14px;
+  }
 
-      <header class="page-head-block" data-tour="greeting">
-        {% if state == "new" %}
-        <p class="page-eyebrow">Good {{ daypart }}, {{ first_name }}</p>
-        <h1 class="page-title">Let's get your first project off the ground.</h1>
-        <p class="page-sub">Your workspace is ready. Start anywhere below — every path lands somewhere real, and nothing here is required.</p>
-        {% elif returning %}
-        <p class="page-eyebrow">Welcome back, {{ first_name }}</p>
-        <h1 class="page-title">Pick up where you left off.</h1>
-        <p class="page-sub">{{ project_count }} project{{ 's' if project_count != 1 }} in your workspace. Jump back in, or start something new.</p>
-        {% else %}
-        <p class="page-eyebrow">Good {{ daypart }}, {{ first_name }}</p>
-        <h1 class="page-title">Your workspace, moving forward.</h1>
-        <p class="page-sub">{{ project_count }} project{{ 's' if project_count != 1 }} in flight. Open one, or start the next.</p>
-        {% endif %}
-      </header>
+  /* ---------------- header ---------------- */
+  .dash-head { display: flex; flex-direction: column; align-items: flex-start; }
 
-      {% if continue_strip %}
-      <a class="continue-strip" href="/projects/{{ continue_strip.id }}" data-tour="resume">
-        <span class="continue-label">{{ 'Jump back in' if returning else 'Most recent' }}</span>
-        <span class="continue-name">{{ continue_strip.name }}</span>
-        <span class="continue-task">{{ continue_strip.task_title }}</span>
-        <span class="continue-age">Updated {{ continue_strip.age }}</span>
-        <span class="continue-go">Open workspace →</span>
+  .dash-date { color: var(--text-3); margin-bottom: 12px; }
+
+  .dash-title {
+    font-family: var(--font-display);
+    font-size: 36px;
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+  }
+
+  .dash-sub {
+    margin-top: 10px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
+  .dash-cta { margin-top: 20px; }
+
+  /* ---------------- stat cards ---------------- */
+  .dash-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+  }
+
+  .dash-stat {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: clamp(104px, 14.6vh, 132px);
+    padding: clamp(20px, 2.9vh, 26px) 24px;
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .dash-stat__line {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    color: var(--text-1);
+  }
+
+  .dash-stat__sep { font-weight: 400; }
+
+  .dash-stat__caption { font-size: 14px; color: var(--text-2); }
+
+  /* ---------------- the two columns ---------------- */
+  .dash-cols {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+    align-items: start;
+  }
+
+  .dash-col { display: flex; flex-direction: column; gap: clamp(24px, 3.6vh, 32px); }
+
+  .dash-card {
+    padding: 24px;
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .dash-card__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .dash-card__title {
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .dash-card__sub { margin-top: 10px; font-size: 14px; line-height: 1.55; color: var(--text-2); }
+
+  /* ---------------- project card ---------------- */
+  .dash-project { display: flex; flex-direction: column; align-items: flex-start; }
+
+  .dash-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    padding: 3px 12px;
+    border-radius: var(--r-pill);
+    background: var(--bg);
+    color: var(--text-1);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+
+  .dash-project__name {
+    margin-top: 18px;
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+  }
+
+  .dash-project__name a { color: var(--text-1); text-decoration: none; }
+  .dash-project__name a:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+  .dash-project__desc {
+    margin-top: 20px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
+  .dash-project__origin { color: var(--text-3); font-size: 13px; }
+  .dash-project__desc.is-empty { color: var(--text-3); }
+
+  .dash-project__meta {
+    margin-top: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-3);
+  }
+
+  .dash-project__desc + .dash-project__meta { margin-top: 18px; }
+
+  .dash-project__cta { height: 44px; margin-top: 20px; }
+
+  /* ---------------- checklist ---------------- */
+  .dash-dismiss {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin: -12px -12px 0 0;
+    border: 0;
+    border-radius: var(--r-control);
+    background: transparent;
+    color: var(--text-3);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .dash-dismiss:hover { background: var(--surface-2); color: var(--text-1); }
+
+  .dash-checks { margin-top: 18px; display: flex; flex-direction: column; }
+
+  .dash-check {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    padding: 8px 0;
+    border-top: 1px solid var(--border);
+    font-size: 14px;
+    color: var(--text-1);
+  }
+
+  .dash-check:first-child { border-top: 0; }
+
+  .dash-check__mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    color: var(--text-3);
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  .dash-check.is-done .dash-check__mark {
+    border-color: var(--success);
+    color: var(--success);
+  }
+
+  .dash-check.is-done .dash-check__label { color: var(--text-2); }
+
+  .dash-check__go {
+    margin-left: auto;
+    padding: 12px 0;
+    font-size: 13px;
+    color: var(--text-1);
+    text-decoration: none;
+  }
+  .dash-check__go:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  /* ---------------- activity / list rows ---------------- */
+  .dash-rows { margin-top: 8px; display: flex; flex-direction: column; }
+
+  .dash-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .dash-row:first-child { border-top: 0; }
+
+  .dash-row__title { font-size: 14px; color: var(--text-1); }
+  .dash-row__meta { font-size: 13px; color: var(--text-3); }
+
+  .dash-approve__cta { height: 44px; margin-top: 20px; }
+
+  .dash-card__fine {
+    margin-top: 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-3);
+  }
+
+  .dash-empty {
+    margin-top: 14px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
+  /* ---------------- recommendations ---------------- */
+  .dash-rec {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px 0;
+    border-top: 1px solid var(--border);
+    text-decoration: none;
+  }
+
+  .dash-rec:first-of-type { border-top: 0; padding-top: 8px; }
+
+  .dash-rec__title { font-size: 14px; font-weight: 600; color: var(--text-1); }
+  .dash-rec__text { font-size: 14px; line-height: 1.55; color: var(--text-2); }
+  .dash-rec__go { margin-top: 8px; font-size: 13px; color: var(--text-1); }
+  .dash-rec:hover .dash-rec__go { text-decoration: underline; text-underline-offset: 3px; }
+
+  /* ---------------- start paths (no art: the new-workspace state) ---------------- */
+  .dash-section-title--spaced { margin-bottom: 16px; }
+
+  .dash-section-title {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .dash-paths { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+
+  .dash-path {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 24px;
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+    text-decoration: none;
+  }
+
+  .dash-path:hover { box-shadow: var(--shadow-pop); }
+
+  .dash-path__icon { color: var(--text-2); }
+
+  .dash-path__icon svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .dash-path__name {
+    margin-top: 16px;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--text-1);
+  }
+
+  .dash-path__text { margin-top: 8px; font-size: 14px; line-height: 1.55; color: var(--text-2); }
+
+  .dash-path__go { margin-top: 16px; font-size: 13px; color: var(--text-1); }
+
+  /* ---------------- continue strip ---------------- */
+  .continue-strip {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-height: 64px;
+    padding: 12px 24px;
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+    text-decoration: none;
+  }
+
+  .continue-strip:hover { box-shadow: var(--shadow-pop); }
+
+  .continue-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+
+  .continue-name { font-family: var(--font-display); font-size: 18px; font-weight: 500; color: var(--text-1); }
+  .continue-task { font-size: 14px; color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .continue-age { margin-left: auto; font-size: 13px; color: var(--text-3); white-space: nowrap; }
+  .continue-go { font-size: 13px; color: var(--text-1); white-space: nowrap; }
+
+  /* ---------------- skeleton and error ---------------- */
+  .dash-skel {
+    border-radius: var(--r-card);
+    background: var(--surface-2);
+    animation: dash-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes dash-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  .dash-skel--title { width: 420px; max-width: 100%; height: 44px; }
+  .dash-skel--short { width: 120px; }
+  .dash-skel--gap { margin-top: 16px; }
+  .dash-skel--gap-sm { margin-top: 14px; }
+  .dash-skel--line { width: 300px; max-width: 100%; height: 16px; }
+  .dash-skel--card { height: clamp(104px, 14.6vh, 132px); }
+  .dash-skel--tall { height: clamp(240px, 37vh, 336px); }
+
+  .dash-error { display: flex; flex-direction: column; align-items: flex-start; }
+  .dash-error__title {
+    margin-top: 24px;
+    font-family: var(--font-display);
+    font-size: 28px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  .dash-error__text { margin-top: 10px; font-size: 15px; color: var(--text-2); }
+  .dash-error__actions { display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
+
+  /* ---------------- dark edges ---------------- */
+  [data-theme="dark"] .dash-card,
+  [data-theme="dark"] .dash-stat,
+  [data-theme="dark"] .dash-path,
+  [data-theme="dark"] .continue-strip { border-color: var(--border); box-shadow: none; }
+
+  /* ---------------- responsive ---------------- */
+  @media (max-width: 1100px) {
+    .dash-title { font-size: 34px; }
+    .dash-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .dash-paths { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 900px) {
+    .dash { gap: 24px; }   /* the clamp's floor is already 24 */
+
+    .dash-title { font-size: 32px; line-height: 1.2; }
+    .dash-sub { font-size: 14px; }
+
+    .dash-stats { grid-template-columns: 1fr; gap: 24px; }
+
+    .dash-cols { display: flex; flex-direction: column; gap: 24px; }
+    .dash-col { display: contents; }
+
+    .dash-card__project { order: 1; }
+    .dash-card__approve { order: 2; }
+    .dash-card__around { order: 3; }
+    .dash-card__check { order: 4; }
+    .dash-card__for { order: 4; }
+    .dash-paths { order: 0; }
+
+    .continue-strip { flex-wrap: wrap; gap: 8px 12px; padding: 14px 16px; }
+    .continue-age { margin-left: 0; }
+    .continue-go { margin-left: auto; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set view = request.args.get('view', '') %}
+{% macro checklist_card() %}
+{% if show_checklist %}
+<section class="checklist-card dash-card dash-card__check" aria-label="Getting set up" data-tour="checklist">
+  <div class="dash-card__head">
+    <h2 class="dash-card__title">Getting set up</h2>
+    <button type="button" class="dash-dismiss" data-checklist-dismiss aria-label="Hide the getting-started list" title="Hide this list">✕</button>
+  </div>
+  <p class="dash-card__sub">{{ checklist | selectattr('done') | list | length }} of {{ checklist | length }} done — each takes under a minute, and all but the first are optional.</p>
+  <ul class="dash-checks">
+    {% for item in checklist %}
+    <li class="dash-check{% if item.done %} is-done{% endif %}">
+      <span class="dash-check__mark" aria-hidden="true">{{ '✓' if item.done else '' }}</span>
+      <span class="dash-check__label">{{ item.label }}</span>
+      {% if not item.done and item.href %}<a class="dash-check__go" href="{{ item.href }}">Do it →</a>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endmacro %}
+
+{% macro for_you() %}
+{% if recommendations %}
+<section class="dash-card dash-card__for" aria-label="For you" data-tour="recommendations">
+  <h2 class="dash-card__title">For you</h2>
+  {% for card in recommendations %}
+  <a class="dash-rec" href="{{ card.href }}">
+    <span class="dash-rec__title">{{ card.title }}</span>
+    <span class="dash-rec__text">{{ card.text }}</span>
+    <span class="dash-rec__go">{{ card.go }} →</span>
+  </a>
+  {% endfor %}
+</section>
+{% endif %}
+{% endmacro %}
+
+<div class="dash"{% if tour_autostart %} data-tour-autostart="1"{% endif %}>
+
+  {% if view == 'loading' %}
+  {# Skeleton, same geometry as the loaded page so nothing jumps. #}
+  <div class="dash-head" role="status" aria-live="polite">
+    <span class="o-visually-hidden">Loading your workspace…</span>
+    <div class="dash-skel dash-skel--line dash-skel--short"></div>
+    <div class="dash-skel dash-skel--title dash-skel--gap"></div>
+    <div class="dash-skel dash-skel--line dash-skel--gap-sm"></div>
+  </div>
+  <div class="dash-stats" aria-hidden="true">
+    <div class="dash-skel dash-skel--card"></div>
+    <div class="dash-skel dash-skel--card"></div>
+    <div class="dash-skel dash-skel--card"></div>
+  </div>
+  <div class="dash-cols" aria-hidden="true">
+    <div class="dash-col"><div class="dash-skel dash-skel--tall"></div></div>
+    <div class="dash-col"><div class="dash-skel dash-skel--tall"></div></div>
+  </div>
+
+  {% elif view == 'error' %}
+  {# Failure state: say what is safe, offer two real ways forward. #}
+  <section class="dash-card dash-error" role="alert">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="dash-error__title">We couldn't load your workspace.</h1>
+    <p class="dash-error__text">Nothing has changed and no files were touched. Reload the page, or open your projects directly.</p>
+    <div class="dash-error__actions">
+      <a class="o-btn o-btn--primary" href="/dashboard">Try again</a>
+      <a class="o-btn o-btn--secondary" href="/projects">Open projects</a>
+    </div>
+  </section>
+
+  {% else %}
+
+  {% if notice %}
+  <div class="dash-notice" role="status">
+    <svg class="o-icon o-icon--sm" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v5M12 16h.01"/></svg>
+    <span>{{ notice }}</span>
+  </div>
+  {% endif %}
+
+  <header class="dash-head" data-tour="greeting">
+    <p class="o-eyebrow dash-date" data-dash-date></p>
+    {% if state == "new" %}
+    <h1 class="dash-title">Let's get your first project off the ground.</h1>
+    <p class="dash-sub">Your workspace is ready. Start anywhere below — every path lands somewhere real, and nothing here is required.</p>
+    {% else %}
+    <h1 class="dash-title">A little progress, every day.</h1>
+    <p class="dash-sub">{% if returning %}Welcome back{% else %}Welcome{% endif %}, {{ first_name }}. Here's where your ideas stand.</p>
+    {% endif %}
+    <a class="o-btn o-btn--primary dash-cta" href="/create"{% if state != "new" %} data-tour="start-paths"{% endif %}>New project</a>
+  </header>
+
+  {% if state == "new" %}
+  {# No projects yet: the three paths do the work the stat cards do later. #}
+  <section aria-label="Ways to start" data-tour="start-paths">
+    <h2 class="dash-section-title dash-section-title--spaced">Three ways to start</h2>
+    <div class="dash-paths">
+      <a class="dash-path" href="/create">
+        <span class="dash-path__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
+        <span class="dash-path__name">Create directly</span>
+        <span class="dash-path__text">Name your project and open its workspace. Fastest way in — add the tasks yourself on the project map.</span>
+        <span class="dash-path__go">New project →</span>
       </a>
-      {% endif %}
+      <a class="dash-path" href="/create?guided=1">
+        <span class="dash-path__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="15.5" r="2.6"/><path d="M18 14.2v1.3l.9.9"/></svg></span>
+        <span class="dash-path__name">Follow the guided setup</span>
+        <span class="dash-path__text">Three short steps — what it is, what it's for, and the first task — reviewed before anything is created.</span>
+        <span class="dash-path__go">Guided setup →</span>
+      </a>
+      <a class="dash-path" href="/create#describe">
+        <span class="dash-path__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4.5 5.5h15v10h-9l-4.5 4v-4H4.5z"/></svg></span>
+        <span class="dash-path__name">Describe it to the Main Agent</span>
+        <span class="dash-path__text">Say what you want in plain words. The Main Agent helps you shape the goal into real first tasks.</span>
+        <span class="dash-path__go">Describe an idea →</span>
+      </a>
+    </div>
+  </section>
+  {% else %}
 
-      {% if show_checklist %}
-      <section class="checklist-card" aria-label="Getting set up" data-tour="checklist">
-        <div class="checklist-head">
-          <div>
-            <h2 class="checklist-title">Getting set up</h2>
-            <p class="checklist-sub">{{ checklist | selectattr('done') | list | length }} of {{ checklist | length }} done — each takes under a minute, and all but the first are optional.</p>
-          </div>
-          <button type="button" class="checklist-dismiss" data-checklist-dismiss aria-label="Hide the getting-started list" title="Hide this list">✕</button>
-        </div>
-        <ul class="dash-checklist">
-          {% for item in checklist %}
-          <li class="dash-check{% if item.done %} done{% endif %}">
-            <span class="dash-check-ico" aria-hidden="true">{{ '✓' if item.done else '' }}</span>
-            <span class="dash-check-label">{{ item.label }}</span>
-            {% if not item.done and item.href %}<a class="dash-check-go" href="{{ item.href }}">Do it →</a>{% endif %}
-          </li>
-          {% endfor %}
-        </ul>
-      </section>
-      {% endif %}
+  {# At a glance. Every figure is counted from the stores this request read. #}
+  <section class="dash-stats" aria-label="Workspace at a glance">
+    <article class="dash-stat">
+      <p class="dash-stat__line"><span>{{ active_project_count }}</span><span class="dash-stat__sep">/</span><span>Active projects</span></p>
+      <p class="dash-stat__caption">One idea at a time.</p>
+    </article>
+    <article class="dash-stat">
+      <p class="dash-stat__line"><span>{{ tasks_done }}</span><span class="dash-stat__sep">/</span><span>Tasks completed</span></p>
+      <p class="dash-stat__caption">Across your projects.</p>
+    </article>
+    <article class="dash-stat">
+      <p class="dash-stat__line"><span>{{ pending_count }}</span><span class="dash-stat__sep">/</span><span>Pending proposals</span></p>
+      <p class="dash-stat__caption">Nothing applied without you.</p>
+    </article>
+  </section>
 
+  {% if continue_strip %}
+  <a class="continue-strip" href="/projects/{{ continue_strip.id }}" data-tour="resume">
+    <span class="continue-label">{{ 'Jump back in' if returning else 'Most recent' }}</span>
+    <span class="continue-name">{{ continue_strip.name }}</span>
+    <span class="continue-task">{{ continue_strip.task_title }}</span>
+    <span class="continue-age">Updated {{ continue_strip.age }}</span>
+    <span class="continue-go">Open workspace →</span>
+  </a>
+  {% endif %}
+  {% endif %}
+
+  <div class="dash-cols">
+    <div class="dash-col">
       {% if state == "new" %}
-      <section aria-label="Ways to start" data-tour="start-paths">
-        <h2 class="dash-section-title">Three ways to start</h2>
-        <div class="hero-paths start-paths">
-          <a class="hero-card" href="/create">
-            <span class="hero-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
-            <span class="hero-card-name">Create directly</span>
-            <span class="hero-card-text">Name your project and open its workspace. Fastest way in — add the tasks yourself on the project map.</span>
-            <span class="hero-card-go">New project →</span>
-          </a>
-          <a class="hero-card" href="/create?guided=1">
-            <span class="hero-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="15.5" r="2.6"/><path d="M18 14.2v1.3l.9.9"/></svg></span>
-            <span class="hero-card-name">Follow the guided setup</span>
-            <span class="hero-card-text">Three short steps — what it is, what it's for, and the first task — reviewed before anything is created.</span>
-            <span class="hero-card-go">Guided setup →</span>
-          </a>
-          <a class="hero-card" href="/create#describe">
-            <span class="hero-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M4.5 5.5h15v10h-9l-4.5 4v-4H4.5z"/></svg></span>
-            <span class="hero-card-name">Describe it to the Main Agent</span>
-            <span class="hero-card-text">Say what you want in plain words. The Main Agent helps you shape the goal into real first tasks.</span>
-            <span class="hero-card-go">Describe an idea →</span>
-          </a>
-        </div>
-      </section>
+        {{ checklist_card() }}
       {% else %}
-      <div class="dash-actions-row" data-tour="start-paths">
-        <a class="btn-primary" href="/create"><svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg> New project</a>
-        <a class="btn-ghost" href="/create#describe">Describe an idea</a>
-        <a class="btn-ghost" href="/agents">Browse specialists</a>
-        <a class="btn-ghost" href="/projects">All projects</a>
-      </div>
+      {% with p = projects[0] %}
+      <article class="dash-card dash-card__project">
+        <span class="dash-chip">{{ p.status_label }}</span>
+        <h2 class="dash-project__name"><a href="/projects/{{ p.id }}">{{ p.name }}</a></h2>
+        {% if p.summary %}
+        <p class="dash-project__desc">{{ p.summary }} <span class="dash-project__origin">· AI summary</span></p>
+        {% elif p.description %}
+        <p class="dash-project__desc">{{ p.description }}</p>
+        {% else %}
+        <p class="dash-project__desc is-empty">No description yet.</p>
+        {% endif %}
+        {% if p.tasks_total %}
+        <p class="dash-project__meta">{{ p.task_title }} · {{ (p.tasks_done * 100 / p.tasks_total) | round | int }}%</p>
+        <p class="dash-project__meta">{{ p.tasks_done }} of {{ p.tasks_total }} tasks complete</p>
+        {% else %}
+        <p class="dash-project__meta">No tasks yet — the map starts when the first one is added.</p>
+        {% endif %}
+        <a class="o-btn o-btn--secondary dash-project__cta" href="/projects/{{ p.id }}">Open Project Map</a>
+      </article>
+      {% endwith %}
 
-      <section aria-label="Your projects">
-        <h2 class="dash-section-title">Your projects</h2>
-        <section class="projects-grid" style="padding: 0 0 14px;">
-          {% for p in projects %}
-          <article class="project-card">
-            <header class="pc-head">
-              <span class="pc-icon" aria-hidden="true">{% for part in p.name.split()[:2] %}{{ part[:1] }}{% endfor %}</span>
-              <span class="status-badge st-{{ p.status }}"><span class="dot"></span>{{ p.status_label }}</span>
-            </header>
-            <h2 class="pc-name"><a href="/projects/{{ p.id }}">{{ p.name }}</a></h2>
-            {% if p.summary %}
-            <p class="pc-desc">{{ p.summary }} <span class="pc-desc-origin">· AI summary</span></p>
-            {% elif p.description %}
-            <p class="pc-desc">{{ p.description }}</p>
-            {% else %}
-            <p class="pc-desc empty">No description yet.</p>
-            {% endif %}
-            <footer class="pc-foot">
-              {% if p.tasks_total %}
-              <p class="pc-taskline">{{ p.task_title }} <span class="pc-taskstate">· {{ p.task_state }}</span></p>
-              <p class="pc-progressline">{{ p.tasks_done }} of {{ p.tasks_total }} tasks complete{% if p.age %} · {{ p.age }}{% endif %}</p>
-              {% else %}
-              <p class="pc-taskline pc-taskline-none">No tasks yet — the map starts when the first one is added.</p>
-              {% endif %}
-              <a class="pc-open" href="/projects/{{ p.id }}" aria-label="Open {{ p.name }}">↗</a>
-            </footer>
-          </article>
-          {% endfor %}
-        </section>
-        {% if project_count > 6 %}<p class="grid-caption"><a href="/projects">View all {{ project_count }} projects →</a></p>{% endif %}
-      </section>
-      {% endif %}
-
-      {% if recommendations %}
-      <section aria-label="For you" data-tour="recommendations">
-        <h2 class="dash-section-title">For you</h2>
-        <div class="rec-grid">
-          {% for card in recommendations %}
-          <article class="rec-card">
-            <h3 class="rec-title">{{ card.title }}</h3>
-            <p class="rec-text">{{ card.text }}</p>
-            <a class="rec-go" href="{{ card.href }}">{{ card.go }} →</a>
-          </article>
+      {% if projects %}
+      <section class="dash-card dash-card__around" aria-label="Around your workspace">
+        <h2 class="dash-card__title">Around your workspace</h2>
+        {% if activity %}
+        <div class="dash-rows">
+          {% for item in activity %}
+          <div class="dash-row">
+            <span class="dash-row__title">{{ item.text }}</span>
+            <span class="dash-row__meta">{% if item.project %}{{ item.project }} · {% endif %}{{ item.time }}</span>
+          </div>
           {% endfor %}
         </div>
+        {% else %}
+        <p class="dash-empty">No activity yet. Task activity appears here as you work.</p>
+        {% endif %}
       </section>
       {% endif %}
-
-      {% if not beta_updates_off %}
-      <aside class="beta-note" aria-label="Beta note" data-tour="beta">
-        <img class="beta-note-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-        <div>
-          <h2 class="beta-note-title">You're early — and that's the point.</h2>
-          <p class="beta-note-text">
-            ORBIT is in open beta: the core loop is real, the unfinished edges are labelled, and the
-            floating <strong>Feedback</strong> button (bottom right, always there) sends notes without
-            leaving your page. Found something rough? Tell us — it goes straight into what ships next.
-          </p>
-        </div>
-        <a class="btn-ghost" href="/feedback">Send feedback</a>
-      </aside>
       {% endif %}
     </div>
-  </main>
+
+    <div class="dash-col">
+      {% if state != "new" or pending_count %}
+      <section class="dash-card dash-card__approve" aria-label="Approvals">
+        <h2 class="dash-card__title">You're in the driver's seat.</h2>
+        {% if pending_count %}
+        <p class="dash-card__sub">{{ pending_count }} proposal{{ 's' if pending_count != 1 }} waiting. Review what would run, then approve or decline.</p>
+        <div class="dash-rows">
+          {% for item in pending_preview %}
+          <div class="dash-row">
+            <span class="dash-row__title">{{ item.summary }}</span>
+            <span class="dash-row__meta">Proposed in this conversation</span>
+          </div>
+          {% endfor %}
+        </div>
+        <a class="o-btn o-btn--secondary dash-approve__cta" href="/">Review proposals</a>
+        {% else %}
+        <p class="dash-card__sub">No pending approvals. Nothing runs until you say so.</p>
+        {% endif %}
+        <p class="dash-card__fine">Your files stay exactly as they are until you approve.</p>
+      </section>
+      {% endif %}
+      {% if state != "new" %}
+        {% if show_checklist %}{{ checklist_card() }}{% else %}{{ for_you() }}{% endif %}
+      {% else %}
+        {{ for_you() }}
+      {% endif %}
+    </div>
+  </div>
+
+  {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+  // The date line is the reader's own date, not a frozen string from the frame.
+  (function () {
+    var el = document.querySelector("[data-dash-date]");
+    if (!el) return;
+    try {
+      el.textContent = new Intl.DateTimeFormat("en-US", {
+        weekday: "long", month: "long", day: "numeric"
+      }).format(new Date());
+    } catch (_error) {
+      el.textContent = "";
+    }
+  })();
+</script>
 {% endblock %}

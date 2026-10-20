@@ -1,0 +1,38 @@
+{# The app sidebar, drawn from Dashboard · Light/Dark · Desktop.
+
+   Text-only by design: the frame shows no icons in the rail, so none are
+   invented. The active item is marked by the 2px copper bar at the left edge
+   (one of copper's four permitted uses), everything else is ink and surface.
+
+   Approvals, Reminders and Connected apps are drawn in the frame but have no
+   page in this build yet. They render as disabled rows marked "Soon" rather
+   than links to nowhere — the same rule the provider buttons follow. #}
+<aside class="app-side" id="appSidebar">
+  <a class="app-brand" href="{% if accounts_enabled %}/dashboard{% else %}/{% endif %}" aria-label="orbit — overview">
+    <img class="app-brand__mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+    <span class="app-brand__word">orbit</span>
+  </a>
+
+  <div class="app-ws">
+    <span class="app-ws__name">{{ (user.name or 'Your').split()[0] }}'s workspace</span>
+    <span class="app-ws__meta">{{ user.workspace }}</span>
+  </div>
+
+  <nav class="app-nav" aria-label="Main">
+    {% if accounts_enabled %}
+    <a class="app-nav__item{% if dashboard_active %} is-active{% endif %}" href="/dashboard"{% if dashboard_active %} aria-current="page"{% endif %}>Overview</a>
+    {% endif %}
+    <a class="app-nav__item{% if projects_active %} is-active{% endif %}" href="/projects"{% if projects_active %} aria-current="page"{% endif %}>Projects</a>
+    <a class="app-nav__item{% if agents_active %} is-active{% endif %}" href="/agents"{% if agents_active %} aria-current="page"{% endif %}>Agents</a>
+    <span class="app-nav__item is-soon" aria-disabled="true" title="Approvals opens in a later build">Approvals<span class="app-nav__soon">Soon</span></span>
+    <a class="app-nav__item{% if analytics_active %} is-active{% endif %}" href="/analytics"{% if analytics_active %} aria-current="page"{% endif %}>Analytics</a>
+    <span class="app-nav__item is-soon" aria-disabled="true" title="Reminders opens in a later build">Reminders<span class="app-nav__soon">Soon</span></span>
+    <span class="app-nav__item is-soon" aria-disabled="true" title="Connected apps opens in a later build">Connected apps<span class="app-nav__soon">Soon</span></span>
+    <a class="app-nav__item{% if settings_active %} is-active{% endif %}" href="/settings"{% if settings_active %} aria-current="page"{% endif %}>Settings</a>
+  </nav>
+
+  <div class="app-side__foot">
+    <span class="app-user__name">{{ user.name }}</span>
+    <span class="app-user__meta">{{ user.workspace }}</span>
+  </div>
+</aside>

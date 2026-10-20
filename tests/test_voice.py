@@ -13,6 +13,8 @@ from unittest.mock import patch
 from types import SimpleNamespace
 from typing import Any
 
+import inspect
+
 import av.error
 from huggingface_hub.errors import LocalEntryNotFoundError
 
@@ -25,6 +27,24 @@ from app.voice import (
     VoiceServiceUnavailable,
 )
 from tools.registry import AuditLog
+
+
+def faster_whisper_can_decode_with_installed_pyav() -> bool:
+    """Whether faster-whisper's decoder is usable with the PyAV that is installed.
+
+    PyAV 19 removed ``av.open(metadata_errors=...)``; faster-whisper 1.2.1 still
+    passes it, so decoding raises ``TypeError`` before any frame is read. Asking
+    the installed source, rather than only its version, means this repairs
+    itself the day faster-whisper stops passing the argument.
+    """
+    major = int(av.__version__.split(".")[0])
+    if major < 19:
+        return True
+    import inspect
+
+    from faster_whisper import audio
+
+    return "metadata_errors" not in inspect.getsource(audio.decode_audio)
 
 
 class FakeWhisperModel:
@@ -241,6 +261,21 @@ class WhisperFailureReportingTests(unittest.TestCase):
         self.assertIn("audit.log", captured.records[0].getMessage())
 
 
+class DecoderCompatibilityTests(unittest.TestCase):
+    def test_pyav_18_is_reported_as_compatible(self) -> None:
+        with patch.object(av, "__version__", "18.1.0"):
+            self.assertTrue(faster_whisper_can_decode_with_installed_pyav())
+
+    def test_pyav_19_is_incompatible_while_faster_whisper_passes_metadata_errors(self) -> None:
+        from faster_whisper import audio
+
+        passes_argument = "metadata_errors" in inspect.getsource(audio.decode_audio)
+        with patch.object(av, "__version__", "19.0.1"):
+            self.assertEqual(
+                faster_whisper_can_decode_with_installed_pyav(), not passes_argument
+            )
+
+
 class DecoderReportingTests(unittest.TestCase):
     """The browser records WebM/Opus; a decoder problem must not read as a generic failure."""
 
@@ -280,6 +315,13 @@ class DecoderReportingTests(unittest.TestCase):
 
     def test_a_real_decode_of_a_non_audio_clip_produces_the_client_error(self) -> None:
         """No ffmpeg program, no model weights: PyAV alone decides this clip is unreadable."""
+        if not faster_whisper_can_decode_with_installed_pyav():
+            self.skipTest(
+                "PyAV 19 removed av.open(metadata_errors=...) and faster-whisper still "
+                "passes it, so no clip decodes on this pair (a TypeError, not a bad "
+                "recording). requirements.txt pins av<19; reinstall requirements to run "
+                "this test."
+            )
         from faster_whisper.audio import decode_audio
 
         class RealDecoderModel(FakeWhisperModel):

@@ -1,108 +1,900 @@
-{% extends "public.html" %}
-{#
-  The optional personalization pass: four questions, each skippable, the whole
-  thing skippable. Two rules make it honest:
-    * "Skip for now" POSTs a real skip (saved as a decision, not a wipe), so
-      the checklist stops asking instead of nagging.
-    * Answers are re-editable later in Settings → Preferences; nothing here is
-      a one-way door.
-#}
-{% block title %}orbit — Personalize your workspace{% endblock %}
-{% block nav %}{% endblock %}
-{% block body %}
-<main class="onboard-shell" style="max-width: 720px;">
-  <header class="onboard-head">
-    <p class="auth-eyebrow">Optional · four questions · about 30 seconds</p>
-    <h1 class="onboard-title" id="wizTitle">Help ORBIT suggest the right things.</h1>
-    <p class="onboard-sub">
-      Your answers shape the recommendations on your dashboard — which specialists to
-      suggest, what to build first. Skip anything; change it later in Settings.
-    </p>
-  </header>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>orbit — A workspace, shaped around you</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='orbit-mark.svg') }}" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+<script>
+  // Theme before first paint: a saved choice wins, otherwise the system setting.
+  (function () {
+    try {
+      var saved = window.localStorage.getItem("orbit.theme");
+      var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.theme = saved || (dark ? "dark" : "light");
+    } catch (_error) {
+      document.documentElement.dataset.theme = "light";
+    }
+  })();
+</script>
+<link rel="stylesheet" href="{{ url_for('static', filename='orbit.css') }}" />
+<style>
+  /* ===========================================================
+     onboarding — three short steps, one card, one promise.
 
-  <div class="stepper-progress" aria-hidden="true" id="wizDots">
-    <span class="stepper-dot active" data-dot="0"></span>
-    <span class="stepper-dot" data-dot="1"></span>
-    <span class="stepper-dot" data-dot="2"></span>
-    <span class="stepper-dot" data-dot="3"></span>
-  </div>
+     Step 01 is drawn in the frame. Steps 02 and 03 have no frame,
+     so they reuse 01's exact card, field and option language
+     instead of inventing a second visual system.
 
-  <form method="post" action="/onboarding" id="wizForm" data-wizard>
-    <div class="options-panel">
-      <fieldset class="options-step active" data-step="0">
-        <legend class="visually-hidden">Your background</legend>
-        <h2>What best describes you?</h2>
-        <p class="q-sub">So examples and suggestions speak your language. Pick the closest fit.</p>
-        <div class="chip-grid">
-          {% for role in roles %}
-          <label class="pick-chip">
-            <input type="radio" name="role" value="{{ role }}"{% if profile.get('role') == role %} checked{% endif %} />
-            <span class="chip-face">{{ role }}</span>
-          </label>
-          {% endfor %}
-        </div>
-      </fieldset>
+     Copper appears twice: the logo mark and the single primary
+     button (one per step, never two at once).
+     =========================================================== */
 
-      <fieldset class="options-step" data-step="1">
-        <legend class="visually-hidden">Your experience</legend>
-        <h2>How long have you been coding?</h2>
-        <p class="q-sub">This only tunes how much explanation ORBIT leans toward — never a gate on features.</p>
-        <div class="chip-grid">
-          {% for level in experiences %}
-          <label class="pick-chip">
-            <input type="radio" name="experience" value="{{ level }}"{% if profile.get('experience') == level %} checked{% endif %} />
-            <span class="chip-face">{{ level }}</span>
-          </label>
-          {% endfor %}
-        </div>
-      </fieldset>
+  html { background: var(--bg); }
 
-      <fieldset class="options-step" data-step="2">
-        <legend class="visually-hidden">What you build</legend>
-        <h2>What do you like building?</h2>
-        <p class="q-sub">Pick any that apply. We'll suggest the agent specialists that fit.</p>
-        <div class="chip-grid">
-          {% for item in interests %}
-          <label class="pick-chip">
-            <input type="checkbox" name="interests" value="{{ item }}"{% if item in (profile.get('interests') or []) %} checked{% endif %} />
-            <span class="chip-face">{{ item }}</span>
-          </label>
-          {% endfor %}
-        </div>
-      </fieldset>
+  .o-skip {
+    position: absolute;
+    left: 16px;
+    top: -60px;
+    z-index: 30;
+    padding: 10px 16px;
+    border-radius: var(--r-control);
+    background: var(--surface);
+    color: var(--text-1);
+    font-size: 14px;
+    text-decoration: none;
+    box-shadow: var(--shadow-pop);
+  }
+  .o-skip:focus { top: 16px; }
 
-      <fieldset class="options-step" data-step="3">
-        <legend class="visually-hidden">Your tools</legend>
-        <h2>Which languages or technologies do you reach for?</h2>
-        <p class="q-sub">Pick any. They tune how projects and examples get described to you.</p>
-        <div class="chip-grid">
-          {% for item in languages %}
-          <label class="pick-chip">
-            <input type="checkbox" name="languages" value="{{ item }}"{% if item in (profile.get('languages') or []) %} checked{% endif %} />
-            <span class="chip-face">{{ item }}</span>
-          </label>
-          {% endfor %}
-        </div>
-      </fieldset>
+  .onb-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: clamp(16px, 4.5vh, 48px) clamp(24px, 3.5vw, 48px) 0;
+  }
 
-      <div class="stepper-actions">
-        <button type="button" class="btn-ghost" id="wizBack" disabled>Back</button>
-        <span class="stepper-count" id="wizCount">1 of 4</span>
-        <span class="spacer"></span>
-        <button type="button" class="btn-primary" id="wizNext">Next</button>
-        <button type="submit" class="btn-primary" id="wizFinish" data-busy-label="Saving…" style="display:none;">
-          <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Save and continue</span>
-        </button>
-      </div>
-    </div>
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    text-decoration: none;
+    color: var(--text-1);
+  }
+
+  .brand__mark { width: 30px; height: 30px; }
+
+  .brand__word {
+    font-family: var(--font-display);
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1;
+  }
+
+  .onb-exit {
+    border: 0;
+    background: none;
+    padding: 10px 0;
+    font-family: var(--font-body);
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+
+  .onb-exit:hover { color: var(--text-1); }
+
+  .onb-main {
+    /* No top padding: the stepper sits straight under the wordmark, which
+       is the tightest this screen gets at any window height. */
+    padding: 0 clamp(24px, 3.5vw, 48px) clamp(24px, 5vh, 64px);
+  }
+
+  /* The frame puts every block on one left edge: at 1440 the stepper, the
+     title, the sub and the card all start at x=192, and the card's 744 plus
+     the 30 gap leave the ring column 282 (its copy breaks at "into", which
+     a wider column would not do). 744 + 30 + 282 = 1056, centred in 1440
+     leaves exactly 192 either side — so the column is 1056 wide, not 1248,
+     and the old 144px indent on the intro was measuring the gutter twice. */
+  .onb-wrap {
+    max-width: 1056px;
+    margin: 0 auto;
+  }
+
+  /* ---------------- stepper ---------------- */
+  .onb-steps {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-3);
+  }
+
+  .onb-steps li {
+    display: inline-flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .onb-steps li + li::before {
+    content: "";
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: var(--text-3);
+    opacity: 0.7;
+  }
+
+  .onb-steps .is-current { color: var(--text-1); }
+  .onb-steps .is-done { color: var(--text-2); }
+
+  /* ---------------- heading ---------------- */
+  .onb-title {
+    margin-top: clamp(24px, 4.5vh, 48px);
+    font-family: var(--font-display);
+    font-size: clamp(30px, 3.4vw, 48px);
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+  }
+
+  .onb-sub {
+    margin-top: clamp(16px, 3vh, 32px);
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  /* ---------------- the two-column body ---------------- */
+  .onb-body {
+    margin-top: clamp(16px, 3.6vh, 32px);
+    display: grid;
+    grid-template-columns: 744px minmax(0, 1fr);
+    gap: 30px;
+    align-items: start;
+  }
+
+  .onb-card {
+    padding: clamp(16px, 2.5vh, 24px);
+    border-radius: var(--r-panel);
+    background: var(--surface);
+  }
+
+  /* ---------------- fields ---------------- */
+  /* public.js marks the input itself; the border lives on the wrapper */
+  .o-field:has(.invalid) { border-color: var(--danger); }
+  .o-field-error.show { display: block; }
+  .onb-save-error[hidden] { display: none; }
+  .onb-save-error { display: block; }
+  .is-busy { opacity: 0.7; pointer-events: none; }
+  .onb-field + .onb-field { margin-top: 16px; }
+
+  .onb-hint {
+    margin-top: 8px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  .onb-question--first { margin-top: 0; }
+
+  .onb-question {
+    margin: 21px 0 0;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .onb-options {
+    margin-top: 17px;
+    display: flex;
+    flex-direction: column;
+    gap: 17px;
+  }
+
+  .onb-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .onb-option:hover { background: var(--surface-2); }
+
+  .onb-option input {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    margin: 3px 0 0;
+    flex: 0 0 16px;
+    border: 1px solid var(--text-3);
+    border-radius: 50%;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .onb-option input:checked {
+    border-color: var(--text-2);
+    box-shadow: inset 0 0 0 3px var(--surface), inset 0 0 0 8px var(--text-2);
+    background: var(--text-2);
+  }
+
+  .onb-option--multi input { border-radius: 4px; }
+
+  .onb-option--multi input:checked {
+    border-radius: 4px;
+    background-color: var(--text-2);
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.6' stroke-linecap='round' stroke-linejoin='round'><path d='m5 13 4 4L19 7'/></svg>");
+    background-size: 11px 11px;
+    background-position: center;
+    background-repeat: no-repeat;
+    box-shadow: none;
+  }
+
+  [data-theme="dark"] .onb-option--multi input:checked {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230F0F10' stroke-width='3.6' stroke-linecap='round' stroke-linejoin='round'><path d='m5 13 4 4L19 7'/></svg>");
+  }
+
+  .onb-option__text { min-width: 0; }
+
+  .onb-option__title {
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.5;
+    color: var(--text-1);
+  }
+
+  .onb-option__hint {
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  /* the chosen row takes the page tone, exactly as the frame draws it */
+  .onb-option:has(input:checked) {
+    background: var(--bg);
+    border-color: var(--border);
+  }
+
+  .onb-option:focus-within {
+    border-color: var(--text-3);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-3) 18%, transparent);
+  }
+
+  .onb-chips {
+    margin-top: 17px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .onb-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    font-size: 14px;
+    line-height: 1.4;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+
+  .onb-chip:hover { background: var(--surface-2); }
+
+  .onb-chip input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .onb-chip:has(input:checked) {
+    background: var(--bg);
+    border-color: var(--text-3);
+    color: var(--text-1);
+    font-weight: 500;
+  }
+
+  .onb-chip:has(input:focus-visible) {
+    outline: 2px solid var(--text-1);
+    outline-offset: 2px;
+  }
+
+  /* ---------------- step mechanics ---------------- */
+  .onb-step { display: none; }
+  .onb-step.is-active { display: block; }
+  .onb-step[hidden] { display: none; }
+
+  .onb-actions {
+    margin-top: 17px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .onb-actions .o-btn--primary {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
+  .onb-back {
+    border: 0;
+    background: none;
+    padding: 0 4px;
+    min-height: 48px;
+    font-family: var(--font-body);
+    font-size: 14px;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+
+  .onb-back:hover { color: var(--text-1); }
+
+  .onb-skip {
+    margin-top: 16px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .onb-skip button {
+    border: 0;
+    background: none;
+    padding: 8px 4px;
+    font-family: var(--font-body);
+    font-size: 13px;
+    color: var(--text-2);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+
+  .onb-skip button:hover { color: var(--text-1); }
+
+  /* ---------------- aside ----------------
+     The column next to the form. On a normal desktop window it needs no
+     pinning at all: the page is bounded to the window (see the bounded
+     block below) and the aside sits in its own grid cell, so it cannot
+     move, cannot overlap the form, and keeps the ring and the note beside
+     the card while the card's fields scroll. Sticky only survives as the
+     fallback for very short windows, where the page scrolls again; and at
+     1000px and narrower, where the columns no longer fit, it un-sticks. */
+  .onb-aside {
+    position: sticky;
+    top: clamp(16px, 4vh, 32px);
+    align-self: start;
+    padding-top: 0;
+  }
+
+  .onb-arc {
+    width: clamp(96px, 14vh, 120px);
+    height: auto;
+    aspect-ratio: 1 / 1;
+    color: var(--ring);
+  }
+
+  .onb-arc circle { fill: none; stroke: currentColor; stroke-width: 1; }
+  .onb-arc .onb-arc__dot { fill: currentColor; stroke: none; }
+
+  .onb-aside__title {
+    margin-top: clamp(16px, 3.2vh, 40px);
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .onb-aside__body {
+    margin-top: clamp(16px, 2.4vh, 24px);
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text-2);
+  }
+
+  .onb-aside__fine {
+    margin-top: clamp(16px, 2.4vh, 24px);
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
+  /* ---------------- summary (step 03) ---------------- */
+  .onb-summary {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .onb-summary__row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .onb-summary__row:last-child { border-bottom: 0; padding-bottom: 0; }
+
+  .onb-summary__label { color: var(--text-2); }
+
+  .onb-summary__value {
+    color: var(--text-1);
+    text-align: right;
+  }
+
+  .onb-summary__value span + span::before {
+    content: " · ";
+    color: var(--text-3);
+  }
+
+  /* ---------------- bounded page ----------------
+     The auth screens' scroll model, applied here: the window is the page,
+     "Save & exit" and the steps/title stay put, and the card's fields
+     scroll inside the card while the ring and the note hold their column.
+     Nothing can overlap: each piece owns a band or a cell, and the only
+     scrollbar is the card's own.
+
+     Gated on height as well as width — this screen carries a stepper and
+     a 48px title above the card, and under 640px those bands would leave
+     the card an unusable sliver. Below that the page scrolls normally,
+     with the aside back on its sticky fallback. */
+  @media (min-width: 1001px) and (min-height: 640px) {
+    html, body { height: 100%; }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .onb-header { flex: 0 0 auto; }
+
+    .onb-main {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+    }
+
+    .onb-wrap {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+
+    .onb-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      align-items: stretch;
+    }
+
+    /* The card is the scroller: its own frame and padding stay put, the
+       fields move inside it. No scrollbar gutter is reserved — at the
+       frame's height the card does not scroll, and reserving one would
+       narrow the fields by the scrollbar width against the frame. */
+    .onb-card {
+      height: 100%;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+
+    .onb-aside {
+      position: static;
+      top: auto;
+      max-height: 100%;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+  }
+
+  /* ---------------- responsive ---------------- */
+  @media (max-width: 1240px) {
+    .onb-body { grid-template-columns: minmax(0, 1fr) 300px; gap: 40px; }
+    .onb-title { font-size: 42px; }
+  }
+
+  /* One column: the ring column no longer fits beside the form. */
+  @media (max-width: 1000px) {
+    .onb-body { grid-template-columns: minmax(0, 1fr); gap: 40px; }
+    .onb-title { font-size: 38px; }
+    .onb-aside { position: static; top: auto; }
+    .onb-aside__title { margin-top: 32px; }
+  }
+
+  @media (max-width: 720px) {
+    .onb-header { padding: clamp(16px, 6vw, 32px) 24px 0; }
+    .brand__mark { width: 26px; height: 26px; }
+    .brand__word { font-size: 26px; }
+
+    .onb-main { padding: 0 24px clamp(24px, 5vh, 48px); }
+
+    .onb-steps {
+      gap: 8px 12px;
+      font-size: 13px;
+      line-height: 1.5;
+      margin-top: 24px;
+    }
+
+    .onb-steps li { gap: 12px; }
+
+    .onb-title {
+      margin-top: 24px;
+      font-size: 32px;
+      line-height: 1.25;
+      letter-spacing: -0.015em;
+    }
+
+    .onb-sub { margin-top: 16px; font-size: 14px; line-height: 1.6; }
+
+    .onb-body { margin-top: 24px; gap: 32px; }
+
+    .onb-card { padding: 20px; border-radius: var(--r-panel); }
+
+    .onb-question { margin-top: 20px; font-size: 19px; line-height: 1.35; }
+
+    .onb-options { margin-top: 16px; gap: 16px; }
+
+    .onb-option { padding: 14px; }
+
+    .onb-option__title,
+    .onb-option__hint { font-size: 13.5px; }
+
+    .onb-arc { width: 96px; height: 96px; }
+    .onb-aside__title { margin-top: 32px; font-size: 22px; }
+    .onb-aside__body { margin-top: 20px; }
+    .onb-aside__fine { margin-top: 20px; }
+  }
+</style>
+</head>
+<body>
+<a class="o-skip" href="#onb-form">Skip to the form</a>
+
+<header class="onb-header">
+  <a class="brand" href="/" aria-label="orbit — home">
+    {# The attached orbit-rings mark, unchanged: same paths, drawn with theme tokens. #}
+    <svg class="brand__mark" viewBox="0 0 64 64" fill="none" aria-hidden="true" focusable="false">
+      <ellipse cx="32" cy="32" rx="27" ry="11" transform="rotate(25 32 32)" stroke="var(--copper)" stroke-width="2" />
+      <ellipse cx="32" cy="32" rx="27" ry="11" transform="rotate(-30 32 32)" stroke="var(--copper-deep)" stroke-width="2" />
+      <circle cx="32" cy="32" r="5" fill="var(--copper-bright)" />
+      <circle cx="55" cy="23" r="2.5" fill="var(--copper)" />
+    </svg>
+    <span class="brand__word">orbit</span>
+  </a>
+
+  {# "Save & exit" is the frame's label for the existing skip: it records a real
+     decision, so the checklist closes the item instead of asking again. #}
+  <form method="post" action="/onboarding" data-onb-skip>
+    <input type="hidden" name="skip" value="1" />
+    <button class="onb-exit" type="submit">Save &amp; exit</button>
   </form>
+</header>
 
-  <div class="onboard-skip">
-    <form method="post" action="/onboarding" class="skip-form">
-      <input type="hidden" name="skip" value="1" />
-      Not now — <button type="submit" class="skip-link">skip this setup and take me to my workspace</button>.
-      We'll remember you asked not to be asked.
-    </form>
+<main class="onb-main">
+  <div class="onb-wrap">
+    <ol class="onb-steps" id="onbSteps">
+      <li data-step-label="0" class="is-current"><span>01 / Your workspace</span></li>
+      <li data-step-label="1"><span>02 / Starting point</span></li>
+      <li data-step-label="2"><span>03 / Ready to build</span></li>
+    </ol>
+
+    <h1 class="onb-title">A workspace, shaped around you.</h1>
+    <p class="onb-sub">A few small details help Orbit meet you where you are.</p>
+
+    <div class="onb-body">
+      <form class="onb-card" id="onb-form" method="post" action="/onboarding" data-auth-form="onboarding" novalidate>
+        <!-- 01 · the frame -->
+        <section class="onb-step is-active" data-step="0" aria-labelledby="step-0-title">
+          <div class="onb-field">
+            <div class="o-field">
+              <label class="o-field__label" for="name">What should we call you?</label>
+              <input class="o-field__input" id="name" name="display_name" type="text" autocomplete="name"
+                     value="{{ account.get('name', '') if account else '' }}" required data-validate="name" aria-describedby="name-error" />
+            </div>
+            <p class="o-field-error" id="name-error" data-error-for="name">Add a name so Orbit knows what to call you.</p>
+            <p class="o-field-error onb-save-error" id="profile-save-error" role="alert" hidden>
+              We couldn’t save your details just now. Check your connection and try again — nothing you typed is lost.
+            </p>
+          </div>
+
+          <div class="onb-field">
+            <div class="o-field">
+              <label class="o-field__label" for="workspace">Workspace name</label>
+              <input class="o-field__input" id="workspace" name="workspace" type="text"
+                     value="{{ account.get('workspace', 'Personal space') if account else 'Personal space' }}" />
+            </div>
+          </div>
+
+          <h2 class="onb-question" id="step-0-title">How familiar is building software?</h2>
+          <div class="onb-options" role="radiogroup" aria-labelledby="step-0-title">
+            <label class="onb-option">
+              <input type="radio" name="experience" value="New to coding"{% if (profile.get('experience') or 'New to coding') == 'New to coding' %} checked{% endif %} />
+              <span class="onb-option__text">
+                <span class="onb-option__title">A fresh start</span><br />
+                <span class="onb-option__hint">I have an idea, but I am new to building.</span>
+              </span>
+            </label>
+            <label class="onb-option">
+              <input type="radio" name="experience" value="1–2 years"{% if profile.get('experience') == '1–2 years' %} checked{% endif %} />
+              <span class="onb-option__text">
+                <span class="onb-option__title">Finding my feet</span><br />
+                <span class="onb-option__hint">I have made a few things before.</span>
+              </span>
+            </label>
+            <label class="onb-option">
+              <input type="radio" name="experience" value="3–5 years"{% if profile.get('experience') == '3–5 years' %} checked{% endif %} />
+              <span class="onb-option__text">
+                <span class="onb-option__title">Comfortably curious</span><br />
+                <span class="onb-option__hint">I build often and want a thoughtful partner.</span>
+              </span>
+            </label>
+          </div>
+
+          <div class="onb-actions">
+            <button class="o-btn o-btn--primary" type="button" data-next="1">Continue to your starting point</button>
+          </div>
+        </section>
+
+        <!-- 02 · derived: the real interests question, in 01's language -->
+        <section class="onb-step" data-step="1" aria-labelledby="step-1-title" hidden>
+          <h2 class="onb-question onb-question--first" id="step-1-title">What are you drawn to building?</h2>
+          <p class="onb-hint">Pick as many as you like. This only shapes what Orbit suggests first.</p>
+          <div class="onb-chips">
+            {% for interest in interests %}
+            <label class="onb-chip">
+              <input type="checkbox" name="interests" value="{{ interest }}"{% if interest in (profile.get('interests') or []) %} checked{% endif %} />
+              <span>{{ interest }}</span>
+            </label>
+            {% endfor %}
+          </div>
+
+          <div class="onb-actions">
+            <button class="onb-back" type="button" data-back="0">Back</button>
+            <button class="o-btn o-btn--primary" type="button" data-next="2">Continue to ready to build</button>
+          </div>
+        </section>
+
+        <!-- 03 · derived: languages plus a plain-language recap -->
+        <section class="onb-step" data-step="2" aria-labelledby="step-2-title" hidden>
+          <h2 class="onb-question onb-question--first" id="step-2-title">Which languages do you reach for?</h2>
+          <p class="onb-hint">Optional. Orbit uses this to pitch its first suggestions at the right level.</p>
+          <div class="onb-chips">
+            {% for language in languages %}
+            <label class="onb-chip">
+              <input type="checkbox" name="languages" value="{{ language }}"{% if language in (profile.get('languages') or []) %} checked{% endif %} />
+              <span>{{ language }}</span>
+            </label>
+            {% endfor %}
+          </div>
+
+          <div class="onb-summary" aria-live="polite">
+            <div class="onb-summary__row">
+              <span class="onb-summary__label">Workspace</span>
+              <span class="onb-summary__value" data-summary="name"></span>
+            </div>
+            <div class="onb-summary__row">
+              <span class="onb-summary__label">Starting point</span>
+              <span class="onb-summary__value" data-summary="interests">Nothing yet</span>
+            </div>
+            <div class="onb-summary__row">
+              <span class="onb-summary__label">Languages</span>
+              <span class="onb-summary__value" data-summary="languages">Nothing yet</span>
+            </div>
+          </div>
+
+          <div class="onb-actions">
+            <button class="onb-back" type="button" data-back="1">Back</button>
+            <button class="o-btn o-btn--primary" type="submit" data-busy-label="Saving…">
+              <span class="btn-label">Enter your workspace</span>
+            </button>
+          </div>
+        </section>
+      </form>
+
+      <aside class="onb-aside">
+        <svg class="onb-arc" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+          <circle cx="60" cy="60" r="59" stroke-dasharray="322 48" transform="rotate(33 60 60)" />
+          <circle class="onb-arc__dot" cx="92" cy="20" r="1.6" />
+        </svg>
+
+        <p class="onb-aside__title">You don’t need all the answers.</p>
+        <p class="onb-aside__body">Orbit breaks your project into understandable stages and explains the details as you go.</p>
+        <p class="onb-aside__fine">Agents suggest. You decide. Every change waits for your approval. Private by default.</p>
+      </aside>
+    </div>
   </div>
 </main>
-{% endblock %}
+
+<script>
+  (function () {
+    "use strict";
+    var form = document.getElementById("onb-form");
+    if (!form) return;
+
+    var steps = Array.prototype.slice.call(form.querySelectorAll("[data-step]"));
+    var labels = Array.prototype.slice.call(document.querySelectorAll("[data-step-label]"));
+    var current = 0;
+
+    /* A new step opens at its own top. On a bounded window the card is the
+       scroll container, so resetting the window alone would leave step 02
+       opening halfway down. */
+    function toTop() {
+      form.scrollTop = 0;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function paint() {
+      steps.forEach(function (step, i) {
+        step.classList.toggle("is-active", i === current);
+        if (i === current) step.removeAttribute("hidden");
+        else step.setAttribute("hidden", "");
+      });
+      labels.forEach(function (label, i) {
+        label.classList.toggle("is-current", i === current);
+        label.classList.toggle("is-done", i < current);
+        if (i === current) label.setAttribute("aria-current", "step");
+        else label.removeAttribute("aria-current");
+      });
+      var heading = steps[current].querySelector("h2");
+      if (heading) heading.setAttribute("tabindex", "-1");
+    }
+
+    /* The profile fields the wizard collects, saved through the settings
+       endpoint that already owns them. No new route, no new server logic;
+       if this fails the wizard still submits its own answers. */
+    /* Saves the two profile fields through the endpoint that owns them.
+       Resolves true only on a real save: the caller must not advance, and
+       must not leave the page, when the name never reached the server. */
+    function saveProfile() {
+      var name = form.querySelector("#name");
+      var workspace = form.querySelector("#workspace");
+      if (!name || !workspace) return Promise.resolve(true);
+      if (!name.value.trim()) return Promise.resolve(false);
+      var body = new URLSearchParams();
+      body.set("name", name.value.trim());
+      body.set("workspace", workspace.value.trim());
+      return fetch("/settings/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+        credentials: "same-origin",
+        redirect: "follow"
+      }).then(function (response) {
+        // /settings/profile redirects on success; a 4xx/5xx is a real failure.
+        return response.ok;
+      }).catch(function () {
+        return false;   // offline or blocked: treated exactly like a rejection
+      });
+    }
+
+    function showSaveError(show) {
+      var box = document.getElementById("profile-save-error");
+      if (!box) return;
+      if (show) box.removeAttribute("hidden");
+      else box.setAttribute("hidden", "");
+      var field = form.querySelector("#name");
+      if (field) field.setAttribute("aria-invalid", show ? "true" : "false");
+    }
+
+    /* Advance only after the profile is safely saved. While the request is
+       in flight the button is busy and the step stays put. */
+    function advance(target, trigger) {
+      var nameInput = form.querySelector("#name");
+      var nameError = form.querySelector("#name-error");
+      var blank = !nameInput || !nameInput.value.trim();
+      if (nameInput) nameInput.classList.toggle("invalid", blank);
+      if (nameError) nameError.classList.toggle("show", blank);
+      showSaveError(false);
+      if (blank) { if (nameInput) nameInput.focus(); return; }
+
+      if (trigger) trigger.classList.add("is-busy");
+      saveProfile().then(function (saved) {
+        if (trigger) trigger.classList.remove("is-busy");
+        if (!saved) { showSaveError(true); return; }
+        current = Math.min(steps.length - 1, target);
+        if (current === 2) summarise();
+        paint();
+        var heading = steps[current].querySelector("h2");
+        if (heading) heading.focus({ preventScroll: true });
+        toTop();
+      });
+    }
+
+    function summarise() {
+      var name = form.querySelector("#name");
+      var workspace = form.querySelector("#workspace");
+      var outName = document.querySelector('[data-summary="name"]');
+      if (outName) outName.textContent = (workspace && workspace.value.trim()) || "Personal space";
+      ["interests", "languages"].forEach(function (key) {
+        var out = document.querySelector('[data-summary="' + key + '"]');
+        if (!out) return;
+        var picked = Array.prototype.slice.call(form.querySelectorAll('input[name="' + key + '"]:checked'))
+          .map(function (input) { return input.value; });
+        out.innerHTML = "";
+        if (!picked.length) { out.textContent = "Nothing yet"; return; }
+        picked.forEach(function (value) {
+          var span = document.createElement("span");
+          span.textContent = value;
+          out.appendChild(span);
+        });
+      });
+    }
+
+    form.addEventListener("click", function (event) {
+      var next = event.target.closest("[data-next]");
+      var back = event.target.closest("[data-back]");
+      if (next) {
+        event.preventDefault();
+        advance(parseInt(next.getAttribute("data-next"), 10) || 0, next);
+      }
+      if (back) {
+        event.preventDefault();
+        current = Math.max(0, parseInt(back.getAttribute("data-back"), 10) || 0);
+        paint();
+        toTop();
+      }
+    });
+
+    form.addEventListener("submit", function (event) {
+      // The last step saves the profile too. If that save is refused, stop the
+      // navigation and say so on the step instead of silently dropping the name.
+      if (form.dataset.saving === "1") return;
+      event.preventDefault();
+      var button = form.querySelector('[type="submit"]');
+      if (button) button.classList.add("is-busy");
+      saveProfile().then(function (saved) {
+        if (button) button.classList.remove("is-busy");
+        if (!saved) { showSaveError(true); return; }
+        form.dataset.saving = "1";
+        form.submit();
+      });
+    });
+
+    var skip = document.querySelector("[data-onb-skip]");
+    if (skip) {
+      // "Save & exit" saves first, then leaves. A refused save keeps the person
+      // on the step with the same visible error, rather than exiting as if the
+      // name had been stored.
+      skip.addEventListener("submit", function (event) {
+        if (skip.dataset.saving === "1") return;
+        event.preventDefault();
+        var button = skip.querySelector("button");
+        if (button) button.classList.add("is-busy");
+        saveProfile().then(function (saved) {
+          if (button) button.classList.remove("is-busy");
+          if (!saved) { showSaveError(true); return; }
+          skip.dataset.saving = "1";
+          skip.submit();
+        });
+      });
+    }
+
+    paint();
+  })();
+</script>
+</body>
+</html>

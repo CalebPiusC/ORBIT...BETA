@@ -1,55 +1,71 @@
-{% extends "public.html" %}
-{% from "_auth_macros.html" import provider_buttons, error_box, notice_box, off_notice %}
+{% extends "auth_shell.html" %}
 {% block title %}orbit — Sign in{% endblock %}
-{% block nav %}{% endblock %}
-{% block body %}
-<main class="auth-shell">
-  <section class="auth-card" aria-labelledby="loginTitle">
-    <img class="card-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-    <p class="auth-eyebrow">Welcome back</p>
-    <h1 class="auth-title" id="loginTitle">Sign in to ORBIT</h1>
-    <p class="auth-sub">Your projects, conversations and agents are where you left them.</p>
+{% block eyebrow %}Welcome back{% endblock %}
+{% block heading %}Back in your orbit.{% endblock %}
+{% block sub %}Sign in to your personal workspace.{% endblock %}
+{% block card %}
+{% if notice %}
+<div class="auth-banner auth-banner--notice" role="status">{{ notice }}</div>
+{% endif %}
 
-    {% if accounts_off %}
-    {{ off_notice() }}
-    <form aria-disabled="true">
-      {{ provider_buttons() }}
-      <div class="divider">or with email</div>
-      <div class="field"><label class="field-label">Email</label><input class="text-input" disabled /></div>
-      <div class="field"><label class="field-label">Password</label><input class="text-input" type="password" disabled /></div>
-      <button class="btn-primary btn-block" type="button" disabled>Sign in</button>
-    </form>
-    {% else %}
-    {{ notice_box(notice, "success" if notice.startswith("Your password") else "") }}
-    {{ provider_buttons(next) }}
-    <div class="divider">or with email</div>
+{% if error %}
+<div class="auth-banner auth-banner--error" role="alert">{{ error }}</div>
+{% endif %}
 
-    {{ error_box(error) }}
+<div class="auth-providers">
+  <button class="o-provider o-provider--soon" type="button" disabled aria-disabled="true"
+          title="Google sign-in is coming soon — use email below for now">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8" /></svg>
+    <span>Continue with Google</span>
+  <span class="o-provider__soon">Coming soon</span></button>
+  <button class="o-provider o-provider--soon" type="button" disabled aria-disabled="true"
+          title="GitHub sign-in is coming soon — use email below for now">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" /></svg>
+    <span>Continue with GitHub</span>
+  <span class="o-provider__soon">Coming soon</span></button>
+</div>
 
-    <form method="post" action="/auth/login" data-auth-form="login" novalidate>
-      <input type="hidden" name="next" value="{{ next }}" />
-      <div class="field">
-        <label class="field-label" for="email">Email</label>
-        <input class="text-input" id="email" name="email" type="email" autocomplete="email"
-               placeholder="you@example.com" value="{{ values.get('email', '') }}" required data-validate="email" />
-        <p class="field-error" data-error-for="email">Enter the email you signed up with.</p>
-      </div>
-      <div class="field">
-        <div class="auth-foot-row" style="margin:0 0 6px;">
-          <label class="field-label" for="password" style="margin:0;">Password</label>
-          <a href="/auth/forgot">Forgot it?</a>
-        </div>
-        <input class="text-input" id="password" name="password" type="password" autocomplete="current-password"
-               required data-validate="required" />
-        <p class="field-error" data-error-for="password">Enter your password.</p>
-      </div>
-      <button class="btn-primary btn-block" type="submit" data-busy-label="Signing you in…">
-        <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Sign in</span>
-      </button>
-    </form>
-    {% endif %}
+<div class="o-rule auth-rule">or use email</div>
 
-    <p class="auth-alt">New to ORBIT? <a href="/auth/signup">Create your account</a></p>
-  </section>
-</main>
+<form class="auth-form" id="auth-form" method="post" action="/auth/login" data-auth-form="login" novalidate>
+  <input type="hidden" name="next" value="{{ next }}" />
+
+  <div class="auth-field">
+    <div class="o-field">
+      <label class="o-field__label" for="email">Email address</label>
+      <input class="o-field__input" id="email" name="email" type="email" autocomplete="email"
+             value="{{ values.get('email', '') }}" required data-validate="email" aria-describedby="email-error" />
+    </div>
+    <p class="o-field-error" id="email-error" data-error-for="email">Enter the email you signed up with.</p>
+  </div>
+
+  <div class="auth-field">
+    <div class="o-field">
+      <label class="o-field__label" for="password">Password</label>
+      <input class="o-field__input" id="password" name="password" type="password" autocomplete="current-password"
+             required data-validate="required" aria-describedby="password-error" />
+    </div>
+    <p class="o-field-error" id="password-error" data-error-for="password">Enter your password.</p>
+  </div>
+
+  <div class="auth-meta">
+    <label class="o-check">
+      <input type="checkbox" name="remember" value="1" checked />
+      <span>Remember me</span>
+    </label>
+    <a class="o-text-action" href="/auth/forgot">Forgot password?</a>
+  </div>
+
+  <button class="o-btn o-btn--primary auth-submit" type="submit" data-busy-label="Signing you in…">
+    <span class="btn-label">Sign in</span>
+  </button>
+</form>
+
+<p class="auth-alt">New to Orbit? <a href="/auth/signup">Create an account
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M7 17 17 7M8 7h9v9" /></svg>
+</a></p>
+
+<hr class="auth-divider" />
+
+<p class="o-fineprint auth-legal"><span>By continuing, you agree to our Terms of Service and Privacy Policy.<br />Your projects are private by default.</span></p>
 {% endblock %}

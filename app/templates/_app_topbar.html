@@ -1,0 +1,37 @@
+{# The mobile bar, drawn from Dashboard · Light/Dark · Mobile: wordmark left,
+   menu at right, a hairline under it. The menu is a real dialog holding the
+   same destinations as the desktop rail — nothing here opens and does nothing. #}
+<div class="app-topbar">
+  <a class="app-brand app-brand--mobile" href="{% if accounts_enabled %}/dashboard{% else %}/{% endif %}" aria-label="orbit — overview">
+    <img class="app-brand__mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+    <span class="app-brand__word">orbit</span>
+  </a>
+  <button class="app-menu" id="appMenu" type="button" aria-haspopup="dialog" aria-controls="appDrawer" aria-expanded="false" aria-label="Open menu">
+    <svg class="app-menu__glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+  </button>
+</div>
+
+<dialog class="app-drawer" id="appDrawer" aria-label="Menu">
+  <div class="app-drawer__head">
+    <span class="app-drawer__title">orbit</span>
+    <button class="app-drawer__close" type="button" data-drawer-close aria-label="Close menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <nav class="app-drawer__nav" aria-label="Menu">
+    {% if accounts_enabled %}
+    <a class="app-nav__item app-nav__item--drawer{% if dashboard_active %} is-active{% endif %}" href="/dashboard">Overview</a>
+    {% endif %}
+    <a class="app-nav__item app-nav__item--drawer{% if projects_active %} is-active{% endif %}" href="/projects">Projects</a>
+    <a class="app-nav__item app-nav__item--drawer{% if agents_active %} is-active{% endif %}" href="/agents">Agents</a>
+    <span class="app-nav__item app-nav__item--drawer is-soon" aria-disabled="true">Approvals<span class="app-nav__soon">Soon</span></span>
+    <a class="app-nav__item app-nav__item--drawer{% if analytics_active %} is-active{% endif %}" href="/analytics">Analytics</a>
+    <span class="app-nav__item app-nav__item--drawer is-soon" aria-disabled="true">Reminders<span class="app-nav__soon">Soon</span></span>
+    <span class="app-nav__item app-nav__item--drawer is-soon" aria-disabled="true">Connected apps<span class="app-nav__soon">Soon</span></span>
+    <a class="app-nav__item app-nav__item--drawer{% if settings_active %} is-active{% endif %}" href="/settings">Settings</a>
+  </nav>
+  <div class="app-drawer__foot">
+    <span class="app-user__name">{{ user.name }}</span>
+    <span class="app-user__meta">{{ user.workspace }}</span>
+  </div>
+</dialog>

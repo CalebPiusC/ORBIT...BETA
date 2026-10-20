@@ -11,8 +11,10 @@ Rules under test:
 
 from __future__ import annotations
 
+import os
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 from typing import Any
 
 import httpx
@@ -53,9 +55,27 @@ class StreamScript:
         return pieces()
 
 
+NO_OPENROUTER = {
+    # An injected client means an offline test: nothing here may read the
+    # developer's .env. Without these, an OPENROUTER_API_KEY on the machine
+    # adds Io/Ganymede/Callisto ahead of the Gemini fallback and these persona
+    # assertions start describing the developer's environment, not the code.
+    "openrouter_api_key": "",
+    "openrouter_models": (),
+    "openrouter_fallback_model": "",
+    "openrouter_client": None,
+}
+
+
 def provider_for(script: dict[str, Any]) -> GeminiProvider:
     client = SimpleNamespace(models=StreamScript(script))
-    return GeminiProvider(client=client, model=PRIMARY, fallback_model=FALLBACK, audit_log=None)
+    return GeminiProvider(
+        client=client,
+        model=PRIMARY,
+        fallback_model=FALLBACK,
+        audit_log=None,
+        **NO_OPENROUTER,
+    )
 
 
 def run(provider: GeminiProvider, **kwargs: Any) -> list[tuple[str, str]]:
@@ -167,6 +187,7 @@ class QuickDeepSelectionTests(unittest.TestCase):
             model=PRIMARY,
             fallback_model="",
             audit_log=None,
+            **NO_OPENROUTER,
         )
         out = run(provider, thinking_level="deep", report_attempts=True)
         models = provider._client.models
@@ -195,7 +216,11 @@ class ReplyStreamsAsItArrivesTests(unittest.TestCase):
                 return pieces()
 
         provider = GeminiProvider(
-            client=SimpleNamespace(models=Models()), model=PRIMARY, fallback_model=None, audit_log=None
+            client=SimpleNamespace(models=Models()),
+            model=PRIMARY,
+            fallback_model=None,
+            audit_log=None,
+            **NO_OPENROUTER,
         )
         seen_before_end: list[int] = []
         for chunk in provider.reply_stream(HISTORY, "sys", think=True):
@@ -203,6 +228,47 @@ class ReplyStreamsAsItArrivesTests(unittest.TestCase):
                 seen_before_end.append(len(pulled))
         self.assertEqual(len(seen_before_end), 4)
         self.assertLess(seen_before_end[0], 4)  # the first answer piece left early
+
+
+class InjectedProviderIgnoresTheDevelopersEnvTests(unittest.TestCase):
+    """A Deep-mode key in .env must not rewrite what an offline test measures."""
+
+    ENV = {
+        "OPENROUTER_API_KEY": "sk-or-from-the-developers-machine",
+        "OPENROUTER_MODEL_2": "io-from-env",
+        "OPENROUTER_MODEL_3": "ganymede-from-env",
+        "OPENROUTER_MODEL_4": "callisto-from-env",
+    }
+
+    def test_an_env_key_cannot_add_openrouter_to_an_injected_provider(self) -> None:
+        with patch.dict(os.environ, self.ENV):
+            provider = provider_for({PRIMARY: ["deep answer"]})
+            out = run(provider, thinking_level="deep", report_attempts=True)
+
+        self.assertIsNone(provider._openrouter_client)
+        self.assertEqual(provider.openrouter_models, ("", "", ""))
+        self.assertEqual(provider._client.models.calls, [PRIMARY])
+        self.assertEqual([text for kind, text in out if kind == "status"], ["Asking Europa…"])
+
+    def test_a_provider_without_injected_settings_still_reads_the_env(self) -> None:
+        """The guard above must not disable OpenRouter for real launches."""
+        settings = SimpleNamespace(
+            api_key="sk-or-configured",
+            models=("io-from-env", "ganymede-from-env", "callisto-from-env"),
+            fallback_model="",
+        )
+        with patch("providers.gemini.load_openrouter_settings", return_value=settings):
+            provider = GeminiProvider(
+                client=SimpleNamespace(models=StreamScript({PRIMARY: ["deep"]})),
+                model=PRIMARY,
+                fallback_model=FALLBACK,
+                audit_log=None,
+            )
+        self.assertIsNotNone(provider._openrouter_client)
+        self.assertEqual(
+            provider.openrouter_models,
+            ("io-from-env", "ganymede-from-env", "callisto-from-env"),
+        )
 
 
 if __name__ == "__main__":

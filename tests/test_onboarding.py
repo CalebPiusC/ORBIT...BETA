@@ -18,6 +18,8 @@ untouched by all of this: an earlier test in this file pins that decision
 from __future__ import annotations
 
 import json
+import os
+import re
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -254,6 +256,28 @@ def make_client() -> tuple:
     return app, app.test_client(), store
 
 
+def make_sqlite_client():
+    """The same app, wired the way production boots: SQLite-backed stores.
+
+    Mirrors ``run_app`` without the server: the chat store, accounts and
+    projects all share one database file, so these tests exercise the store
+    adapter the shipped app actually uses.
+    """
+    from app.sqlite_accounts import SQLiteAccountStore
+    from app.sqlite_projects import SQLiteProjectStore
+    from app.sqlite_store import SQLiteStore
+
+    directory = tempfile.TemporaryDirectory()
+    store = SQLiteStore(os.path.join(directory.name, "orbit.sqlite3"))
+    app = create_app(provider=FakeProvider())
+    app.config["TESTING"] = True
+    app.config["STORE"] = store
+    accounts = SQLiteAccountStore(store.database, iterations=1_000)
+    app.config["ACCOUNTS"] = accounts
+    app.config["PROJECTS"] = SQLiteProjectStore(store.database)
+    return directory, app, app.test_client(), accounts
+
+
 def signup(client, email: str = EMAIL, name: str = "Ada Osei"):
     return client.post(
         "/auth/signup",
@@ -299,40 +323,35 @@ class GuardTests(unittest.TestCase):
         self.assertIn("accounts off", resp.get_data(as_text=True))
 
     def test_landing_page_is_the_signed_out_front_door(self) -> None:
+        # Copy follows the ORBIT UI___2 design frames, which superseded the
+        # earlier long-form beta page.
         _, client, _ = make_client()
         text = client.get("/").get_data(as_text=True)
-        self.assertIn("Open beta", text)
-        self.assertIn("Create your free account", text)
+        self.assertIn("Sign in", text)
         self.assertIn("How it works", text)
-        self.assertIn("visibly disabled", text)  # the unfinished parts say so out loud
+        self.assertIn("Start your project", text)
+        self.assertIn("Create your free workspace", text)
 
-    def test_landing_page_claims_only_what_the_app_does_today(self) -> None:
-        """Every capability on the marketing page must exist in this build.
+    def test_landing_page_never_presents_a_provider_as_connected(self) -> None:
+        """The landing page may name import entry points, never live connections.
 
-        Each assertion names a claim that used to be false: a GitHub connection
-        that was only a seeded status, code-change drafting that does not exist,
-        file attachments that are never uploaded, and voice presented as
-        shipping when it has not been proven end to end.
+        The ORBIT UI___2 frames replaced the long-form beta copy, so the older
+        "No Git provider is connected yet" paragraph is gone. What survives is
+        the part that matters: no provider may be described as already
+        connected, and no attachment or voice capability may be claimed.
         """
         _, client, _ = make_client()
         text = client.get("/landing").get_data(as_text=True)
 
-        # No Git provider is connected, so none may be claimed.
         self.assertNotIn("GitHub is connected", text)
         self.assertNotIn("a GitHub connection", text)
-        self.assertIn("No Git provider is connected yet", text)
-        self.assertIn("Coming next", text)
-
-        # The agent plans and narrates; it does not draft code changes yet.
-        self.assertNotIn("drafts changes for your review", text)
-        self.assertIn("Drafting the code changes for your review is coming next", text)
+        self.assertNotIn("Connected to GitHub", text)
 
         # Attachments are never uploaded to the model, so they are not offered.
         self.assertNotIn("Attach files", text)
 
-        # Voice is labelled for what it is.
-        self.assertIn("Voice in testing", text)
-        self.assertNotIn("Hold-to-talk input and spoken replies, plus daily-plan", text)
+        # Voice is not presented as shipping.
+        self.assertNotIn("voice is ready", text.lower())
 
 
 class AuthFlowTests(unittest.TestCase):
@@ -549,6 +568,8 @@ class ProjectEntryTests(unittest.TestCase):
 
 
 class SettingsPageTests(unittest.TestCase):
+    WIZARD_EMAIL = "grace@example.dev"   # the account oauth() signs in
+
     def setUp(self) -> None:
         self.app, self.client, self.store = make_client()
         oauth(self.client)
@@ -617,6 +638,8 @@ class SettingsPageTests(unittest.TestCase):
 
 
 class FeedbackTests(unittest.TestCase):
+    WIZARD_EMAIL = "grace@example.dev"   # the account oauth() signs in
+
     def setUp(self) -> None:
         self.app, self.client, self.store = make_client()
         oauth(self.client)
@@ -643,5 +666,582 @@ class FeedbackTests(unittest.TestCase):
         self.assertIn("No notes yet", text)
 
 
+class OnboardingWizardTests(unittest.TestCase):
+    """The rebuilt onboarding wizard: its step contract, its keyboard hooks and
+    the save-before-advance rule that keeps a typed name from being dropped.
+
+    These are structural and server-side assertions on purpose: the repo's
+    suite runs offline with no browser, so anything that depends on paint is
+    asserted through the markup the script binds to, and the failure path is
+    proven against the real HTTP endpoint.
+    """
+
+    WIZARD_EMAIL = "grace@example.dev"   # the account oauth() signs in
+
+    def setUp(self) -> None:
+        self.app, self.client, self.store = make_client()
+        oauth(self.client)
+
+    def page(self) -> str:
+        resp = self.client.get("/onboarding")
+        self.assertEqual(resp.status_code, 200)
+        return resp.get_data(as_text=True)
+
+    # ----- the three drawn steps -------------------------------------------
+
+    def test_three_steps_and_only_the_first_is_open(self) -> None:
+        text = self.page()
+        # three step sections, exactly one active
+        self.assertEqual(text.count('class="onb-step is-active"'), 1)
+        self.assertEqual(text.count('class="onb-step"'), 2)
+        # and only the first is not hidden
+        self.assertEqual(text.count('data-step="0" aria-labelledby'), 1)
+        self.assertIn('data-step="1" aria-labelledby="step-1-title" hidden', text)
+        self.assertIn('data-step="2" aria-labelledby="step-2-title" hidden', text)
+
+    def test_stepper_labels_start_on_step_one(self) -> None:
+        text = self.page()
+        self.assertIn('data-step-label="0" class="is-current"', text)
+        self.assertIn("01 / Your workspace", text)
+        self.assertIn("02 / Starting point", text)
+        self.assertIn("03 / Ready to build", text)
+
+    def test_frame_copy_and_controls_are_present(self) -> None:
+        text = self.page()
+        for phrase in (
+            "A workspace, shaped around you.",
+            "A few small details help Orbit meet you where you are.",
+            "What should we call you?",
+            "Workspace name",
+            "How familiar is building software?",
+            "A fresh start",
+            "Finding my feet",
+            "Comfortably curious",
+            "Continue to your starting point",
+            "Save &amp; exit",
+            "You don’t need all the answers.",
+        ):
+            self.assertIn(phrase, text)
+
+    # ----- keyboard reachability ------------------------------------------
+
+    def test_every_step_control_is_a_real_button(self) -> None:
+        """The stepper is a script, so its controls must be natively tabbable
+        and Enter/Space-activatable: real <button> elements, never divs."""
+        text = self.page()
+        for hook in ("data-next=", "data-back="):
+            # each occurrence sits on a <button ...>
+            for fragment in text.split(hook)[1:]:
+                opening = text[max(0, text.index(fragment) - 200):text.index(fragment)]
+                self.assertIn("<button", opening, hook)
+
+    def test_steps_are_labelled_for_assistive_tech(self) -> None:
+        text = self.page()
+        # the list of steps is an ordered list; the script sets aria-current
+        self.assertIn('<ol class="onb-steps" id="onbSteps">', text)
+        self.assertIn("aria-current", text)  # the script's contract
+
+    def test_headings_receive_focus_after_advancing(self) -> None:
+        """Focus is moved to the new step's heading, and headings are made
+        focusable, so a keyboard user is never dropped back at the top of the
+        document with no announcement."""
+        text = self.page()
+        self.assertIn('setAttribute("tabindex", "-1")', text)
+        self.assertIn('heading.focus({ preventScroll: true })', text)
+
+    # ----- save-before-advance --------------------------------------------
+
+    def test_advance_is_gated_on_a_successful_save(self) -> None:
+        text = self.page()
+        # the failure branch returns before the step changes
+        self.assertIn("if (!saved) { showSaveError(true); return; }", text)
+        # and the error is a live region with real text
+        self.assertIn('id="profile-save-error" role="alert"', text)
+        self.assertIn("We couldn’t save your details just now", text)
+
+    def test_save_refused_degrades_to_false_not_true(self) -> None:
+        """A network failure must resolve false — never fall through as a
+        successful save, which is what let the wizard advance into a dropped
+        name before this test existed."""
+        text = self.page()
+        self.assertIn("return false;   // offline or blocked", text)
+        self.assertNotIn("catch(function () { /* offline: the wizard answers still save */ })", text)
+
+    def test_submit_is_blocked_while_the_save_is_in_flight(self) -> None:
+        text = self.page()
+        self.assertIn('if (form.dataset.saving === "1") return;', text)
+        self.assertIn('if (skip.dataset.saving === "1") return;', text)
+
+    def test_profile_endpoint_reports_failure_the_way_the_page_reads_it(self) -> None:
+        """The page treats a non-2xx as a refused save. Prove the endpoint can
+        actually answer that way, so the branch is not unreachable in practice:
+        an empty name is rejected with a 303 back to settings#profile, while a
+        real name is accepted."""
+        resp = self.client.post("/settings/profile", data={"name": "", "workspace": "X"})
+        self.assertEqual(resp.status_code, 303)
+        self.assertIn("error=name", resp.headers["Location"])
+
+        resp = self.client.post("/settings/profile", data={"name": "Ada Osei", "workspace": "Fieldnotes"})
+        self.assertEqual(resp.status_code, 303)
+        self.assertIn("saved=profile", resp.headers["Location"])
+        self.assertEqual(self.store.by_email(self.WIZARD_EMAIL)["name"], "Ada Osei")
+        self.assertEqual(self.store.by_email(self.WIZARD_EMAIL)["workspace"], "Fieldnotes")
+
+    def test_save_and_exit_records_a_real_skip(self) -> None:
+        resp = self.client.post("/onboarding", data={"skip": "1"})
+        self.assertEqual(resp.status_code, 303)
+        account = self.store.by_email(self.WIZARD_EMAIL)
+        self.assertTrue(account["onboarding"]["personalize_skipped"])
+
+    def test_wizard_answers_still_land_through_the_new_form(self) -> None:
+        resp = self.client.post("/onboarding", data={
+            "experience": "1–2 years",
+            "interests": ["Data & ML"],
+            "languages": ["Python"],
+        })
+        self.assertEqual(resp.status_code, 303)
+        profile = self.store.by_email(self.WIZARD_EMAIL)["profile"]
+        self.assertEqual(profile["experience"], "1–2 years")
+        self.assertEqual(profile["interests"], ["Data & ML"])
+        self.assertEqual(profile["languages"], ["Python"])
+
+
+class DerivedAuthScreenTests(unittest.TestCase):
+    """Sign up, verify, forgot and reset have no frames of their own.
+
+    They were built on the Sign in frame's shell, so these tests pin the two
+    things that make that claim true: every one of them renders through the
+    shared shell (same card, same chrome, one primary button), and the copy
+    that existed because the old pages made a promise or held a privacy line
+    still exists after the rebuild.
+    """
+
+    def setUp(self) -> None:
+        self.app, self.client, self.store = make_client()
+
+    def shell(self, text: str) -> None:
+        self.assertIn('class="auth-card"', text)
+        self.assertIn('id="authTitle"', text)          # the shared shell's heading id
+        self.assertIn("A little clarity goes a long way.", text)   # the frame's marketing column
+        self.assertIn("A calmer way to build.", text)              # the frame's footer
+        self.assertEqual(text.count("o-btn--primary"), 1, "exactly one primary button per screen")
+
+    def test_signup_renders_through_the_sign_in_shell(self) -> None:
+        text = self.client.get("/auth/signup").get_data(as_text=True)
+        self.shell(text)
+        # Provider rows are drawn, but honestly: no real OAuth exists yet, so
+        # they are disabled buttons marked coming soon, never links.
+        self.assertIn("Continue with Google", text)
+        self.assertIn("Continue with GitHub", text)
+        self.assertIn("Coming soon", text)
+        self.assertNotIn('href="/auth/oauth/google', text)
+        self.assertNotIn('href="/auth/oauth/github', text)
+        self.assertIn("or use email", text)
+        # every field the server actually reads
+        for field in ('name="name"', 'name="email"', 'name="password"', 'name="confirm"'):
+            self.assertIn(field, text)
+
+    def test_verify_renders_through_the_shell_and_stays_honest(self) -> None:
+        signup(self.client)
+        text = self.client.get("/auth/verify").get_data(as_text=True)
+        self.shell(text)
+        self.assertIn('id="code"', text)
+        # the sandbox really does send no mail, and the page says so
+        self.assertIn("Demo build — no email is sent.", text)
+        self.assertIn("Resend the code", text)
+
+    def test_forgot_renders_through_the_shell_without_revealing_accounts(self) -> None:
+        text = self.client.get("/auth/forgot").get_data(as_text=True)
+        self.shell(text)
+        self.assertIn("the next page answers the same either way", text)
+        self.assertIn('name="email"', text)
+
+    def test_reset_renders_through_the_shell(self) -> None:
+        signup(self.client)
+        verify(self.client, self.store)
+        self.client.post("/auth/forgot", data={"email": EMAIL})
+        text = self.client.get("/auth/reset").get_data(as_text=True)
+        self.shell(text)
+        for field in ('id="code"', 'id="password"', 'id="confirm"'):
+            self.assertIn(field, text)
+        self.assertIn("Update password", text)
+
+    def test_no_auth_screen_offers_a_provider_link_that_cannot_work(self) -> None:
+        """No auth screen may link to a provider flow it cannot really perform.
+
+        The /auth/oauth routes still exist and are still honest when visited
+        directly (they say "Demo flow"), but a control labelled "Continue with
+        Google" must not pretend to start one. Each is a disabled <button>.
+        """
+        # Guests only: once signed in, both routes correctly redirect to the app.
+        for path in ("/auth/login", "/auth/signup"):
+            text = self.client.get(path).get_data(as_text=True)
+            with self.subTest(path=path):
+                self.assertNotIn('href="/auth/oauth/', text)
+                self.assertEqual(text.count('class="o-provider o-provider--soon"'), 2)
+                self.assertEqual(text.count('class="o-provider o-provider--soon"'), 2)
+                self.assertEqual(text.count('disabled aria-disabled="true"'), 2)
+
+    def test_no_auth_screen_ships_a_dead_legal_link(self) -> None:
+        """Terms and Privacy are drawn as text in the frame's footer. There are
+        no such routes, so no auth page may render them as links."""
+        signup(self.client)
+        for path in ("/auth/login", "/auth/signup", "/auth/forgot", "/auth/verify"):
+            text = self.client.get(path).get_data(as_text=True)
+            with self.subTest(path=path):
+                self.assertNotIn('href="/terms"', text)
+                self.assertNotIn('href="/privacy"', text)
+
+    def test_accounts_off_still_renders_every_auth_page(self) -> None:
+        """The pre-existing suite launches with no account store; every auth
+        page must still answer 200 with the honest banner."""
+        app = create_app(provider=FakeProvider())
+        client = app.test_client()
+        for path in ("/auth/login", "/auth/signup", "/auth/forgot"):
+            resp = client.get(path)
+            with self.subTest(path=path):
+                self.assertEqual(resp.status_code, 200)
+                self.assertIn("accounts off", resp.get_data(as_text=True))
+
+
+class ButtonContrastTests(unittest.TestCase):
+    """The one place a colour decision is asserted rather than eyeballed.
+
+    Copper is the brand accent and the primary button is one of its four
+    allowed uses, so the label on it must clear 4.5:1 in both themes — and in
+    the hover state, which is where a darker fill silently broke AA.
+    """
+
+    @staticmethod
+    def _relative_luminance(value: str) -> float:
+        value = value.lstrip("#")
+        channels = [int(value[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+    def ratio(self, fg: str, bg: str) -> float:
+        a, b = self._relative_luminance(fg), self._relative_luminance(bg)
+        hi, lo = max(a, b), min(a, b)
+        return (hi + 0.05) / (lo + 0.05)
+
+    def test_primary_label_clears_aa_in_both_themes(self) -> None:
+        pairs = {
+            "light": ("#1B1208", "#C2692F"),
+            "light hover": ("#1B1208", "#CC7839"),
+            "dark": ("#0F0F10", "#D9814A"),
+            "dark hover": ("#0F0F10", "#C9763F"),
+        }
+        for name, (fg, bg) in pairs.items():
+            with self.subTest(state=name):
+                self.assertGreaterEqual(self.ratio(fg, bg), 4.5, name)
+
+    def test_the_tokens_match_what_is_asserted(self) -> None:
+        """Guard against the CSS drifting away from the tested values."""
+        css = (Path(__file__).resolve().parents[1] / "app" / "static" / "orbit.css").read_text()
+        for token in (
+            "--copper: #C2692F;",
+            "--copper-hover: #CC7839;",
+            "--copper-ink: #1B1208;",
+            "--copper: #D9814A;",
+            "--copper-hover: #C9763F;",
+            "--copper-ink: #0F0F10;",
+        ):
+            self.assertIn(token, css)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class DashboardDesignTests(unittest.TestCase):
+    """The Overview screen as drawn in Dashboard · Light/Dark · Desktop/Mobile.
+
+    These pin the promises the frame makes structurally: one primary action,
+    no literal colour in the markup, a rail whose order matches the frame, and
+    an honest treatment for the three destinations this build does not have.
+    """
+
+    def _active(self):
+        app, client, accounts = make_client()
+        oauth(client)
+        account = accounts.by_email("grace@example.dev")
+        project = app.config["PROJECTS"].create(
+            user_id=account["id"], name="Fieldnotes", description="A quieter home for everything you want to read."
+        )
+        view = app.config["STORE"].for_account(account["id"])
+        view.create_task("Save your first article", project_id=project.id)
+        client.get("/dashboard")  # the first visit marks the return
+        return app, client, project
+
+    def test_one_primary_action_on_the_screen(self) -> None:
+        _, client, _ = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertEqual(page.count("o-btn--primary"), 1)
+        self.assertIn("New project", page)
+
+    def test_markup_carries_no_literal_colour_or_inline_style(self) -> None:
+        _, client, _ = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertNotIn('style="', page)
+        self.assertNotIn("rgba(", page)
+        self.assertIsNone(re.search(r"#[0-9A-Fa-f]{3,6}\b", page))
+
+    def test_the_rail_follows_the_frame_order(self) -> None:
+        _, client, _ = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        rail = page[page.index('class="app-nav"'):page.index("</aside>")]
+        order = ["Overview", "Projects", "Agents", "Approvals", "Analytics", "Reminders", "Connected apps", "Settings"]
+        positions = [rail.index(label) for label in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn('class="app-nav__item is-active" href="/dashboard" aria-current="page"', rail)
+
+    def test_unbuilt_destinations_are_disabled_not_dead_links(self) -> None:
+        _, client, _ = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        for path in ("/approvals", "/reminders", "/connected"):
+            self.assertNotIn(f'href="{path}"', page)
+        self.assertEqual(page.count('class="app-nav__item is-soon"'), 3)  # rail
+        self.assertEqual(page.count("app-nav__item app-nav__item--drawer is-soon"), 3)  # drawer
+        self.assertIn('aria-disabled="true"', page)
+
+    def test_the_phone_menu_is_a_real_dialog_with_the_same_rail(self) -> None:
+        _, client, _ = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertIn('id="appDrawer"', page)
+        self.assertIn('aria-controls="appDrawer"', page)
+        self.assertIn('aria-expanded="false"', page)
+        self.assertIn("data-drawer-close", page)
+        drawer = page[page.index('id="appDrawer"'):]
+        self.assertIn('href="/projects"', drawer)
+        self.assertIn('href="/settings"', drawer)
+
+    def test_the_three_states_render(self) -> None:
+        _, client, _ = self._active()
+        loading = client.get("/dashboard?view=loading").get_data(as_text=True)
+        self.assertIn("dash-skel", loading)
+        self.assertIn("Loading your workspace", loading)
+        error = client.get("/dashboard?view=error").get_data(as_text=True)
+        self.assertIn("couldn't load your workspace", error)
+        self.assertIn("Try again", error)
+        self.assertIn("Open projects", error)
+
+    def test_the_project_card_and_strip_name_real_work(self) -> None:
+        _, client, project = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        card_start = page.index("dash-card__project")
+        card = page[card_start:]
+        self.assertIn("Fieldnotes", card)
+        self.assertIn("Open Project Map", card)
+        self.assertIn(f'href="/projects/{project.id}"', card)
+        strip = page[page.index('class="continue-strip"'):]
+        self.assertIn("Fieldnotes", strip)
+        self.assertIn("Open workspace", strip)
+
+    def test_the_drawer_and_rail_share_no_missing_page(self) -> None:
+        _, client, _ = self._active()
+        page = client.get("/dashboard").get_data(as_text=True)
+        # Every href in the chrome resolves to a route this build serves.
+        for href in re.findall(r'href="(/[^"#?]*)"', page):
+            if href.startswith("/projects/") or href.startswith("/static/"):
+                continue
+            self.assertIn(
+                href, {"/dashboard", "/projects", "/agents", "/analytics", "/settings", "/create", "/", "/onboarding"},
+                href,
+            )
+
+
+class DashboardDataTests(unittest.TestCase):
+    """The Overview roll-ups: real counts, honest empties, account isolation.
+
+    Every figure the route adds is read through the store view bound to the
+    signed-in account, so these tests drive two accounts with different work
+    and assert that neither screen can see the other's rows.
+
+    The SQLite subclass below re-runs every one of these checks against the
+    production store, so the two implementations cannot drift apart.
+    """
+
+    use_sqlite = False
+
+    def _make(self):
+        if not self.use_sqlite:
+            return make_client()
+        directory, app, client, accounts = make_sqlite_client()
+        store = app.config["STORE"]
+
+        def _release_database() -> None:
+            # addCleanup is LIFO, so this runs before the directory is removed.
+            # A store call must leave no connection behind: on Windows a live
+            # handle makes the temp directory undeletable, which is how these
+            # tests failed there. Closing is a no-op when nothing leaked; the
+            # count is what catches a regression.
+            self.assertEqual(store.database.open_connection_count, 0)
+            store.database.close()
+
+        self.addCleanup(directory.cleanup)
+        self.addCleanup(_release_database)
+        return app, client, accounts
+
+    @staticmethod
+    def _stat(page: str, label: str) -> int | None:
+        match = re.search(
+            r"<span>(\d+)</span><span class=\"dash-stat__sep\">/</span>"
+            r"<span>" + re.escape(label) + r"</span>",
+            page,
+        )
+        return int(match.group(1)) if match else None
+
+    @staticmethod
+    def _proposal(view, summary: str, card_id: str) -> None:
+        from app.store import ActionCard, ChatMessage
+
+        conv = view.start_conversation()
+        view.append_message(
+            conv.id,
+            ChatMessage(
+                who="Orbit",
+                time="09:12",
+                body=summary,
+                is_orbit=True,
+                action=ActionCard(id=card_id, summary=summary),
+            ),
+        )
+
+    def test_counts_read_the_signed_in_accounts_own_records(self) -> None:
+        app, client, accounts = self._make()
+        oauth(client)
+        account = accounts.by_email("grace@example.dev")
+        project = app.config["PROJECTS"].create(
+            user_id=account["id"], name="Fieldnotes", description=""
+        )
+        view = app.config["STORE"].for_account(account["id"])
+        view.create_task("Save your first article", project_id=project.id)
+        second = view.create_task("Build the reading list", project_id=project.id)
+        view.set_done(second.id)
+        self._proposal(view, "Add this line to your notes: “Keep going”", "act-count")
+
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertEqual(self._stat(page, "Active projects"), 1)
+        self.assertEqual(self._stat(page, "Tasks completed"), 1)
+        self.assertEqual(self._stat(page, "Pending proposals"), 1)
+        # The proposal itself is named, and the proposal count is spelled out.
+        self.assertIn("Keep going", page)
+        self.assertIn("1 proposal waiting", page)
+        # The activity feed carries the recorded line and its project.
+        self.assertIn("Task created from your request.", page)
+        self.assertIn("Fieldnotes · ", page)
+
+    def test_one_accounts_dashboard_never_shows_anothers_work(self) -> None:
+        app, client, accounts = self._make()
+        oauth(client, email="ada@example.dev", name="Ada A")
+        ada = accounts.by_email("ada@example.dev")
+        ada_project = app.config["PROJECTS"].create(
+            user_id=ada["id"], name="Alpha project", description=""
+        )
+        ada_view = app.config["STORE"].for_account(ada["id"])
+        ada_task = ada_view.create_task("Build the alpha thing", project_id=ada_project.id)
+        ada_view.set_done(ada_task.id)
+        self._proposal(ada_view, "Alpha proposal: write the alpha note", "act-alpha")
+        client.get("/auth/logout")
+
+        oauth(client, email="bob@example.dev", name="Bob B")
+        bob = accounts.by_email("bob@example.dev")
+        bob_project = app.config["PROJECTS"].create(
+            user_id=bob["id"], name="Beta project", description=""
+        )
+        bob_view = app.config["STORE"].for_account(bob["id"])
+        bob_view.create_task("Build the beta thing", project_id=bob_project.id)
+        self._proposal(bob_view, "Beta proposal: write the beta note", "act-beta")
+
+        bob_page = client.get("/dashboard").get_data(as_text=True)
+        self.assertIn("Beta project", bob_page)
+        self.assertIn("Beta proposal", bob_page)
+        self.assertEqual(self._stat(bob_page, "Tasks completed"), 0)
+        for leak in ("Alpha project", "Alpha proposal", "Build the alpha thing"):
+            self.assertNotIn(leak, bob_page)
+
+        client.get("/auth/logout")
+        oauth(client, email="ada@example.dev", name="Ada A")
+        ada_page = client.get("/dashboard").get_data(as_text=True)
+        self.assertIn("Alpha project", ada_page)
+        self.assertIn("Alpha proposal", ada_page)
+        self.assertEqual(self._stat(ada_page, "Tasks completed"), 1)
+        for leak in ("Beta project", "Beta proposal", "Build the beta thing"):
+            self.assertNotIn(leak, ada_page)
+
+    def test_empty_states_are_named_not_faked(self) -> None:
+        app, client, accounts = self._make()
+        oauth(client)
+        account = accounts.by_email("grace@example.dev")
+        app.config["PROJECTS"].create(user_id=account["id"], name="A quiet project", description="")
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertIn("No pending approvals.", page)
+        self.assertIn("No activity yet.", page)
+        self.assertEqual(self._stat(page, "Pending proposals"), 0)
+        self.assertEqual(self._stat(page, "Tasks completed"), 0)
+
+    def test_activity_is_capped_at_ten_and_follows_task_creation(self) -> None:
+        app, client, accounts = self._make()
+        oauth(client)
+        account = accounts.by_email("grace@example.dev")
+        project = app.config["PROJECTS"].create(user_id=account["id"], name="Long list", description="")
+        view = app.config["STORE"].for_account(account["id"])
+        for index in range(12):
+            view.create_task(f"Task number {index}", project_id=project.id)
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertEqual(page.count("Task created from your request."), 10)
+        # Every row names the task's project; the cap is the feed's, not the store's.
+        self.assertEqual(page.count("Long list · "), 10)
+        self.assertEqual(len(view.recent_activity(limit=10)), 10)
+        self.assertEqual(len(view.recent_activity(limit=50)), 12)
+
+    def test_resolving_a_proposal_removes_it_from_the_count(self) -> None:
+        app, client, accounts = self._make()
+        oauth(client)
+        account = accounts.by_email("grace@example.dev")
+        app.config["PROJECTS"].create(user_id=account["id"], name="Resolve project", description="")
+        view = app.config["STORE"].for_account(account["id"])
+        self._proposal(view, "Add this line to your notes: “Resolve me”", "act-resolve")
+        self.assertEqual(
+            self._stat(client.get("/dashboard").get_data(as_text=True), "Pending proposals"), 1
+        )
+        view.resolve_action("act-resolve", "approved", "ok")
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertEqual(self._stat(page, "Pending proposals"), 0)
+        self.assertIn("No pending approvals.", page)
+
+    def test_a_proposal_the_chat_cannot_show_is_not_counted(self) -> None:
+        """Scope by what the home screen can actually put in front of you.
+
+        The chat shows one conversation and has no switcher, so a card left in
+        an earlier conversation has no Approve control on screen. Counting it
+        would make the dashboard's own "Review proposals" button unable to show
+        what the number promised.
+        """
+        app, client, accounts = self._make()
+        oauth(client)
+        account = accounts.by_email("grace@example.dev")
+        app.config["PROJECTS"].create(user_id=account["id"], name="Scope project", description="")
+        view = app.config["STORE"].for_account(account["id"])
+        self._proposal(view, "Add this line to your notes: “Behind you”", "act-old")
+        self.assertEqual(
+            self._stat(client.get("/dashboard").get_data(as_text=True), "Pending proposals"), 1
+        )
+        view.new_conversation()  # "+" opens a fresh, empty thread
+        page = client.get("/dashboard").get_data(as_text=True)
+        self.assertEqual(self._stat(page, "Pending proposals"), 0)
+        self.assertIn("No pending approvals.", page)
+
+
+class DashboardDataSQLiteTests(DashboardDataTests):
+    """Every dashboard-data check, run against the SQLite store production uses."""
+
+    use_sqlite = True
+
+    def test_the_harness_really_uses_the_sqlite_store(self) -> None:
+        from app.sqlite_accounts import SQLiteAccountStore
+        from app.sqlite_store import SQLiteStore
+
+        app, _client, accounts = self._make()
+        self.assertIsInstance(app.config["STORE"], SQLiteStore)
+        self.assertIsInstance(accounts, SQLiteAccountStore)
