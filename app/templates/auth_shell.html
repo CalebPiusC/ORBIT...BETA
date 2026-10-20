@@ -231,11 +231,13 @@
 
   .auth-form { margin-top: clamp(16px, 3vh, 32px); }
 
-  /* Two grid steps: the tighter field rhythm keeps a four-field sign-up
-     reachable on a 720-tall window. */
-  .auth-field + .auth-field { margin-top: 16px; }
+  /* The frame's field rhythm — 24, the gap Sign in and Sign up measure
+     between one field's box and the next. The frame wins over the tighter
+     16 tried during the layout pass: height is handled by the column
+     scrolling (see the desktop block below), not by squeezing the form. */
+  .auth-field + .auth-field { margin-top: 24px; }
 
-  .auth-field + .auth-providers { margin-top: 16px; }
+  .auth-field + .auth-providers { margin-top: 24px; }
 
   /* public.js marks the input itself; the border lives on the wrapper */
   .o-field:has(.invalid) { border-color: var(--danger); }
