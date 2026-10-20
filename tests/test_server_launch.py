@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import importlib
 import logging
 import os
+import subprocess
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
+import app.server
 from app.server import DEFAULT_SECRET_KEY, run_app
 from app.voice import VoiceDependencyReport
 
@@ -213,6 +220,98 @@ class ServerLaunchTests(unittest.TestCase):
 
         self.assertNotEqual(fake_app.secret_key, DEFAULT_SECRET_KEY)
         self.assertTrue(fake_app.secret_key)
+
+
+class DotenvStartupTests(unittest.TestCase):
+    """The project-root .env must be loaded before the app reads the environment.
+
+    ``python -m app.server`` used to refuse to start when
+    ORBIT_SECRET_KEY lived only in .env: create_app() read the
+    variable before anything had loaded the file, so the app baked
+    in the committed default secret and run_app() rightly refused.
+    """
+
+    SECRET = "dotenv-only-secret-" + "s" * 45
+
+    def setUp(self) -> None:
+        self._original_secret = os.environ.get("ORBIT_SECRET_KEY")
+        os.environ.pop("ORBIT_SECRET_KEY", None)
+        self.addCleanup(self._restore_secret)
+        # Leave app.server bound to the real project .env, whatever
+        # the test reloaded it against.
+        self.addCleanup(importlib.reload, app.server)
+
+    def _restore_secret(self) -> None:
+        if self._original_secret is None:
+            os.environ.pop("ORBIT_SECRET_KEY", None)
+        else:
+            os.environ["ORBIT_SECRET_KEY"] = self._original_secret
+
+    def _start_against(self, env_file: Path) -> Any:
+        """Re-import app.server so its startup .env load reads ``env_file``."""
+        with patch("config.ENV_FILE", env_file):
+            importlib.reload(app.server)
+            return app.server.create_app()
+
+    def test_app_starts_with_the_secret_key_only_in_dotenv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text(f"ORBIT_SECRET_KEY={self.SECRET}\n")
+
+            web_app = self._start_against(env_file)
+
+        self.assertEqual(web_app.secret_key, self.SECRET)
+        app.server._require_real_secret_key(web_app)  # must not raise
+
+    def test_app_still_refuses_when_the_key_is_missing_everywhere(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "no-such-dotenv"
+
+            web_app = self._start_against(missing)
+
+        self.assertEqual(web_app.secret_key, DEFAULT_SECRET_KEY)
+        with self.assertRaisesRegex(RuntimeError, "ORBIT_SECRET_KEY is not set"):
+            app.server._require_real_secret_key(web_app)
+
+    def test_launch_from_another_directory_loads_the_project_dotenv(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        with (
+            tempfile.TemporaryDirectory() as launch_dir,
+            tempfile.TemporaryDirectory() as env_dir,
+        ):
+            env_file = Path(env_dir) / ".env"
+            env_file.write_text(f"ORBIT_SECRET_KEY={self.SECRET}\n")
+            launcher = (
+                "import sys\n"
+                "from pathlib import Path\n"
+                "import config\n"
+                "config.ENV_FILE = Path(sys.argv[1])\n"
+                "import app.server as server\n"
+                "app = server.create_app()\n"
+                "server._require_real_secret_key(app)\n"
+                "assert app.secret_key == sys.argv[2]\n"
+                "print('LAUNCHED')\n"
+            )
+            environment = {
+                key: value
+                for key, value in os.environ.items()
+                if key != "ORBIT_SECRET_KEY"
+            }
+            environment["PYTHONPATH"] = os.pathsep.join(
+                [str(repo_root), environment.get("PYTHONPATH", "")]
+            )
+
+            result = subprocess.run(
+                [sys.executable, "-c", launcher, str(env_file), self.SECRET],
+                cwd=launch_dir,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("LAUNCHED", result.stdout)
 
 
 if __name__ == "__main__":

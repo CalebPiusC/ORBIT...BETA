@@ -105,6 +105,20 @@ from memory.facts import FactStore
 from memory.time_context import with_current_time
 from tools.registry import DEFAULT_AUDIT_LOG_PATH, AuditLog
 
+from config import ENV_FILE
+from dotenv import load_dotenv
+
+# Load the project root's .env before anything reads the environment.
+# create_app() picks up ORBIT_SECRET_KEY (and run_app() refuses to
+# start without it), so a key that lives only in .env must already be
+# in os.environ by the time create_app() runs -- loading it from inside
+# a dependency, as VoiceService does, is too late for the settings
+# create_app() itself reads. ENV_FILE is absolute (the folder that
+# contains app/), so the directory the command was run from does not
+# matter. override=False keeps an explicitly exported variable
+# authoritative over the file.
+load_dotenv(dotenv_path=ENV_FILE, override=False)
+
 log = logging.getLogger("orbit.server")
 
 # The session-signing secret's fallback. It is committed, so it is public: any
