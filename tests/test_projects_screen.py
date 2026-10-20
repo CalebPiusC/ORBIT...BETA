@@ -238,7 +238,9 @@ class ProjectsScreenTests(unittest.TestCase):
         # A project without a description gets no invented line.
         self.assertNotIn("No description yet.", page)
         self.assertIn("0 of 1 tasks complete", page)
-        self.assertIn("Open Project Map", page)
+        # The frame's label and its arrow, into the real workspace route.
+        self.assertIn('Open project <span class="pj-card__arrow" aria-hidden="true">↗</span>', page)
+        self.assertNotIn("Open Project Map", page)
         self.assertIn(f'href="/projects/{with_description.id}"', page)
         # Proposals have no project link in this build, so no pill is drawn.
         self.assertNotIn("proposal", page.lower())

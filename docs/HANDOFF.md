@@ -782,7 +782,7 @@ and the logo — nothing else.
 
 **Projects (`projects.html`, `GET /projects`).** Two-column card grid (single column
 on the phone), status chip, name, owner-written description **only when one exists**,
-`x of y tasks complete · n%`, `Updated <human_age>`, and an "Open Project Map" button
+`x of y tasks complete · n%`, `Updated <human_age>`, and the frame's "Open project ↗" button
 to the existing workspace route. Search (`?q=`, name/description) and the status
 filter (the real Live / Build in Progress / Archived / Saved Ideas, as a select and
 as count-bearing chips) run on the signed-in account's own projects only.

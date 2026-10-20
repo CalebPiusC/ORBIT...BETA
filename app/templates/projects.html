@@ -206,6 +206,8 @@
 
   .pj-card__cta { height: 48px; }
 
+  .pj-card__arrow { font-size: 15px; line-height: 1; }
+
   /* ---------------- the import invitation ---------------- */
   .pj-import {
     display: flex;
@@ -493,7 +495,7 @@
       <p class="pj-card__meta">Updated {{ p.age }}</p>
       {% endif %}
       <div class="pj-card__foot">
-        <a class="o-btn o-btn--secondary pj-card__cta" href="/projects/{{ p.id }}">Open Project Map</a>
+        <a class="o-btn o-btn--secondary pj-card__cta" href="/projects/{{ p.id }}">Open project <span class="pj-card__arrow" aria-hidden="true">↗</span></a>
       </div>
     </article>
     {% endfor %}
