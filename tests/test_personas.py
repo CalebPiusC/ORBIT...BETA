@@ -17,6 +17,7 @@ from typing import Any
 
 import httpx
 from google.genai.errors import APIError
+from pytest import MonkeyPatch
 
 from providers.base import ChatMessage
 from providers.gemini import GeminiProvider
@@ -60,6 +61,26 @@ def provider_for(script: dict[str, Any]) -> GeminiProvider:
 
 def run(provider: GeminiProvider, **kwargs: Any) -> list[tuple[str, str]]:
     return [(c.kind, c.text) for c in provider.reply_stream(HISTORY, "sys", **kwargs)]
+
+
+def without_openrouter(monkeypatch: MonkeyPatch) -> None:
+    """Keep the "no OpenRouter" tests independent of the developer's .env.
+
+    GeminiProvider reads the OpenRouter settings when it is built, and
+    config.load_openrouter_settings() loads .env with override=False, so
+    deleting the variables is not enough -- load_dotenv would restore them
+    from .env. Setting them to empty strings keeps them present in the
+    environment (so .env cannot override them) while meaning "not
+    configured", which is what these tests exercise.
+    """
+    for name in (
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_MODEL_1",
+        "OPENROUTER_MODEL_2",
+        "OPENROUTER_MODEL_3",
+        "OPENROUTER_FALLBACK_MODEL",
+    ):
+        monkeypatch.setenv(name, "")
 
 
 class SlotNameTests(unittest.TestCase):
@@ -153,8 +174,10 @@ class QuickDeepSelectionTests(unittest.TestCase):
         self.assertEqual(provider.last_model_used, PRIMARY)
 
     def test_deep_without_openrouter_uses_gemini_as_europa_final_fallback(self) -> None:
-        provider = provider_for({PRIMARY: ["deep answer"]})
-        out = run(provider, thinking_level="deep", report_attempts=True)
+        with MonkeyPatch.context() as monkeypatch:
+            without_openrouter(monkeypatch)
+            provider = provider_for({PRIMARY: ["deep answer"]})
+            out = run(provider, thinking_level="deep", report_attempts=True)
         models = provider._client.models
         self.assertEqual(models.calls, [PRIMARY])
         self.assertEqual(models.configs[0].max_output_tokens, 4096)
@@ -162,13 +185,15 @@ class QuickDeepSelectionTests(unittest.TestCase):
         self.assertEqual(provider.last_model_used, PRIMARY)
 
     def test_deep_without_openrouter_still_uses_primary_with_deep_budget(self) -> None:
-        provider = GeminiProvider(
-            client=SimpleNamespace(models=StreamScript({PRIMARY: ["deep"]})),
-            model=PRIMARY,
-            fallback_model="",
-            audit_log=None,
-        )
-        out = run(provider, thinking_level="deep", report_attempts=True)
+        with MonkeyPatch.context() as monkeypatch:
+            without_openrouter(monkeypatch)
+            provider = GeminiProvider(
+                client=SimpleNamespace(models=StreamScript({PRIMARY: ["deep"]})),
+                model=PRIMARY,
+                fallback_model="",
+                audit_log=None,
+            )
+            out = run(provider, thinking_level="deep", report_attempts=True)
         models = provider._client.models
         self.assertEqual(models.calls, [PRIMARY])
         self.assertEqual(models.configs[0].max_output_tokens, 4096)
