@@ -70,6 +70,7 @@ from app.analytics import RATING_LABELS, build_analytics
 from app.followups import followups_for
 from app.projectmap import latest_task, map_stages, next_up, progress, row_state
 from app.projects import (
+    IMPORT_SOURCES,
     SOURCE_LABELS,
     STATUS_LABELS,
     STATUSES,
@@ -848,6 +849,22 @@ def create_app(
             active_status_label=STATUS_LABELS.get(status, "") if status else "",
             notice=notice,
             view=view,
+            projects_active=True,
+            agents_active=False,
+            **_sidebar_context(),
+        )
+
+    @app.get("/projects/import")
+    def import_project_page() -> str:
+        """The Import project screen.
+
+        A page, not an importer: every source is drawn and disabled, and the
+        only working choice is "start new", which is the existing /create
+        flow. Nothing here reads, writes or connects anything.
+        """
+        return render_template(
+            "import_project.html",
+            sources=[(key, SOURCE_LABELS[key]) for key in IMPORT_SOURCES],
             projects_active=True,
             agents_active=False,
             **_sidebar_context(),
