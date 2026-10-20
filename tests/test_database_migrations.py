@@ -1,10 +1,15 @@
 import sqlite3
+import sys
 
 import pytest
 
 from app.database import Database
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX file mode bits (st_mode & 0o077) do not apply on Windows",
+)
 def test_migrations_apply_cleanly_to_empty_database(tmp_path):
     path = tmp_path / "fresh.sqlite3"
     db = Database(path)

@@ -1,4 +1,5 @@
 import sqlite3
+import sys
 from datetime import date
 
 import pytest
@@ -143,6 +144,10 @@ def test_removing_account_a_does_not_mutate_account_b_record(tmp_path):
     assert accounts.check_password(b["id"], "password2")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX file mode bits (st_mode & 0o077) do not apply on Windows",
+)
 def test_insert_with_unknown_account_is_rejected_and_storage_permissions_are_private(tmp_path):
     db_path = tmp_path / "missing" / "nested" / "store.sqlite3"
     db = Database(db_path)
