@@ -366,9 +366,13 @@
   .onb-skip button:hover { color: var(--text-1); }
 
   /* ---------------- aside ----------------
-     The column next to the form; sticky so the ring and the note stay in
-     view while the card scrolls, and bounded by vh so it never outgrows
-     the window. It is a grid cell, so it cannot overlap the form. */
+     The column next to the form. On a normal desktop window it needs no
+     pinning at all: the page is bounded to the window (see the bounded
+     block below) and the aside sits in its own grid cell, so it cannot
+     move, cannot overlap the form, and keeps the ring and the note beside
+     the card while the card's fields scroll. Sticky only survives as the
+     fallback for very short windows, where the page scrolls again; and at
+     1000px and narrower, where the columns no longer fit, it un-sticks. */
   .onb-aside {
     position: sticky;
     top: clamp(16px, 4vh, 32px);
@@ -443,6 +447,68 @@
     color: var(--text-3);
   }
 
+  /* ---------------- bounded page ----------------
+     The auth screens' scroll model, applied here: the window is the page,
+     "Save & exit" and the steps/title stay put, and the card's fields
+     scroll inside the card while the ring and the note hold their column.
+     Nothing can overlap: each piece owns a band or a cell, and the only
+     scrollbar is the card's own.
+
+     Gated on height as well as width — this screen carries a stepper and
+     a 48px title above the card, and under 640px those bands would leave
+     the card an unusable sliver. Below that the page scrolls normally,
+     with the aside back on its sticky fallback. */
+  @media (min-width: 1001px) and (min-height: 640px) {
+    html, body { height: 100%; }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .onb-header { flex: 0 0 auto; }
+
+    .onb-main {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+    }
+
+    .onb-wrap {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+
+    .onb-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      align-items: stretch;
+    }
+
+    /* The card is the scroller: its own frame and padding stay put, the
+       fields move inside it. No scrollbar gutter is reserved — at the
+       frame's height the card does not scroll, and reserving one would
+       narrow the fields by the scrollbar width against the frame. */
+    .onb-card {
+      height: 100%;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+
+    .onb-aside {
+      position: static;
+      top: auto;
+      max-height: 100%;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+  }
+
   /* ---------------- responsive ---------------- */
   @media (max-width: 1240px) {
     .onb-body { grid-template-columns: minmax(0, 1fr) 300px; gap: 40px; }
@@ -450,7 +516,8 @@
     .onb-title { font-size: 42px; }
   }
 
-  @media (max-width: 980px) {
+  /* One column: the ring column no longer fits beside the form. */
+  @media (max-width: 1000px) {
     .onb-body { grid-template-columns: minmax(0, 1fr); gap: 40px; }
     .onb-title { font-size: 38px; }
     .onb-aside { position: static; top: auto; }
@@ -670,6 +737,14 @@
     var labels = Array.prototype.slice.call(document.querySelectorAll("[data-step-label]"));
     var current = 0;
 
+    /* A new step opens at its own top. On a bounded window the card is the
+       scroll container, so resetting the window alone would leave step 02
+       opening halfway down. */
+    function toTop() {
+      form.scrollTop = 0;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
     function paint() {
       steps.forEach(function (step, i) {
         step.classList.toggle("is-active", i === current);
@@ -743,7 +818,7 @@
         paint();
         var heading = steps[current].querySelector("h2");
         if (heading) heading.focus({ preventScroll: true });
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        toTop();
       });
     }
 
@@ -778,7 +853,7 @@
         event.preventDefault();
         current = Math.max(0, parseInt(back.getAttribute("data-back"), 10) || 0);
         paint();
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        toTop();
       }
     });
 
