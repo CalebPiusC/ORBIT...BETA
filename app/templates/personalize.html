@@ -95,8 +95,14 @@
     padding: 0 clamp(24px, 3.5vw, 48px) clamp(24px, 5vh, 64px);
   }
 
+  /* The frame puts every block on one left edge: at 1440 the stepper, the
+     title, the sub and the card all start at x=192, and the card's 744 plus
+     the 30 gap leave the ring column 282 (its copy breaks at "into", which
+     a wider column would not do). 744 + 30 + 282 = 1056, centred in 1440
+     leaves exactly 192 either side — so the column is 1056 wide, not 1248,
+     and the old 144px indent on the intro was measuring the gutter twice. */
   .onb-wrap {
-    max-width: 1248px;
+    max-width: 1056px;
     margin: 0 auto;
   }
 
@@ -106,7 +112,6 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 16px;
-    padding-left: 144px;
     font-size: 13px;
     line-height: 1.4;
     color: var(--text-3);
@@ -133,7 +138,6 @@
   /* ---------------- heading ---------------- */
   .onb-title {
     margin-top: clamp(24px, 4.5vh, 48px);
-    padding-left: 144px;
     font-family: var(--font-display);
     font-size: clamp(30px, 3.4vw, 48px);
     font-weight: 500;
@@ -144,7 +148,6 @@
 
   .onb-sub {
     margin-top: clamp(16px, 3vh, 32px);
-    padding-left: 144px;
     font-size: 16px;
     line-height: 1.5;
     color: var(--text-2);
@@ -512,7 +515,6 @@
   /* ---------------- responsive ---------------- */
   @media (max-width: 1240px) {
     .onb-body { grid-template-columns: minmax(0, 1fr) 300px; gap: 40px; }
-    .onb-steps, .onb-title, .onb-sub { padding-left: 0; }
     .onb-title { font-size: 42px; }
   }
 
