@@ -178,14 +178,16 @@ class ProjectRouteTests(unittest.TestCase):
             return []
         return [json.loads(line) for line in self.audit_path.read_text().splitlines() if line.strip()]
 
-    def test_projects_page_renders_the_first_run_hero(self) -> None:
+    def test_a_new_account_gets_the_empty_state_and_both_real_paths(self) -> None:
         html = self.client.get("/projects").get_data(as_text=True)
-        # The design's two real paths out of the empty state.
-        self.assertIn("What would you like to make?", html)
-        self.assertIn("Start with an idea", html)
-        self.assertIn("Bring your own project", html)
-        self.assertIn('href="/create"', html)
-        self.assertNotIn("Good ideas, moving forward", html)  # that's the list view
+        # The frame's heading, then the empty state that guides the first project.
+        self.assertIn("Room for your ideas.", html)
+        self.assertIn("No projects yet.", html)
+        for path in ('href="/create"', 'href="/projects/import"'):
+            self.assertIn(path, html)
+        # The toolbar would filter nothing, so it is not drawn.
+        self.assertNotIn('class="pj-grid"', html)
+        self.assertNotIn("All <span", html)
 
     def test_create_then_list(self) -> None:
         resp = self.client.post(
@@ -263,8 +265,8 @@ class ProjectRouteTests(unittest.TestCase):
         legitimately shows every project, filtered view or not — a plain
         haystack search would find filtered-out names there.
         """
-        start = html.index('class="projects-grid"')
-        end = html.index("grid-caption", start)
+        start = html.index('class="pj-grid"')
+        end = html.index("pj-import", start)
         return html[start:end]
 
     def test_search_and_status_filter(self) -> None:
@@ -276,7 +278,8 @@ class ProjectRouteTests(unittest.TestCase):
         self.assertNotIn("Order bot", grid)
         # chips carry real counts, including the zeroes
         html = self.client.get("/projects").get_data(as_text=True)
-        self.assertIn("Archived <span", html)
+        self.assertIn('Archived <span class="pj-chip__count">· 1</span>', html)
+        self.assertIn('Saved Ideas <span class="pj-chip__count">· 0</span>', html)
         grid = self._grid_only(html)
         self.assertIn("Order bot", grid)
         self.assertIn("Old site", grid)
@@ -287,14 +290,22 @@ class ProjectRouteTests(unittest.TestCase):
         grid = self._grid_only(self.client.get("/projects?status=bogus").get_data(as_text=True))
         self.assertIn("Order bot", grid)
 
-    def test_sort_links_really_sort(self) -> None:
-        self.project_store.create(user_id="caleb", name="Zebra")
+    def test_the_order_is_most_recently_updated_first(self) -> None:
+        older = self.project_store.create(user_id="caleb", name="Zebra")
         self.project_store.create(user_id="caleb", name="Alpha")
+
+        def age_the_zebra(data: dict) -> None:
+            for raw in data["projects"]:
+                if raw["id"] == older.id:
+                    raw["updated_at"] = "2020-01-01T00:00:00+00:00"
+
+        self.project_store._update(age_the_zebra)
+        grid = self._grid_only(self.client.get("/projects").get_data(as_text=True))
+        self.assertLess(grid.index("Alpha"), grid.index("Zebra"))
+        # The frame has no sort control; ?sort= is not honoured either way.
+        self.assertNotIn("sort=", grid)
         grid = self._grid_only(self.client.get("/projects?sort=name").get_data(as_text=True))
         self.assertLess(grid.index("Alpha"), grid.index("Zebra"))
-        grid = self._grid_only(self.client.get("/projects").get_data(as_text=True))
-        self.assertLess(grid.index("Zebra"), grid.index("Alpha"))  # recent first
-        self.assertNotIn("sort=zebra", grid)
 
     def test_selecting_and_deselecting_a_specialist(self) -> None:
         store = self.app.config["STORE"].for_account(DEFAULT_USER_ID)

@@ -772,3 +772,45 @@ the hero, disabled import rows, plan mode, the continue strip, sort, select/dese
 assignment (24); sidebar/tooltip and home assertions in `test_app.py` /
 `test_message_actions.py` updated to the v2 rail. Full suite: **462 tests, all
 green.**
+
+### 5.9 The app shell reaches the Projects screens (2026-10-20)
+
+Group 1 of the ORBIT UI___2 rebuild: **Projects** and **Import project**, both on the
+shared `app_shell.html` (rail + phone bar + drawer), both drawn at 1440 and 390 in
+both themes. Copper stays on one primary action per screen, the rail's active bar
+and the logo — nothing else.
+
+**Projects (`projects.html`, `GET /projects`).** Two-column card grid (single column
+on the phone), status chip, name, owner-written description **only when one exists**,
+`x of y tasks complete · n%`, `Updated <human_age>`, and the frame's "Open project ↗" button
+to the existing workspace route. Search (`?q=`, name/description) and the status
+filter (the real Live / Build in Progress / Archived / Saved Ideas, as a select and
+as count-bearing chips) run on the signed-in account's own projects only.
+
+* The frame's "N proposals" pill is **not** drawn: proposals carry no project link in
+  this build, so any number there would be invented.
+* The old `?sort=recent|name` links are gone — the frames have no sort control, and
+  the order is fixed to the store's real `updated_at` descending.
+* The old AI-summary/language/task-state card fields are gone too; the card now shows
+  only what the frame asks for and the store really holds.
+* States: the new-account empty state (create or import — both real), a separate
+  "Nothing matches" panel for a search/filter, and `?view=loading` / `?view=error`
+  skeletons and failure panel **derived** from the dashboard's own states.
+* The import invitation panel keeps its place below the grid; its copy now says the
+  imports are coming soon, because they are.
+
+**Import project (`import_project.html`, new `GET /projects/import`).** Header, the
+two left cards and the bearings panel follow the frame. Every source the frame draws
+(GitHub, GitLab, Bitbucket, local folder, ZIP) is a **disabled** `<button>` with a
+"Coming soon" label, exactly like the Google/GitHub rows on Sign in — no link, no
+form, no file input anywhere on the page. Only "Start a new project" works, and it
+goes to the existing `/create` flow. GitHub is stated as optional in the card and in
+the fine print. The frame's "Import & create Project Map" primary could not survive:
+nothing imports, so the one copper action is the path that does work.
+
+**Tests:** `tests/test_projects_screen.py` and `tests/test_import_screen.py`, each run
+twice — in-memory and SQLite — like `DashboardDataTests`. They pin account isolation
+(page, search and filter), search/filter correctness, empty vs no-results, disabled
+import options with no link/form, zero inline styles and zero hard-coded colours, and
+exactly one primary action. Updated in place: `tests/test_projects.py` (hero → empty
+state, grid slicing, fixed order instead of sort links).

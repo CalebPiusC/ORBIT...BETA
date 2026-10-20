@@ -949,6 +949,48 @@ class ButtonContrastTests(unittest.TestCase):
             self.assertIn(token, css)
 
 
+class LayoutPassTests(unittest.TestCase):
+    """Keep the cross-screen layout decisions from regressing silently.
+
+    The templates carry their screen-specific CSS, so these checks assert the
+    desktop scroll model and the measured frame rhythm without requiring a
+    browser in the offline suite.
+    """
+
+    ROOT = Path(__file__).resolve().parents[1]
+
+    @classmethod
+    def _template(cls, name: str) -> str:
+        return (cls.ROOT / "app" / "templates" / name).read_text(encoding="utf-8")
+
+    def test_auth_sticky_panel_and_independent_form_scroller(self) -> None:
+        css = self._template("auth_shell.html")
+        desktop = css[css.index("@media (min-width: 1001px)"):]
+        self.assertRegex(desktop, r"\.auth-marketing\s*\{[^}]*position:\s*sticky;")
+        self.assertIn(".auth-card-col", desktop)
+        self.assertIn("overflow-y: auto;", desktop)
+        self.assertIn(".auth-field + .auth-field { margin-top: 24px; }", css)
+
+    def test_onboarding_sticky_side_panel_and_independent_form_scroller(self) -> None:
+        css = self._template("personalize.html")
+        bounded = css[css.index("@media (min-width: 1001px) and (min-height: 640px)"):]
+        self.assertRegex(bounded, r"\.onb-aside\s*\{[^}]*position:\s*sticky;")
+        self.assertRegex(bounded, r"\.onb-card\s*\{[^}]*overflow-y:\s*auto;")
+        # Onboarding's frame measures 16px between its two fields; the auth
+        # frame's 24px rhythm is intentionally not carried across here.
+        self.assertIn(".onb-field + .onb-field { margin-top: 16px; }", css)
+
+    def test_short_window_gutters_and_app_shell_spacing_are_clamped(self) -> None:
+        auth = self._template("auth_shell.html")
+        onboarding = self._template("personalize.html")
+        app_shell = self._template("app_shell.html")
+        self.assertIn("--auth-gap: clamp(24px, 8vh, 104px);", auth)
+        self.assertIn("clamp(24px, 5vh, 64px)", onboarding)
+        self.assertIn("--app-pad-y: clamp(24px, 4.4vh, 40px);", app_shell)
+        self.assertIn("--app-pad-bottom: clamp(24px, 5vh, 48px);", app_shell)
+        self.assertIn("padding: var(--app-pad-y) var(--app-pad-x) var(--app-pad-bottom);", app_shell)
+
+
 if __name__ == "__main__":
     unittest.main()
 

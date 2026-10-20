@@ -369,13 +369,11 @@
   .onb-skip button:hover { color: var(--text-1); }
 
   /* ---------------- aside ----------------
-     The column next to the form. On a normal desktop window it needs no
-     pinning at all: the page is bounded to the window (see the bounded
-     block below) and the aside sits in its own grid cell, so it cannot
-     move, cannot overlap the form, and keeps the ring and the note beside
-     the card while the card's fields scroll. Sticky only survives as the
-     fallback for very short windows, where the page scrolls again; and at
-     1000px and narrower, where the columns no longer fit, it un-sticks. */
+     The column next to the form stays sticky in its own grid cell. The
+     bounded desktop page gives the card its own scroller, so the ring and
+     note remain beside it without the form sliding underneath. At 1000px
+     and narrower the columns no longer fit, so the side column un-sticks
+     and the page scrolls normally. */
   .onb-aside {
     position: sticky;
     top: clamp(16px, 4vh, 32px);
@@ -503,9 +501,12 @@
       overscroll-behavior: contain;
     }
 
+    /* Keep the side panel sticky beside the form while the card scrolls
+       independently. It lives in the grid's second cell, so it cannot
+       overlap or become the form's scroll surface. */
     .onb-aside {
-      position: static;
-      top: auto;
+      position: sticky;
+      top: clamp(16px, 4vh, 32px);
       max-height: 100%;
       overflow-y: auto;
       overscroll-behavior: contain;

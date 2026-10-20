@@ -1,121 +1,541 @@
-{% extends "layout.html" %}
+{% extends "app_shell.html" %}
+{# ===========================================================
+   Projects — every project this account has, newest first.
+
+   Drawn from design/ORBIT UI___2/:
+     Projects · Light · Desktop.png      (1440 x 1277)
+     Projects · Dark  · Desktop.png
+     Projects · Light · Mobile.png       (390)
+     Projects · Dark  · Mobile.png
+
+   Measured from the frames at 1440 (they are 2x exports):
+     content 1136 wide; title 36; header rhythm 10 / 20;
+     toolbar = search 872 + 24 + status 240, both ending on the
+     same baseline; chips 40 below; cards 556 wide, 24 apart,
+     32 between rows, radius 16, padding 24; import panel full
+     width, 32 below the grid.
+
+   What the cards show is what the store holds: name, the
+   description the owner typed (omitted, not invented, when
+   there is none), the status, the task count and completion,
+   the real updated age, and the way into the project's map.
+   The frame's "2 proposals" pill is deliberately absent —
+   proposals carry no project link yet in this build, so the
+   number would be invented.
+
+   States (derived from the dashboard's own set, dashboard.html):
+     empty       — no projects at all: guide the first one.
+     no-results  — a search or status that matches nothing.
+     ?view=loading — skeleton on the same geometry.
+     ?view=error   — the failure panel, with two real ways out.
+   =========================================================== #}
 {% block title %}orbit — Projects{% endblock %}
-{% block body_class %}v2{% endblock %}
-{% block body %}
-<div class="screen screen--active" id="screen-projects">
-{% include "_sidebar.html" %}
 
-  <main class="page-main">
-    {% include "_topbar.html" %}
-    <div class="page-wrap">
+{% block head %}
+<style>
+  /* ---------------- page ---------------- */
+  .projects-page { display: flex; flex-direction: column; }
 
-      <div class="page-topline">
-        <nav class="page-crumb" aria-label="Breadcrumb"><span class="crumb-workspace">{{ user.workspace }}</span><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Projects</span></nav>
-        <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
-      </div>
+  /* ---------------- header ---------------- */
+  .pj-head { display: flex; flex-direction: column; align-items: flex-start; }
 
-      {% if total == 0 and not query and not active_status %}
-      {# First run: the design's empty hero. Both paths go somewhere real. #}
-      <section class="empty-hero" aria-label="Start">
-        <img class="hero-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-        <h1 class="hero-title">What would you like to make?</h1>
-        <p class="hero-sub">Your projects live here — each with its own map, tasks and Main Agent.</p>
-        <div class="hero-paths">
-          <a class="hero-card" href="/create">
-            <span class="hero-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 4.5v11M6.5 10l5.5-5.5L17.5 10"/><path d="M5 19.5h14"/></svg></span>
-            <span class="hero-card-name">Start with an idea</span>
-            <span class="hero-card-text">Name it, tell the Main Agent what you want to build, and plan the first task together.</span>
-            <span class="hero-card-go">New project →</span>
-          </a>
-          <a class="hero-card" href="/create#import">
-            <span class="hero-card-icon" aria-hidden="true"><svg class="oi" viewBox="0 0 24 24"><path d="M12 15.5v-11M6.5 10 12 4.5 17.5 10"/><rect x="4.5" y="17" width="15" height="3" rx="1.5"/></svg></span>
-            <span class="hero-card-name">Bring your own project</span>
-            <span class="hero-card-text">Import from GitHub, GitLab or Bitbucket. No repository provider is connected yet — the import section says so honestly.</span>
-            <span class="hero-card-go">See import →</span>
-          </a>
-        </div>
-      </section>
-      {% else %}
+  .pj-title {
+    font-family: var(--font-display);
+    font-size: clamp(30px, 2.5vw, 36px);
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+  }
 
-      <header class="page-head-block">
-        <p class="page-eyebrow">Your personal workspace</p>
-        <h1 class="page-title">Good ideas, moving forward.</h1>
-        <p class="page-sub">
-          {{ total }} project{{ 's' if total != 1 }}{% if building %} — {{ building }} in progress{% endif %}.
-          Pick up where you left off.
-        </p>
-      </header>
+  .pj-sub {
+    margin-top: 10px;
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
 
-      {% if notice %}
-      <div class="notice-bar" role="status">
-        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v5M12 16h.01"/></svg>
-        <span>{{ notice }}</span>
-      </div>
-      {% endif %}
+  .pj-new { margin-top: 20px; }
 
-      <div class="projects-toolbar">
-        <form class="search-field" method="get" action="/projects" role="search">
-          <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
-          <input type="search" name="q" value="{{ query }}" placeholder="Search projects" aria-label="Search projects" autocomplete="off" />
-          {% if active_status %}<input type="hidden" name="status" value="{{ active_status }}" />{% endif %}
-        </form>
-        <nav class="sort-links" aria-label="Sort">
-          {% for key, label, link in sort_links %}
-          <a class="sort-link{% if active_sort == key %} active{% endif %}" href="{{ link }}">{{ label }}</a>
-          {% endfor %}
-        </nav>
-        <a class="btn-primary" href="/create" id="newProject"><svg class="oi" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></svg> New project</a>
-      </div>
+  /* ---------------- search and status ---------------- */
+  .pj-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(180px, 17vw, 240px);
+    gap: 24px;
+    align-items: end;
+    margin-top: clamp(24px, 3.6vh, 32px);
+  }
 
-      <nav class="filter-chips" aria-label="Filter by status">
-        <a class="filter-chip{% if not active_status %} active{% endif %}" href="/projects{% if query %}?q={{ query }}{% endif %}">All <span class="count">{{ total }}</span></a>
-        {% for key, label in statuses %}
-        <a class="filter-chip{% if active_status == key %} active{% endif %}" href="/projects?status={{ key }}{% if query %}&q={{ query }}{% endif %}">{{ label }} <span class="count">{{ counts[key] }}</span></a>
-        {% endfor %}
-      </nav>
+  /* the frame's field carries its own label, like every other input */
+  .pj-search { padding: 12px 16px 14px; }
 
-      {% if projects %}
-      <section class="projects-grid" aria-label="Projects">
-        {% for p in projects %}
-        <article class="project-card">
-          <header class="pc-head">
-            <span class="pc-icon" aria-hidden="true">{% for part in p.name.split()[:2] %}{{ part[:1] }}{% endfor %}</span>
-            <span class="status-badge st-{{ p.status }}"><span class="dot"></span>{{ p.status_label }}</span>
-          </header>
-          <h2 class="pc-name"><a href="/projects/{{ p.id }}">{{ p.name }}</a></h2>
-          {% if p.summary %}
-          <p class="pc-desc">{{ p.summary }} <span class="pc-desc-origin">· AI summary</span></p>
-          {% elif p.description %}
-          <p class="pc-desc">{{ p.description }}</p>
-          {% else %}
-          <p class="pc-desc empty">No description yet.</p>
-          {% endif %}
-          <p class="pc-tech{% if not p.languages %} pc-tech-none{% endif %}">
-            {% if p.languages %}{{ p.languages|join(' · ') }}{% else %}No technology chosen yet{% endif %}
-          </p>
-          <footer class="pc-foot">
-            {% if p.tasks_total %}
-            <p class="pc-taskline">{{ p.task_title }} <span class="pc-taskstate">· {{ p.task_state }}</span></p>
-            <p class="pc-progressline">{{ p.tasks_done }} of {{ p.tasks_total }} tasks complete{% if p.age %} · {{ p.age }}{% endif %}</p>
-            {% else %}
-            <p class="pc-taskline pc-taskline-none">No tasks yet — the map starts when the first one is added.</p>
-            {% endif %}
-            <a class="pc-open" href="/projects/{{ p.id }}" aria-label="Open {{ p.name }}">↗</a>
-          </footer>
-        </article>
-        {% endfor %}
-      </section>
-      <p class="grid-caption">AI descriptions come from a real conversation with the project's Main Agent. Cards without one show what you wrote when the project started.</p>
-      {% else %}
-      <section class="empty-state" aria-label="No matching projects">
-        <img class="empty-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-        <h2>Nothing matches</h2>
-        <p>{% if query %}No project matches “{{ query }}”{% if active_status %} in {{ active_status }}{% endif %}.{% else %}No projects have this status yet.{% endif %}</p>
-        <a class="btn-ghost" href="/projects">Clear the filters</a>
-      </section>
-      {% endif %}
-      {% endif %}
+  .pj-search .o-field__input { font-size: 15px; }
+
+  .pj-filter { display: flex; flex-direction: column; gap: 10px; }
+
+  .pj-filter__label {
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text-2);
+  }
+
+  .pj-select { position: relative; display: block; }
+
+  .pj-select select {
+    display: block;
+    width: 100%;
+    height: 48px;
+    padding: 0 44px 0 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    color: var(--text-1);
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+  }
+
+  .pj-select select:hover { background: var(--surface-2); }
+
+  .pj-select__chev {
+    position: absolute;
+    top: 50%;
+    right: 16px;
+    width: 16px;
+    height: 16px;
+    margin-top: -8px;
+    color: var(--text-2);
+    pointer-events: none;
+  }
+
+  /* ---------------- status chips ---------------- */
+  .pj-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 24px;
+    margin-top: clamp(28px, 4vh, 40px);
+  }
+
+  .pj-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 4px 0;
+    font-size: 14px;
+    line-height: 1.4;
+    color: var(--text-2);
+    text-decoration: none;
+  }
+
+  .pj-chip:hover { color: var(--text-1); }
+
+  .pj-chip.is-active { font-weight: 600; color: var(--text-1); }
+
+  .pj-chip__count { font-weight: 400; color: var(--text-3); }
+
+  /* ---------------- the grid ---------------- */
+  .pj-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: clamp(20px, 3.4vh, 32px) 24px;
+    margin-top: clamp(28px, 4vh, 40px);
+  }
+
+  .pj-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 0;
+    min-height: clamp(220px, 30vh, 296px);
+    padding: clamp(20px, 2.9vh, 24px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .pj-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    padding: 3px 12px;
+    border-radius: var(--r-pill);
+    background: var(--chip-bg);
+    color: var(--text-1);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .pj-card__name {
+    margin-top: 18px;
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .pj-card__name a { color: var(--text-1); text-decoration: none; }
+
+  .pj-card__name a:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+  .pj-card__desc {
+    margin-top: 10px;
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
+  .pj-card__meta {
+    margin-top: 18px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-3);
+  }
+
+  .pj-card__meta + .pj-card__meta { margin-top: 0; }
+
+  /* the footer sits on the card's bottom edge, so buttons line up across a row */
+  .pj-card__foot { margin-top: auto; padding-top: 20px; }
+
+  .pj-card__cta { height: 48px; }
+
+  .pj-card__arrow { font-size: 15px; line-height: 1; }
+
+  /* ---------------- the import invitation ---------------- */
+  .pj-import {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    margin-top: clamp(24px, 3.6vh, 32px);
+    padding: clamp(20px, 3vh, 28px) clamp(20px, 2.4vw, 24px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .pj-import__title {
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .pj-import__text {
+    margin-top: 12px;
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
+  .pj-import__cta { margin-top: 20px; }
+
+  /* ---------------- empty and no-results ---------------- */
+  .pj-state {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    margin-top: clamp(24px, 4vh, 40px);
+    padding: clamp(24px, 4vh, 36px) clamp(20px, 3vw, 32px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .pj-state__title {
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .pj-state__text {
+    margin-top: 10px;
+    max-width: 62ch;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  .pj-state__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 24px;
+  }
+
+  /* ---------------- notice ---------------- */
+  .pj-notice {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: clamp(20px, 3vh, 28px);
+    padding: 12px 16px;
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: 14px;
+  }
+
+  /* ---------------- loading, derived from dashboard.html ---------------- */
+  .pj-skel {
+    border-radius: var(--r-card);
+    background: var(--surface-2);
+    animation: pj-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes pj-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  .pj-skel--eyebrow { width: 110px; height: 12px; }
+  .pj-skel--title { width: min(420px, 100%); height: 40px; margin-top: 16px; }
+  .pj-skel--line { width: min(320px, 100%); height: 16px; margin-top: 14px; }
+  .pj-skel--button { width: 116px; height: 48px; margin-top: 20px; }
+  .pj-skel--tools { height: 69px; }
+  .pj-skel--card { min-height: clamp(220px, 30vh, 296px); }
+  .pj-skel--panel { min-height: clamp(140px, 21vh, 196px); }
+
+  /* ---------------- error, derived from dashboard.html ---------------- */
+  .pj-error {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: clamp(24px, 4vh, 36px) clamp(20px, 3vw, 32px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .pj-error__title {
+    margin-top: 24px;
+    font-family: var(--font-display);
+    font-size: 28px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .pj-error__text {
+    margin-top: 10px;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  .pj-error__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 24px;
+  }
+
+  /* ---------------- dark edges ---------------- */
+  [data-theme="dark"] .pj-card,
+  [data-theme="dark"] .pj-import,
+  [data-theme="dark"] .pj-state,
+  [data-theme="dark"] .pj-error { border-color: var(--border); box-shadow: none; }
+
+  /* ---------------- phone ---------------- */
+  @media (max-width: 900px) {
+    .pj-title { font-size: clamp(26px, 7.4vw, 30px); }
+    .pj-sub { font-size: 14px; }
+
+    /* 16px keeps iOS from zooming the field when it takes focus. */
+    .pj-search .o-field__input,
+    .pj-select select { font-size: 16px; }
+
+    .pj-tools {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 20px;
+      margin-top: 24px;
+    }
+
+    .pj-chips { gap: 6px 20px; margin-top: 24px; }
+
+    .pj-grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 24px;
+    }
+
+    .pj-card { min-height: 0; }
+
+    .pj-import__title { font-size: 22px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="projects-page">
+
+  {% if view == 'loading' %}
+  {# Derived from the dashboard's loading state: same geometry, so the real
+     page does not jump when it arrives. #}
+  <div role="status" aria-live="polite">
+    <span class="o-visually-hidden">Loading your projects…</span>
+    <div class="pj-skel pj-skel--eyebrow" aria-hidden="true"></div>
+    <div class="pj-skel pj-skel--title" aria-hidden="true"></div>
+    <div class="pj-skel pj-skel--line" aria-hidden="true"></div>
+    <div class="pj-skel pj-skel--button" aria-hidden="true"></div>
+  </div>
+  <div class="pj-tools" aria-hidden="true">
+    <div class="pj-skel pj-skel--tools"></div>
+    <div class="pj-skel pj-skel--tools"></div>
+  </div>
+  <div class="pj-grid" aria-hidden="true">
+    <div class="pj-skel pj-skel--card"></div>
+    <div class="pj-skel pj-skel--card"></div>
+    <div class="pj-skel pj-skel--card"></div>
+    <div class="pj-skel pj-skel--card"></div>
+  </div>
+  <div class="pj-skel pj-skel--panel" aria-hidden="true"></div>
+
+  {% elif view == 'error' %}
+  {# Derived from the dashboard's failure state: say what is safe, offer two
+     real ways forward. #}
+  <section class="pj-error" role="alert">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="pj-error__title">We couldn't load your projects.</h1>
+    <p class="pj-error__text">Nothing has changed and no files were touched. Reload this page, or open your workspace overview and come back.</p>
+    <div class="pj-error__actions">
+      <a class="o-btn o-btn--primary" href="/projects">Try again</a>
+      <a class="o-btn o-btn--secondary" href="/dashboard">Open Overview</a>
     </div>
-  </main>
+  </section>
+
+  {% else %}
+
+  <header class="pj-head">
+    <h1 class="pj-title">Room for your ideas.</h1>
+    <p class="pj-sub">Find your next step, or make a new starting point.</p>
+    <a class="o-btn o-btn--primary pj-new" href="/create">New project</a>
+  </header>
+
+  {% if notice %}
+  <div class="pj-notice" role="status">
+    <svg class="o-icon o-icon--sm" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M12 8v5M12 16h.01" /></svg>
+    <span>{{ notice }}</span>
+  </div>
+  {% endif %}
+
+  {% if total == 0 and not query and not active_status %}
+  {# A brand-new account. Both paths lead somewhere real; the copper stays on
+     the header's New project button, so these two are secondary. #}
+  <section class="pj-state" aria-labelledby="pjEmptyTitle">
+    <h2 class="pj-state__title" id="pjEmptyTitle">No projects yet.</h2>
+    <p class="pj-state__text">Start one with a name and, if you like, a sentence about it — its Project Map and Main Agent are ready as soon as it exists. Already have something? The import screen says exactly what is and isn't connected yet.</p>
+    <div class="pj-state__actions">
+      <a class="o-btn o-btn--secondary" href="/create">New project</a>
+      <a class="o-btn o-btn--secondary" href="/projects/import">Import a project</a>
+    </div>
+  </section>
+
+  {% else %}
+
+  <form class="pj-tools" method="get" action="/projects" role="search">
+    <label class="o-field pj-search">
+      <span class="o-field__label">Find a project</span>
+      <input class="o-field__input" type="search" name="q" value="{{ query }}" placeholder="Search by name or description" aria-label="Search projects by name or description" autocomplete="off" />
+    </label>
+    <div class="pj-filter">
+      <label class="pj-filter__label" for="projectStatus">Status</label>
+      <span class="pj-select">
+        <select id="projectStatus" name="status" data-status-filter>
+          <option value="">All statuses</option>
+          {% for key, label in statuses %}
+          <option value="{{ key }}"{% if active_status == key %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <svg class="pj-select__chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+      </span>
+    </div>
+    <button type="submit" class="o-visually-hidden">Search</button>
+  </form>
+
+  <nav class="pj-chips" aria-label="Filter by status">
+    <a class="pj-chip{% if not active_status %} is-active{% endif %}" href="{{ url_for('projects_page', q=query or None) }}"{% if not active_status %} aria-current="true"{% endif %}>All <span class="pj-chip__count">· {{ total }}</span></a>
+    {% for key, label in statuses %}
+    <a class="pj-chip{% if active_status == key %} is-active{% endif %}" href="{{ url_for('projects_page', status=key, q=query or None) }}"{% if active_status == key %} aria-current="true"{% endif %}>{{ label }} <span class="pj-chip__count">· {{ counts[key] }}</span></a>
+    {% endfor %}
+  </nav>
+
+  {% if projects %}
+  <section class="pj-grid" aria-label="Projects">
+    {% for p in projects %}
+    <article class="pj-card">
+      <span class="pj-status">{{ p.status_label }}</span>
+      <h2 class="pj-card__name"><a href="/projects/{{ p.id }}">{{ p.name }}</a></h2>
+      {% if p.description %}
+      <p class="pj-card__desc">{{ p.description }}</p>
+      {% endif %}
+      {% if p.tasks_total %}
+      <p class="pj-card__meta">{{ p.tasks_done }} of {{ p.tasks_total }} tasks complete · {{ (p.tasks_done * 100 / p.tasks_total) | round | int }}%</p>
+      {% else %}
+      <p class="pj-card__meta">No tasks yet — the map starts when the first one is added.</p>
+      {% endif %}
+      {% if p.age %}
+      <p class="pj-card__meta">Updated {{ p.age }}</p>
+      {% endif %}
+      <div class="pj-card__foot">
+        <a class="o-btn o-btn--secondary pj-card__cta" href="/projects/{{ p.id }}">Open project <span class="pj-card__arrow" aria-hidden="true">↗</span></a>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+  {% else %}
+  {# A search or status that matches nothing: distinct from a new account. #}
+  <section class="pj-state" aria-labelledby="pjNoResults">
+    <h2 class="pj-state__title" id="pjNoResults">Nothing matches</h2>
+    <p class="pj-state__text">{% if query %}No project matches “{{ query }}”{% if active_status_label %} in {{ active_status_label }}{% endif %}.{% elif active_status_label %}No project is marked {{ active_status_label }} yet.{% else %}No project matches this view.{% endif %}</p>
+    <div class="pj-state__actions">
+      <a class="o-btn o-btn--secondary" href="/projects">Clear the filters</a>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="pj-import" aria-labelledby="pjImportTitle">
+    <h2 class="pj-import__title" id="pjImportTitle">Already have something started?</h2>
+    <p class="pj-import__text">Bring a folder, ZIP, or GitHub repository into orbit — those imports are coming soon. GitHub is always optional.</p>
+    <a class="o-btn o-btn--secondary pj-import__cta" href="/projects/import">Import a project</a>
+  </section>
+
+  {% endif %}
+  {% endif %}
 </div>
+
+<script>
+  // The frame's status control is a select; submitting on change keeps the
+  // search text and needs no extra button. Without JavaScript the same form
+  // still submits with Enter from the search field, and the chips below are
+  // plain links either way.
+  (function () {
+    var select = document.querySelector("[data-status-filter]");
+    if (!select || !select.form) return;
+    select.addEventListener("change", function () {
+      if (typeof select.form.requestSubmit === "function") {
+        select.form.requestSubmit();
+      } else {
+        select.form.submit();
+      }
+    });
+  })();
+</script>
 {% endblock %}

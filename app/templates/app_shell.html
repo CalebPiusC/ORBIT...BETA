@@ -33,7 +33,7 @@
        wordmark, nav 56 below that;
        content inset 40, 1136 wide at 1440, 32 between sections,
        24 between columns;
-       phone bar 56 tall with a hairline under it, 16 gutters.
+       phone bar 56 tall with a hairline under it, 24 gutters.
 
      Copper in the rail appears once: the active indicator.
 
@@ -299,7 +299,7 @@
       align-items: center;
       justify-content: space-between;
       height: 56px;
-      padding: 0 16px;
+      padding: 0 24px;
       border-bottom: 1px solid var(--border);
       background: var(--bg);
     }
@@ -310,7 +310,9 @@
 
     .app {
       --app-pad-y: clamp(16px, 4vh, 24px);
-      --app-pad-x: 16px;
+      /* The phone frames (Dashboard, Projects, Import) measure a 24px gutter
+         at 390 — the wordmark, the cards and the panels all start there. */
+      --app-pad-x: 24px;
       --app-pad-bottom: clamp(24px, 5vh, 48px);
     }
   }

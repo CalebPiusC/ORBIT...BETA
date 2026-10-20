@@ -41,9 +41,9 @@
      Scroll model on desktop (>=1001px): the page itself does not scroll.
      The header and footer are fixed bands and the form column between
      them is the only scroller, so the form can never slide under the
-     panel, the panel can never slide over the header or the footer, and
-     no element overlaps another at any width. The left panel occupies
-     its own grid cell for the full height of that band, centred.
+     panel. The left panel is sticky in its own grid cell for the full
+     height of that band, so it stays beside the form without crossing
+     the header or footer.
 
      The card keeps the frame's 432px: the grid column is 432 plus the
      page gutter, and that spare gutter is where the column's scrollbar
@@ -145,10 +145,9 @@
   }
 
   /* ---------------- left column ----------------
-     The panel is its own grid cell and never leaves it. On desktop that
-     cell is exactly the band between the fixed header and footer, so the
-     panel is fixed by construction rather than by sticking — a sticky
-     panel in a scrolling page is what slid over the header and the footer.
+     The panel is its own grid cell and never leaves it. On desktop it is
+     sticky within the bounded main band; the separate form-column scroller
+     means it stays beside the form and cannot slide over the header/footer.
      "safe" keeps the top edge reachable if the content is ever taller than
      the band. */
   .auth-marketing {
@@ -440,6 +439,16 @@
       padding-right: 0;
       align-items: stretch;
       overflow: hidden;
+    }
+
+    /* Keep the frame's left panel sticky while the form column scrolls
+       independently. The main band is bounded, so sticky cannot cross the
+       header or footer and the form cannot pass underneath it. */
+    .auth-marketing {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      height: 100%;
     }
 
     .auth-card-col {
