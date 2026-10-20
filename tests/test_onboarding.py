@@ -990,6 +990,13 @@ class LayoutPassTests(unittest.TestCase):
         self.assertIn("--app-pad-bottom: clamp(24px, 5vh, 48px);", app_shell)
         self.assertIn("padding: var(--app-pad-y) var(--app-pad-x) var(--app-pad-bottom);", app_shell)
 
+    def test_the_phone_gutter_is_the_frames_24px(self) -> None:
+        """Every phone frame (Dashboard, Projects, Import) measures 24 at 390."""
+        app_shell = self._template("app_shell.html")
+        phone = app_shell[app_shell.index("@media (max-width: 900px)"):]
+        self.assertIn("--app-pad-x: 24px;", phone)
+        self.assertIn("padding: 0 24px;", phone)
+
 
 if __name__ == "__main__":
     unittest.main()
