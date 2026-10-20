@@ -1,13 +1,70 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
+import subprocess
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.server import DEFAULT_SECRET_KEY, run_app
 from app.voice import VoiceDependencyReport
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Run in a *fresh* interpreter, because the thing under test happens at import
+# time: app/server.py loads the project .env before create_app() reads
+# ORBIT_SECRET_KEY. Nothing in-process can re-run a module-level statement, so
+# each case below reproduces a real launch instead of reaching into internals.
+#
+# config.ENV_FILE is pointed at a temporary file *before* app.server is
+# imported; app.server does ``from config import ENV_FILE`` at import, so it
+# picks the temporary path up exactly as it would pick up the real one. The
+# repo's own .env is never read or written by these tests.
+_LAUNCH_SCRIPT = """
+import json
+import pathlib
+
+import config
+config.ENV_FILE = pathlib.Path(__ENV_FILE__)
+
+import app.server as server
+from flask import Flask
+
+ran = {}
+
+
+def record_run(self, **options):
+    ran.update(options)
+
+
+Flask.run = record_run
+
+app = server.create_app()
+guard = "passed"
+try:
+    server._require_real_secret_key(app)
+except RuntimeError as exc:
+    guard = "refused: " + str(exc)
+
+started = False
+if guard == "passed":
+    server.run_app(app)
+    started = bool(ran)
+
+print("RESULT" + json.dumps({
+    "secret_is_default": app.secret_key == server.DEFAULT_SECRET_KEY,
+    "guard": guard,
+    "started": started,
+    "host": ran.get("host"),
+    "env_file_is_absolute": bool(getattr(server, "ENV_FILE", None))
+                            and server.ENV_FILE.is_absolute(),
+}))
+"""
 
 
 class FakeHeartbeat:
@@ -182,6 +239,88 @@ class ServerLaunchTests(unittest.TestCase):
             run_app(app)  # type: ignore[arg-type]
 
         self.assertEqual(app.run_options, {"host": "127.0.0.1", "port": 5000, "debug": False})
+
+    # ----- the project's .env at launch ------------------------------------
+    #
+    # The bug these cover: a fresh terminal whose only copy of
+    # ORBIT_SECRET_KEY was in .env refused to start, because the first
+    # load_dotenv happened inside VoiceService.__init__, after create_app()
+    # had already frozen app.secret_key to the committed default.
+
+    def _launch(self, env_file: Path, *, cwd: Path, secret: str | None = None) -> dict:
+        """Boot the server in a fresh interpreter and report what happened."""
+        script = _LAUNCH_SCRIPT.replace("__ENV_FILE__", repr(str(env_file)))
+        home = Path(tempfile.mkdtemp(prefix="orbit-launch-home-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        env = {key: value for key, value in os.environ.items() if key != "ORBIT_SECRET_KEY"}
+        if secret is not None:
+            env["ORBIT_SECRET_KEY"] = secret
+        # A real launch installs SQLite stores; keep that database (and any
+        # model cache) inside the throwaway home rather than the real one.
+        env["PYTHONPATH"] = str(REPO_ROOT)
+        env["HOME"] = str(home)
+        env["USERPROFILE"] = str(home)
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=str(cwd),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        lines = [line for line in completed.stdout.splitlines() if line.startswith("RESULT")]
+        self.assertEqual(len(lines), 1, completed.stdout + completed.stderr)
+        payload = json.loads(lines[0][len("RESULT"):])
+        payload["output"] = completed.stdout + completed.stderr
+        return payload
+
+    def test_a_key_that_lives_only_in_the_env_file_starts_the_server(self) -> None:
+        """The reported bug: .env holds the key, the terminal holds nothing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            secret = "secret-from-the-env-file-4c1d9e"
+            env_file.write_text(f"ORBIT_SECRET_KEY={secret}\n", encoding="utf-8")
+
+            result = self._launch(env_file, cwd=REPO_ROOT)
+
+        self.assertFalse(result["secret_is_default"])   # create_app saw the key
+        self.assertEqual(result["guard"], "passed")     # the launch gate agrees
+        self.assertTrue(result["started"])              # run_app reached app.run()
+        self.assertEqual(result["host"], "127.0.0.1")
+        # "Never log or print the key": the secret appears in no output at all.
+        self.assertNotIn(secret, result["output"])
+
+    def test_a_missing_key_is_still_refused_everywhere(self) -> None:
+        """No .env, no variable: the guard must still refuse, not fall back."""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._launch(Path(tmp) / "absent.env", cwd=REPO_ROOT)
+
+        self.assertTrue(result["secret_is_default"])
+        self.assertTrue(result["guard"].startswith("refused:"))
+        self.assertIn("ORBIT_SECRET_KEY is not set", result["guard"])
+        self.assertFalse(result["started"])
+
+    def test_the_project_env_is_loaded_from_any_working_directory(self) -> None:
+        """config.ENV_FILE is resolved from the checkout, not from the cwd."""
+        from config import ENV_FILE
+
+        self.assertTrue(ENV_FILE.is_absolute())
+        self.assertEqual(ENV_FILE, REPO_ROOT / ".env")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env_file = Path(tmp) / ".env"
+            env_file.write_text("ORBIT_SECRET_KEY=secret-from-elsewhere-9a7b\n", encoding="utf-8")
+            elsewhere = Path(tempfile.mkdtemp(prefix="orbit-launch-cwd-"))
+            self.addCleanup(lambda: __import__("shutil").rmtree(elsewhere, ignore_errors=True))
+
+            # Launched from a directory that contains no .env of its own.
+            result = self._launch(env_file, cwd=elsewhere)
+
+        self.assertTrue(result["env_file_is_absolute"])
+        self.assertFalse(result["secret_is_default"])
+        self.assertEqual(result["guard"], "passed")
+        self.assertTrue(result["started"])
 
     def test_demo_launcher_uses_shared_safe_runner(self) -> None:
         import run_demo
