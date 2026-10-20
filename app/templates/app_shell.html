@@ -36,7 +36,20 @@
        phone bar 56 tall with a hairline under it, 16 gutters.
 
      Copper in the rail appears once: the active indicator.
+
+     Short windows: every vertical step in the rail and the page gutter is
+     a clamp() on viewport height, and the page padding lives in three
+     custom properties on .app. A screen that extends this shell inherits
+     the whole fix -- it only fills the content block -- and a screen that
+     needs a different gutter changes the variables, not the rules.
      =========================================================== */
+
+  .app {
+    /* the shell's page gutter, one place, viewport-relative */
+    --app-pad-y: clamp(24px, 4.4vh, 40px);
+    --app-pad-x: clamp(24px, 2.8vw, 40px);
+    --app-pad-bottom: clamp(24px, 5vh, 48px);
+  }
 
   html { background: var(--bg); }
 
@@ -65,7 +78,8 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
-    padding: 24px 0 32px;
+    height: 100svh;
+    padding: clamp(16px, 2.4vh, 24px) 0 clamp(16px, 3vh, 32px);
     background: var(--surface);
   }
 
@@ -91,7 +105,7 @@
   .app-ws {
     display: flex;
     flex-direction: column;
-    margin-top: 48px;
+    margin-top: clamp(16px, 4.4vh, 48px);
     padding: 0 32px;
   }
 
@@ -101,7 +115,7 @@
   .app-nav {
     display: flex;
     flex-direction: column;
-    margin-top: 52px;
+    margin-top: clamp(16px, 4.8vh, 48px);
   }
 
   .app-nav__item {
@@ -109,7 +123,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    height: 50px;
+    height: clamp(44px, 6.4vh, 48px);
     padding: 0 32px;
     color: var(--text-2);
     font-size: 15px;
@@ -151,7 +165,7 @@
   .app-side__foot {
     display: flex;
     flex-direction: column;
-    margin-top: 44px;
+    margin-top: clamp(24px, 4vh, 48px);
     padding: 0 32px;
   }
 
@@ -264,7 +278,7 @@
     min-width: 0;
   }
 
-  .app-content { padding: 40px; }
+  .app-content { padding: var(--app-pad-y) var(--app-pad-x) var(--app-pad-bottom); }
 
   .app-inner { max-width: 1136px; }
 
@@ -272,7 +286,7 @@
   [data-theme="dark"] .app-side { background: var(--surface); }
 
   @media (max-width: 1100px) {
-    .app-content { padding: 32px 32px 56px; }
+    .app { --app-pad-x: clamp(24px, 3vw, 32px); }
   }
 
   @media (max-width: 900px) {
@@ -294,11 +308,22 @@
     .app-brand--mobile .app-brand__mark { width: 24px; height: 24px; }
     .app-brand--mobile .app-brand__word { font-size: 22px; }
 
-    .app-content { padding: 24px 16px 48px; }
+    .app {
+      --app-pad-y: clamp(16px, 4vh, 24px);
+      --app-pad-x: 16px;
+      --app-pad-bottom: clamp(24px, 5vh, 48px);
+    }
   }
 
   @media (min-width: 901px) {
     .app-drawer { display: none; }
+  }
+
+  /* Last resort on a very short window: the rail scrolls rather than
+     cutting off Settings or the account line. It fits without this at
+     720 tall. */
+  @media (max-height: 640px) and (min-width: 901px) {
+    .app-side { overflow-y: auto; overscroll-behavior: contain; }
   }
 
   /* The first-run tour (drawn in onboarding.js) is part of the shell. */
