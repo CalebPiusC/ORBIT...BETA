@@ -811,30 +811,23 @@ def create_app(
         card["age"] = human_age(project.updated_at)
         return card
 
-    def _sort_link(base_args: dict[str, str], sort: str) -> str:
-        args = {k: v for k, v in base_args.items() if v}
-        args["sort"] = sort
-        query = "&".join(f"{k}={v}" for k, v in args.items())
-        return url_for("projects_page") + (f"?{query}" if query else "")
-
-    SORTS: dict[str, str] = {"recent": "Recent activity", "name": "Name"}
-
     @app.get("/projects")
     def projects_page() -> str:
         st = _scoped_store()
         project_store = _scoped_projects()
         query = request.args.get("q", "").strip()
         status = request.args.get("status", "").strip() or None
-        sort = request.args.get("sort", "").strip() or "recent"
-        if sort not in SORTS:
-            sort = "recent"
         if status is not None and status not in STATUS_LABELS:
             # A status the filter cannot have produced is ignored, not honoured
             # with an empty grid that looks like lost data.
             status = None
+        # Presentation-only switches for review, exactly as the dashboard's:
+        # ?view=loading / ?view=error render the skeleton and the failure panel.
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
+        # The order is fixed by the store: most recently updated first.
         cards = project_store.list(query=query, status=status)
-        if sort == "name":
-            cards = sorted(cards, key=lambda p: p.name.lower())
         counts = project_store.counts()
         total = sum(counts.values())
         notice_raw = request.args.get("notice", "").strip()
@@ -844,20 +837,17 @@ def create_app(
                 "A project needs a name (80 characters or fewer). "
                 "The description is optional, up to 600 characters."
             )
-        base_args = {"q": query, "status": status or ""}
-        sort_links = [(key, label, _sort_link(base_args, key)) for key, label in SORTS.items()]
         return render_template(
             "projects.html",
             projects=[_project_card_view(p, st) for p in cards],
             counts=counts,
             total=total,
-            building=counts.get("building", 0),
             statuses=[(key, STATUS_LABELS[key]) for key in STATUSES],
             query=query,
             active_status=status,
-            active_sort=sort,
-            sort_links=sort_links,
+            active_status_label=STATUS_LABELS.get(status, "") if status else "",
             notice=notice,
+            view=view,
             projects_active=True,
             agents_active=False,
             **_sidebar_context(),
