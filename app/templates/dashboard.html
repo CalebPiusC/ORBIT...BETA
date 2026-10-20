@@ -26,9 +26,14 @@
        three stat cards 362 wide, 132 tall, 24 apart;
        two columns 556 wide, 24 apart; 32 between stacked cards;
        card radius 16, padding 24.
+     Short windows (the 1280x720 laptop case): the section rhythm and the
+     stat band's height are clamp()s on viewport height, so the page keeps
+     the frame's proportions on a tall monitor and loses height rather than
+     pushing the work below the fold on a short one. The shell's own
+     gutter does the same — see app_shell.html.
      =========================================================== */
 
-  .dash { display: flex; flex-direction: column; gap: 32px; }
+  .dash { display: flex; flex-direction: column; gap: clamp(24px, 3.6vh, 32px); }
 
   .dash-notice {
     display: flex;
@@ -75,8 +80,8 @@
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    min-height: 132px;
-    padding: 26px 24px;
+    min-height: clamp(104px, 14.6vh, 132px);
+    padding: clamp(20px, 2.9vh, 26px) 24px;
     border: 1px solid transparent;
     border-radius: var(--r-card);
     background: var(--surface);
@@ -107,7 +112,7 @@
     align-items: start;
   }
 
-  .dash-col { display: flex; flex-direction: column; gap: 32px; }
+  .dash-col { display: flex; flex-direction: column; gap: clamp(24px, 3.6vh, 32px); }
 
   .dash-card {
     padding: 24px;
@@ -396,8 +401,8 @@
   .dash-skel--gap { margin-top: 16px; }
   .dash-skel--gap-sm { margin-top: 14px; }
   .dash-skel--line { width: 300px; max-width: 100%; height: 16px; }
-  .dash-skel--card { height: 132px; }
-  .dash-skel--tall { height: 336px; }
+  .dash-skel--card { height: clamp(104px, 14.6vh, 132px); }
+  .dash-skel--tall { height: clamp(240px, 37vh, 336px); }
 
   .dash-error { display: flex; flex-direction: column; align-items: flex-start; }
   .dash-error__title {
@@ -424,7 +429,7 @@
   }
 
   @media (max-width: 900px) {
-    .dash { gap: 24px; }
+    .dash { gap: 24px; }   /* the clamp's floor is already 24 */
 
     .dash-title { font-size: 32px; line-height: 1.2; }
     .dash-sub { font-size: 14px; }
