@@ -55,7 +55,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 24px;
-    padding: 26px 48px 0;
+    padding: clamp(16px, 4.5vh, 48px) clamp(24px, 3.5vw, 48px) 0;
   }
 
   .brand {
@@ -90,7 +90,9 @@
   .onb-exit:hover { color: var(--text-1); }
 
   .onb-main {
-    padding: 0 48px 64px;
+    /* No top padding: the stepper sits straight under the wordmark, which
+       is the tightest this screen gets at any window height. */
+    padding: 0 clamp(24px, 3.5vw, 48px) clamp(24px, 5vh, 64px);
   }
 
   .onb-wrap {
@@ -130,10 +132,10 @@
 
   /* ---------------- heading ---------------- */
   .onb-title {
-    margin-top: 46px;
+    margin-top: clamp(24px, 4.5vh, 48px);
     padding-left: 144px;
     font-family: var(--font-display);
-    font-size: 48px;
+    font-size: clamp(30px, 3.4vw, 48px);
     font-weight: 500;
     line-height: 1.2;
     letter-spacing: -0.02em;
@@ -141,7 +143,7 @@
   }
 
   .onb-sub {
-    margin-top: 30px;
+    margin-top: clamp(16px, 3vh, 32px);
     padding-left: 144px;
     font-size: 16px;
     line-height: 1.5;
@@ -150,7 +152,7 @@
 
   /* ---------------- the two-column body ---------------- */
   .onb-body {
-    margin-top: 36px;
+    margin-top: clamp(16px, 3.6vh, 32px);
     display: grid;
     grid-template-columns: 744px minmax(0, 1fr);
     gap: 30px;
@@ -158,7 +160,7 @@
   }
 
   .onb-card {
-    padding: 24px;
+    padding: clamp(16px, 2.5vh, 24px);
     border-radius: var(--r-panel);
     background: var(--surface);
   }
@@ -363,12 +365,21 @@
 
   .onb-skip button:hover { color: var(--text-1); }
 
-  /* ---------------- aside ---------------- */
-  .onb-aside { padding-top: 0; }
+  /* ---------------- aside ----------------
+     The column next to the form; sticky so the ring and the note stay in
+     view while the card scrolls, and bounded by vh so it never outgrows
+     the window. It is a grid cell, so it cannot overlap the form. */
+  .onb-aside {
+    position: sticky;
+    top: clamp(16px, 4vh, 32px);
+    align-self: start;
+    padding-top: 0;
+  }
 
   .onb-arc {
-    width: 120px;
-    height: 120px;
+    width: clamp(96px, 14vh, 120px);
+    height: auto;
+    aspect-ratio: 1 / 1;
     color: var(--ring);
   }
 
@@ -376,7 +387,7 @@
   .onb-arc .onb-arc__dot { fill: currentColor; stroke: none; }
 
   .onb-aside__title {
-    margin-top: 41px;
+    margin-top: clamp(16px, 3.2vh, 40px);
     font-family: var(--font-display);
     font-size: 24px;
     font-weight: 500;
@@ -386,14 +397,14 @@
   }
 
   .onb-aside__body {
-    margin-top: 27px;
+    margin-top: clamp(16px, 2.4vh, 24px);
     font-size: 14px;
     line-height: 1.7;
     color: var(--text-2);
   }
 
   .onb-aside__fine {
-    margin-top: 27px;
+    margin-top: clamp(16px, 2.4vh, 24px);
     font-size: 12px;
     line-height: 1.55;
     color: var(--text-2);
@@ -442,15 +453,16 @@
   @media (max-width: 980px) {
     .onb-body { grid-template-columns: minmax(0, 1fr); gap: 40px; }
     .onb-title { font-size: 38px; }
+    .onb-aside { position: static; top: auto; }
     .onb-aside__title { margin-top: 32px; }
   }
 
   @media (max-width: 720px) {
-    .onb-header { padding: 64px 24px 0; }
+    .onb-header { padding: clamp(16px, 6vw, 32px) 24px 0; }
     .brand__mark { width: 26px; height: 26px; }
     .brand__word { font-size: 26px; }
 
-    .onb-main { padding: 0 24px 48px; }
+    .onb-main { padding: 0 24px clamp(24px, 5vh, 48px); }
 
     .onb-steps {
       gap: 8px 12px;
