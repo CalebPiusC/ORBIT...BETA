@@ -386,7 +386,9 @@
   .tool-pill .status-dot { width: 6px; height: 6px; border-radius: 50%; }
   .tool-pill.connected .status-dot { background: var(--green); }
   .tool-pill.not-connected .status-dot { background: var(--text-faint); }
-  .manage-link { color: var(--accent-bright); cursor: pointer; }
+  .tool-none { font-size: 12px; color: var(--text-dim); }
+  .manage-link { color: var(--accent-bright); cursor: pointer; text-decoration: none; }
+  .manage-link:hover { text-decoration: underline; }
 
   .home-footer { text-align: center; padding: 16px; font-size: 11px; color: var(--text-faint); }
 

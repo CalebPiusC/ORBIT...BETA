@@ -252,7 +252,12 @@ class Store:
 
     def __init__(self) -> None:
         self.user = _SEED_USER
-        self.connections: list[Connection] = list(_SEED_CONNECTIONS)
+        # Copies, not the seed's own objects: mutating one store's connection
+        # used to change the module-level seed, and with it every other store
+        # in the process (and the next test).
+        self.connections: list[Connection] = [
+            Connection(name=c.name, status=c.status) for c in _SEED_CONNECTIONS
+        ]
         # No seeded history: a conversation exists only once the person has
         # sent something. Invented titles in the rail read as work that
         # happened when it did not.

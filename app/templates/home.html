@@ -149,16 +149,26 @@
         </div>
       </div>
 
+      {# Only what is really connected gets a name. No integration is built yet,
+         so listing "GitHub, Linear, Vercel" here claimed three live connections
+         the sidebar itself reported as 0 active. Empty means empty. #}
+      {% set connected_apps = connections | selectattr('status', 'equalto', 'connected') | list %}
       <div class="connected-tools">
-        <div class="label">Your development tools, connected to Orbit</div>
+        {% if connected_apps %}
+        <div class="label">Connected to Orbit</div>
         <div class="tool-row">
-          {% for conn in connections %}
-          <div class="tool-pill {% if conn.status == 'connected' %}connected{% else %}not-connected{% endif %}">
-            <span class="status-dot"></span>{{ conn.name }}
-          </div>
+          {% for conn in connected_apps %}
+          <div class="tool-pill connected"><span class="status-dot"></span>{{ conn.name }}</div>
           {% endfor %}
-          <div class="manage-link">Manage →</div>
+          <a class="manage-link" href="/settings">Manage →</a>
         </div>
+        {% else %}
+        <div class="label">No apps connected yet</div>
+        <div class="tool-row">
+          <span class="tool-none">Nothing is connected — the integrations are not built yet.</span>
+          <a class="manage-link" href="/settings">Settings →</a>
+        </div>
+        {% endif %}
       </div>
     </div>
 
