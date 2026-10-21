@@ -632,6 +632,7 @@ class ActionOwnershipTests(unittest.TestCase):
 # is considered.
 EXPECTED_OWNERSHIP_CHECKED = {
     "assign_agent",          # project_id in the form body
+    "agent_conversation",    # project_id (+ agent_id from the catalog)
     "project_workspace",     # project_id (+ ?task=)
     "project_set_status",    # project_id
     "project_new_task",      # project_id (+ builds_on in the form)

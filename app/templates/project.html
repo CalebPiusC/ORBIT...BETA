@@ -743,7 +743,7 @@
           </button>
         </form>
       </div>
-      <a class="ws-detail__close" href="/projects/{{ project.id }}{% if agent_id != 'main' %}?agent={{ agent_id }}{% endif %}#details">Close the details</a>
+      <a class="ws-detail__close" href="/projects/{{ project.id }}#details">Close the details</a>
       {% elif tasks %}
       <div class="ws-state">
         <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
@@ -769,7 +769,7 @@
       {% endif %}
       {% for link in specialist_links %}
       {% if loop.first %}<div class="ws-chat__links">{% endif %}
-        <a class="ws-chat__link" href="/projects/{{ project.id }}?agent={{ link.id }}#agent">Open the {{ link.name }} conversation →</a>
+        <a class="ws-chat__link" href="/projects/{{ project.id }}/agents/{{ link.id }}">Open the {{ link.name }} conversation →</a>
       {% if loop.last %}</div>{% endif %}
       {% endfor %}
 

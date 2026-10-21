@@ -65,6 +65,8 @@ from app.accounts import (
 )
 from app.actions import PendingActions, ProposalRejected
 from app.age import human_age
+from types import SimpleNamespace
+
 from app.agents import MAIN_AGENT_ID, agent_types, get_agent, search_agents
 from app.analytics import RATING_LABELS, build_analytics
 from app.followups import followups_for
@@ -871,8 +873,9 @@ def create_app(
             "project_id": project.id,
             "waiting": any(proposal_ready(t) for t in tasks),
             "age": human_age(project.updated_at) or "just now",
-            "url": url_for("project_workspace", project_id=project.id, agent=conv.agent_id)
-            + "#agent",
+            "url": url_for(
+                "agent_conversation", project_id=project.id, agent_id=conv.agent_id
+            ),
         }
 
     @app.get("/projects")
@@ -1119,7 +1122,9 @@ def create_app(
             "agent_specialist_assigned", agent_id=agent.id, project_id=project_id
         )
         return redirect(
-            url_for("project_workspace", project_id=project_id, agent=agent.id) + "#agent",
+            url_for(
+                "agent_conversation", project_id=project_id, agent_id=agent.id
+            ),
             code=303,
         )
 
@@ -1168,6 +1173,17 @@ def create_app(
                 get_agent(agent_id)
             except KeyError:
                 agent_id = MAIN_AGENT_ID
+            else:
+                # A specialist conversation has its own screen now; the
+                # workspace column stays the Main Agent's.
+                return redirect(
+                    url_for(
+                        "agent_conversation",
+                        project_id=project_id,
+                        agent_id=agent_id,
+                    ),
+                    code=303,
+                )
         thread = st.project_thread(project_id, agent_id=agent_id)
         speaker = (
             "Main Agent" if agent_id == MAIN_AGENT_ID else get_agent(agent_id).name
@@ -1261,6 +1277,55 @@ def create_app(
                 get_agent(agent_id).starters if agent_id != MAIN_AGENT_ID else PROJECT_STARTERS
             ),
             plan_hint=request.args.get("plan", "") == "1",
+            view=view,
+            projects_active=True,
+            agents_active=False,
+            active_project_id=project_id,
+            **_sidebar_context(),
+        )
+
+    @app.get("/projects/<project_id>/agents/<agent_id>")
+    @ownership_checked("project_id", "agent_id (catalog)")
+    def agent_conversation(project_id: str, agent_id: str) -> str:
+        """One specialist's conversation with one project, full page.
+
+        No frame exists for this screen: it is derived from the workspace's
+        chat column (same thread rules — the person's messages right, the
+        agent's left, no name labels — same composer, same footnote), given
+        the room a full page affords. It renders the conversation the store
+        already carries for (project, agent); nothing new is stored here and
+        the stream endpoint is the workspace's own, so gating, audit and
+        ownership are unchanged. An agent id the Agents page could not have
+        produced falls back to the Main Agent, exactly as the workspace rail
+        always has. ``?view=loading`` / ``?view=error`` are the shared
+        presentation-only switches.
+        """
+        st = _scoped_store()
+        project, not_owned = _owned_project_or_404(project_id, template=True)
+        if not_owned is not None:
+            return not_owned
+        try:
+            agent = get_agent(agent_id)
+        except KeyError:
+            # The Main Agent has no registry card — give the template the
+            # same display fields from the workspace's own constants.
+            agent = SimpleNamespace(
+                id=MAIN_AGENT_ID,
+                name="Main Agent",
+                role="The project's primary assistant.",
+                starters=PROJECT_STARTERS,
+            )
+        thread = st.project_thread(project_id, agent_id=agent.id)
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
+        return render_template(
+            "conversation.html",
+            project=project.card(),
+            agent=agent,
+            thread=thread,
+            followups=followups_for(thread),
+            starters=agent.starters,
             view=view,
             projects_active=True,
             agents_active=False,

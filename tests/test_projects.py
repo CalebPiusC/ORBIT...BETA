@@ -331,7 +331,10 @@ class ProjectRouteTests(unittest.TestCase):
         project = self.project_store.create(user_id="caleb", name="Fieldnotes")
         resp = self.client.post("/agents/review/assign", data={"project_id": project.id})
         self.assertEqual(resp.status_code, 303)
-        self.assertIn(f"/projects/{project.id}?agent=review", resp.headers["Location"])
+        # assign lands on the specialist's own conversation screen now
+        self.assertEqual(
+            resp.headers["Location"], f"/projects/{project.id}/agents/review"
+        )
         conv = store.project_conversation(project.id, agent_id="review")
         self.assertIsNotNone(conv)
         self.assertEqual(conv.agent_id, "review")

@@ -216,7 +216,10 @@ class AgentConversationTests(WorkspaceFixture):
             "/agents/review/assign", data={"project_id": self.project.id}
         )
         self.assertEqual(resp.status_code, 303)
-        self.assertIn("agent=review", resp.headers["Location"])
+        # assign lands on the specialist's conversation screen now
+        self.assertEqual(
+            resp.headers["Location"], f"/projects/{self.project.id}/agents/review"
+        )
         self.assertIsNone(self.view.selected_agent)  # consumed by the assignment
         conv = self.view.project_conversation(self.project.id, agent_id="review")
         self.assertIsNotNone(conv)
