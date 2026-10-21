@@ -117,3 +117,122 @@ def next_up(tasks: list[Any], task: Any) -> Any | None:
         if _stage_name(candidate) == stage and not getattr(candidate, "done", False):
             return candidate
     return None
+
+
+# ---------------------------------------------------------------------------
+# The workspace map (design/ORBIT UI___2, Workspace frames): stages render as
+# stacked cards of task rows, never as a node-and-line graph. A row's suffix
+# and a stage's capsule are derived from stored state only:
+#
+#   * "Approved" / "Applied" come from the approval gate's own flags;
+#   * "Needs approval" means a run finished a turn cleanly (status IDLE) and
+#     nothing was approved or applied yet — a draft exists, nothing moved;
+#   * "Up next" is positional: the first still-planned row on the whole map,
+#     exactly once, so one row names the next step and the rest stay planned;
+#   * a stage capsule is "Complete" when every row is closed, "N need
+#     approval" (the copper dot) when any draft waits, "In progress" while a
+#     run streams, "Up next" on the first stage whose rows are all still
+#     planned, "n of m complete" when some are closed, else "Planned".
+# ---------------------------------------------------------------------------
+
+CLOSED_STATES = ("done", "approved", "applied")
+
+
+def proposal_ready(task: Any) -> bool:
+    """True when a finished run left a draft nobody approved or applied yet."""
+    if getattr(task, "done", False):
+        return False
+    if getattr(task, "approved", False) or getattr(task, "applied", False):
+        return False
+    run = getattr(task, "run", None)
+    if run is None:
+        return False
+    return getattr(run, "status", IDLE) == IDLE
+
+
+def workspace_state(task: Any) -> tuple[str, str]:
+    """(key, label) for one workspace map row, from stored state only."""
+    if getattr(task, "applied", False):
+        return ("applied", "Applied")
+    if getattr(task, "approved", False):
+        return ("approved", "Approved")
+    if getattr(task, "done", False):
+        return ("done", "Done")
+    if proposal_ready(task):
+        return ("needs_approval", "Needs approval")
+    run = getattr(task, "run", None)
+    if run is not None and getattr(run, "status", IDLE) == RUNNING:
+        return ("in_progress", "In progress")
+    if run is not None and getattr(run, "status", IDLE) == FAILED:
+        return ("needs_attention", "Needs attention")
+    return ("planned", "Planned")
+
+
+def workspace_stages(tasks: list[Any]) -> list[dict[str, Any]]:
+    """The map as the workspace draws it: ordered stage cards with capsules."""
+    stages = map_stages(tasks)
+    rows_by_stage: dict[str, list[dict[str, Any]]] = {}
+    for stage in stages:
+        rows: list[dict[str, Any]] = []
+        for cell in stage["tasks"]:
+            task = next(t for t in tasks if t.id == cell["id"])
+            key, label = workspace_state(task)
+            rows.append({**cell, "state": key, "state_label": label})
+        rows_by_stage[stage["name"]] = rows
+
+    # "Up next" names the first still-planned row on the whole map, once.
+    up_next_id = ""
+    for stage in stages:
+        for row in rows_by_stage[stage["name"]]:
+            if row["state"] == "planned":
+                up_next_id = row["id"]
+                break
+        if up_next_id:
+            break
+    up_next_stage = ""
+    for stage in stages:
+        for row in rows_by_stage[stage["name"]]:
+            if row["id"] == up_next_id:
+                row["state_label"] = "Up next"
+                up_next_stage = stage["name"]
+                break
+
+    out: list[dict[str, Any]] = []
+    for index, stage in enumerate(stages, start=1):
+        rows = rows_by_stage[stage["name"]]
+        waiting = sum(1 for r in rows if r["state"] == "needs_approval")
+        closed = sum(1 for r in rows if r["state"] in CLOSED_STATES)
+        running = sum(1 for r in rows if r["state"] == "in_progress")
+        if closed == len(rows):
+            chip = {"key": "complete", "label": "Complete", "dot": False}
+        elif waiting:
+            chip = {
+                "key": "approval",
+                "label": f"{waiting} need approval"
+                if waiting != 1
+                else "1 needs approval",
+                "dot": True,
+            }
+        elif running:
+            chip = {"key": "progress", "label": "In progress", "dot": False}
+        elif stage["name"] == up_next_stage:
+            chip = {"key": "upnext", "label": "Up next", "dot": False}
+        elif closed:
+            chip = {
+                "key": "count",
+                "label": f"{closed} of {len(rows)} complete",
+                "dot": False,
+            }
+        else:
+            chip = {"key": "planned", "label": "Planned", "dot": False}
+        out.append(
+            {
+                "index": index,
+                "name": stage["name"],
+                "chip": chip,
+                "rows": rows,
+                "done": stage["done"],
+                "total": stage["total"],
+            }
+        )
+    return out
