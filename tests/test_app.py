@@ -143,19 +143,36 @@ class AppRoutesTests(unittest.TestCase):
         """Nothing is faked as live: no tool or Git integration is built yet.
 
         GitHub used to render as "connected" while no GitHub code existed. The
-        row now says what is true, and the composer's GitHub shortcut — a bare
-        link to github.com that read as an integration — is gone.
+        home screen went further and named all three ("Your development tools,
+        connected to Orbit: GitHub, Linear, Vercel") while the sidebar reported
+        0 active — a claim, not a status. With nothing connected the row now
+        says exactly that and names no product at all.
         """
         resp = self.client.get("/")
         body = resp.get_data(as_text=True)
-        # All three rows are present, and every one is explicitly not connected.
+        self.assertIn("No apps connected yet", body)
+        self.assertIn("Nothing is connected", body)
         for name in ("GitHub", "Linear", "Vercel"):
-            self.assertIn(name, body)
-        self.assertEqual(body.count("tool-pill not-connected"), 3)
-        self.assertNotIn("tool-pill connected", body)
-        # The chrome's count agrees with the rows.
+            self.assertNotIn(name, body)
+        self.assertNotIn('class="tool-pill', body)
+        self.assertNotIn("Your development tools", body)
+        # The chrome's count agrees with the row.
         self.assertIn("Connected apps · 0 active", body)
         self.assertNotIn("github-shortcut", body)
+    def test_a_real_connection_is_named_and_counted(self):
+        """When one exists, the row names it — the conditional is not a lie.
+
+        The empty state above must not be the only thing the template can do:
+        a connected app still renders with its name, and the sidebar count
+        agrees.
+        """
+        self.store.connections[0].status = "connected"
+        body = self.client.get("/").get_data(as_text=True)
+        self.assertIn('class="tool-pill connected"', body)
+        self.assertIn("GitHub", body)  # named only because it is connected
+        self.assertNotIn("Linear", body)
+        self.assertNotIn("No apps connected yet", body)
+        self.assertIn("Connected apps · 1 active", body)
 
     def test_the_task_composer_has_no_github_shortcut(self):
         body = self.client.get("/task/T1").get_data(as_text=True)
@@ -694,6 +711,14 @@ def _root_tokens(path: Path) -> dict[str, str]:
     return {name: value.strip() for name, value in re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", block.group(1))}
 
 
+def _selector_tokens(path: Path, selector: str) -> dict[str, str]:
+    """Tokens declared in one CSS block, e.g. the light theme's token swap."""
+    text = path.read_text(encoding="utf-8")
+    block = re.search(selector + r"\s*\{(.*?)\}", text, re.S)
+    assert block is not None, selector
+    return {name: value.strip() for name, value in re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", block.group(1))}
+
+
 def _hex_luminance(color: str) -> float:
     """WCAG relative luminance of a #rrggbb colour."""
     channels = [int(color[i : i + 2], 16) / 255 for i in (1, 3, 5)]
@@ -748,6 +773,37 @@ class PaletteAndBubbleTests(unittest.TestCase):
         bubble = re.search(r"\.chat-bubble\.user\s*\{[^}]*\}", css)
         self.assertIsNotNone(bubble)
         self.assertIn("var(--on-accent)", bubble.group(0))
+
+    def test_selected_toggle_pills_clear_aa_in_both_themes(self) -> None:
+        """Chat/Agent and Quick/Deep: the selected pill's label is real text.
+
+        The shell pass hardcoded a charcoal fill under ``--text``, which in the
+        light theme meant near-black ink on charcoal (≈1.25:1). Both themes now
+        take the pair from tokens, and both pairs must clear 4.5:1 — including
+        the hover fill and the unselected label on the tray.
+        """
+        stylesheet = self.ROOT / "app" / "templates" / "layout.html"
+        dark = _root_tokens(stylesheet)
+        light = {**dark, **_selector_tokens(stylesheet, r'\[data-theme="light"\]')}
+        for theme, tokens in (("dark", dark), ("light", light)):
+            with self.subTest(theme=theme):
+                for fill in ("--toggle-selected-bg", "--toggle-selected-bg-hover"):
+                    self.assertGreaterEqual(
+                        _contrast(tokens["--toggle-selected-fg"], tokens[fill]), 4.5, fill
+                    )
+                self.assertGreaterEqual(
+                    _contrast(tokens["--text-dim"], tokens["--bg-sunken"]), 4.5, "unselected"
+                )
+
+    def test_toggle_rules_take_their_colours_from_the_tokens(self) -> None:
+        css = (self.ROOT / "app" / "templates" / "layout.html").read_text(encoding="utf-8")
+        rules = re.findall(r"\.mode-toggle button\.active\s*\{[^}]*\}", css)
+        self.assertTrue(rules, "the selected-pill rule must exist")
+        for rule in rules:
+            self.assertIn("var(--toggle-selected-fg)", rule)
+            self.assertIn("var(--toggle-selected-bg)", rule)
+            self.assertNotIn("#252b36", rule)
+            self.assertNotIn("var(--text)", rule)
 
     def test_accent_labels_are_readable_on_the_charcoal_surfaces(self) -> None:
         for surface in ("--bg", "--bg-raised", "--bg-card"):

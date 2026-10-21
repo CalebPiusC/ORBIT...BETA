@@ -233,6 +233,92 @@ class RestartPersistenceTests(HeartbeatTestCase):
         self.assertEqual([n["kind"] for n in fired], [KIND_GAP])
 
 
+class OneNoticePerConditionTests(HeartbeatTestCase):
+    """One condition, one notice per account per day — on the JSON state file.
+
+    The regression this pins: PR #20's legacy import copied a ``heartbeat.json``
+    into the account row. The legacy file carried a notice for the day but no
+    ``fired`` marker, so the first tick after the import saw "condition due, not
+    fired today" and opened a second, identical notice. The home screen showed
+    both.
+    """
+
+    LEGACY_NOTICE = {
+        "id": "hb-legacy000001",
+        "kind": KIND_PLAN,
+        "text": (
+            "It is past 10:00 and there is no plan saved for today yet. "
+            "Tell Orbit your plan in chat to save it."
+        ),
+        "created_at": "2026-10-11T10:05:00Z",
+        "dismissed_at": None,
+        "push": "off",
+        "manual": False,
+    }
+
+    def write_state(self, notices: list[dict[str, Any]], fired: dict[str, str] | None = None) -> None:
+        self.state_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "paused": False,
+                    "last_checkin_at": "2026-10-10T12:00:00Z",
+                    "fired": fired or {},
+                    "notices": notices,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def test_a_notice_already_open_for_today_is_not_raised_again(self) -> None:
+        self.write_state([self.LEGACY_NOTICE])
+        hb = self.heartbeat()
+        self.assertEqual(hb.tick(at(11, 12, 0)), [])
+        self.assertEqual(len(hb.snapshot()["notices"]), 1)
+        # The marker is rebuilt, so later ticks on the same day stay quiet too.
+        self.assertEqual(self.state()["fired"][KIND_PLAN], "2026-10-11")
+        self.assertEqual(hb.tick(at(11, 18, 0)), [])
+        self.assertEqual(len(hb.snapshot()["notices"]), 1)
+
+    def test_pre_existing_duplicates_collapse_to_one_card_and_are_kept(self) -> None:
+        copy = dict(self.LEGACY_NOTICE, id="hb-legacy000002")
+        self.write_state([self.LEGACY_NOTICE, copy])
+        hb = self.heartbeat()
+        self.assertEqual(len(hb.snapshot()["notices"]), 2)  # before the next tick
+        self.assertEqual(hb.tick(at(11, 12, 0)), [])
+        notices = hb.snapshot()["notices"]
+        self.assertEqual([n["id"] for n in notices], [self.LEGACY_NOTICE["id"]])
+        # Nothing was deleted: both rows are still on disk, the copy is marked.
+        stored = self.state()["notices"]
+        self.assertEqual(len(stored), 2)
+        self.assertEqual(stored[1]["duplicate_of"], self.LEGACY_NOTICE["id"])
+
+    def test_the_import_rebuilds_the_fired_marker_and_never_duplicates(self) -> None:
+        from heartbeat.service import _empty_state, merge_imported_state
+
+        legacy = {
+            "version": 1,
+            "paused": False,
+            "last_checkin_at": "2026-10-10T12:00:00Z",
+            "fired": {},
+            "notices": [self.LEGACY_NOTICE, dict(self.LEGACY_NOTICE)],
+        }
+        merged = merge_imported_state(_empty_state(), legacy)
+        self.assertEqual(merged["fired"][KIND_PLAN], "2026-10-11")
+        self.assertEqual([n["id"] for n in merged["notices"]], [self.LEGACY_NOTICE["id"]])
+
+        # A second import of the same file is a no-op, not a second notice.
+        again = merge_imported_state(merged, legacy)
+        self.assertEqual(len(again["notices"]), 1)
+
+    def test_one_condition_one_notice_across_repeated_ticks(self) -> None:
+        hb = self.heartbeat()
+        self.assertEqual([n["kind"] for n in hb.tick(at(11, 10, 0))], [KIND_PLAN])
+        for hour in (11, 13, 17, 21):
+            self.assertEqual(hb.tick(at(11, hour, 0)), [])
+        self.assertEqual(len(hb.snapshot()["notices"]), 1)
+
+
 class PauseTests(HeartbeatTestCase):
     def test_paused_heartbeat_fires_nothing_even_for_a_direct_check(self) -> None:
         hb = self.heartbeat()

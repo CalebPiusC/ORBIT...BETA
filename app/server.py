@@ -3029,7 +3029,11 @@ def run_app(app: Flask) -> None:
             heartbeat = SQLiteHeartbeatManager(
                 settings=load_heartbeat_settings(), database=database
             )
-            from heartbeat.service import DEFAULT_HEARTBEAT_PATH, _empty_state
+            from heartbeat.service import (
+                DEFAULT_HEARTBEAT_PATH,
+                _empty_state,
+                merge_imported_state,
+            )
             from memory.jsonstore import JsonStore
 
             old_heartbeat_path = Path(
@@ -3042,8 +3046,11 @@ def run_app(app: Flask) -> None:
                 ).fetchone()
             if old_heartbeat_path.is_file() and not was_imported:
                 legacy_state = JsonStore(old_heartbeat_path, _empty_state).read()
+                # Merged, never overwritten: a legacy notice carries the proof
+                # that its condition already fired today, so importing it no
+                # longer lets the next tick raise a second identical notice.
                 heartbeat.for_account(DEFAULT_USER_ID)._store.update(
-                    lambda state: state.update(legacy_state)
+                    lambda state: merge_imported_state(state, legacy_state)
                 )
                 with database.connect() as db:
                     db.execute(
