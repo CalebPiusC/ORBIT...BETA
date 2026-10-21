@@ -820,6 +820,61 @@ def create_app(
         card["age"] = human_age(project.updated_at)
         return card
 
+    def _recent_specialist_conversation(
+        st: AccountView, own_projects: list[Any]
+    ) -> dict[str, Any] | None:
+        """The newest specialist conversation worth picking up, or None.
+
+        Real data only: a project conversation that carries a specialty and
+        at least one message. Conversations hold no timestamp of their own,
+        so recency is the project's updated_at — the same clock the workspace
+        meta line uses. The card's title is the last thing the person asked
+        in that thread, trimmed; the meta names the project, whether a draft
+        waits for approval there, and the project's age.
+        """
+        best: tuple[Any, Any, list[Any]] | None = None
+        best_key = ""
+        for project in own_projects:
+            for conv in st.project_conversations(project.id):
+                if conv.agent_id == MAIN_AGENT_ID:
+                    continue
+                thread = st.thread(conv.id)
+                if not thread:
+                    continue
+                key = project.updated_at or ""
+                if best is None or key > best_key:
+                    best = (conv, project, thread)
+                    best_key = key
+        if best is None:
+            return None
+        conv, project, thread = best
+        try:
+            agent_name = get_agent(conv.agent_id).name
+        except KeyError:
+            return None
+        subject = ""
+        for message in reversed(thread):
+            if not message.is_orbit:
+                subject = message.body
+                break
+        if not subject:
+            subject = thread[0].body
+        subject = " ".join(subject.split())
+        if len(subject) > 70:
+            subject = subject[:67].rsplit(" ", 1)[0] + "…"
+        tasks = st.tasks_for_project(project.id)
+        return {
+            "title": subject,
+            "agent_name": agent_name,
+            "agent_id": conv.agent_id,
+            "project_name": project.name,
+            "project_id": project.id,
+            "waiting": any(proposal_ready(t) for t in tasks),
+            "age": human_age(project.updated_at) or "just now",
+            "url": url_for("project_workspace", project_id=project.id, agent=conv.agent_id)
+            + "#agent",
+        }
+
     @app.get("/projects")
     def projects_page() -> str:
         st = _scoped_store()
@@ -964,25 +1019,63 @@ def create_app(
 
     @app.get("/agents")
     def agents_page() -> str:
+        """The six specialists, and the two honest ways into a conversation.
+
+        A card's Start opens the picker at its specialty; the header's copper
+        button opens it at the project. Both end in the same POST assign the
+        Agents page has always used, so the conversation lands in the project
+        the person picked. ``?view=loading`` / ``?view=error`` are the
+        presentation-only switches, derived from the dashboard's own set.
+        """
         st = _scoped_store()
         project_store = _scoped_projects()
         query = request.args.get("q", "").strip()
-        selected = None
         if st.selected_agent:
             try:
-                selected = get_agent(st.selected_agent)
+                get_agent(st.selected_agent)
             except KeyError:
                 # A selection pointing nowhere clears itself rather than
-                # showing a bar that names a specialty that does not exist.
+                # naming a specialty that does not exist.
                 st.selected_agent = None
-        assign_targets = [{"id": p.id, "name": p.name} for p in project_store.list()]
+        own_projects = project_store.list()
+        picker_projects = []
+        for p in own_projects:
+            tasks = st.tasks_for_project(p.id)
+            done, total = progress(tasks)
+            picker_projects.append(
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "task_line": f"{done} of {total} tasks complete",
+                }
+            )
+        pick_agent = None
+        pick_id = request.args.get("pick", "").strip()
+        if pick_id:
+            try:
+                pick_agent = get_agent(pick_id)
+            except KeyError:
+                pick_agent = None
+        pick_project = None
+        pick_project_id = request.args.get("project", "").strip()
+        if pick_project_id:
+            pick_project = project_store.get(pick_project_id)
+        choose = request.args.get("choose", "").strip() == "1"
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
         return render_template(
             "agents.html",
             agents=search_agents(query),
+            agents_all=agent_types(),
             query=query,
             total=len(agent_types()),
-            selected_agent=selected,
-            assign_targets=assign_targets,
+            picker_projects=picker_projects,
+            pick_agent=pick_agent,
+            pick_project=pick_project.card() if pick_project is not None else None,
+            choose=choose,
+            recent=_recent_specialist_conversation(st, own_projects),
+            view=view,
             projects_active=False,
             agents_active=True,
             **_sidebar_context(),

@@ -1,104 +1,390 @@
-{% extends "layout.html" %}
+{% extends "app_shell.html" %}
+{# ===========================================================
+   Agents — the six specialists, on the shared app shell.
+
+   Drawn from design/ORBIT UI___2/:
+     Agents · Dark · Desktop.png  (2880 export, read at 1440)
+     Agents · Dark · Mobile.png   (390)
+     Agents · Light · Mobile.png  (390)
+   (Agents Light Desktop does not exist in the frame set; it is
+   derived from the light tokens plus this screen's layout.)
+
+   Measured from the frames at 1440:
+     title 36, sub 15, copper button 48, intro line 15; cards in a
+     3-up grid, 24 apart, 24 padding, 16 radius; icon 24, name 24
+     display, persona and best-at 14; Start full-width secondary;
+     the pick-up card spans the grid 32 below it.
+
+   What a card shows is the registry (app/agents.py): the specialty's
+   name, its persona line and its "best at" line from the frames, and
+   a Start conversation button. No success rates, no usage figures,
+   no on/off toggles — none of those exist in this build.
+
+   Choosing a specialist asks which project it should work in (the
+   picker panel below the header, server-rendered so it works without
+   JavaScript), then opens that project's conversation with it — the
+   conversation the store already carries.
+
+   States (derived from the dashboard's own set, dashboard.html):
+     empty   — no projects to pick / no specialist conversation yet.
+     loading — ?view=loading, skeleton on the same geometry.
+     error   — ?view=error, the failure panel with two ways out.
+   =========================================================== #}
 {% block title %}orbit — Agents{% endblock %}
-{% block body_class %}v2{% endblock %}
-{% block body %}
-<div class="screen screen--active" id="screen-agents">
-{% include "_sidebar.html" %}
 
-  <main class="page-main">
-    {% include "_topbar.html" %}
-    <div class="page-wrap">
+{% block head %}
+<style>
+  .ag-page { display: flex; flex-direction: column; }
 
-      <div class="page-topline">
-        <nav class="page-crumb" aria-label="Breadcrumb"><span class="crumb-workspace">{{ user.workspace }}</span><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Agents</span></nav>
-        <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
-      </div>
+  .ag-title {
+    font-family: var(--font-display);
+    font-size: clamp(28px, 2.5vw, 36px);
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+  }
 
-      <header class="page-head-block">
-        <p class="page-eyebrow">Specialists for your projects</p>
-        <h1 class="page-title">The right help, on the right job.</h1>
-        <p class="page-sub">{{ total }} specialties · available across your projects. Choosing one assigns its own conversation inside the project you pick — its brief is the system prompt the conversation actually runs under.</p>
-      </header>
+  .ag-sub { margin-top: 12px; font-size: 15px; line-height: 1.55; color: var(--text-2); }
 
-      <form class="search-field agents-search" method="get" action="/agents" role="search">
-        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
-        <input type="search" name="q" value="{{ query }}" placeholder="Find an agent by specialty" aria-label="Find an agent by specialty" autocomplete="off" />
+  .ag-cta { margin-top: 20px; }
+
+  .ag-intro {
+    margin-top: clamp(24px, 3.4vh, 32px);
+    max-width: 74ch;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  /* ---------------- picker panel ---------------- */
+  .ag-picker {
+    margin-top: 24px;
+    padding: clamp(20px, 2vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  [data-theme="dark"] .ag-picker { border-color: var(--border); box-shadow: none; }
+
+  .ag-picker__title {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--text-1);
+  }
+
+  .ag-picker__text { margin-top: 8px; font-size: 14px; line-height: 1.6; color: var(--text-2); }
+
+  .ag-picker__rows { margin-top: 16px; display: flex; flex-direction: column; }
+
+  .ag-picker__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 4px;
+    border-top: 1px solid var(--border);
+    color: var(--text-1);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.5;
+    text-decoration: none;
+  }
+
+  .ag-picker__row:first-child { border-top: 0; }
+  .ag-picker__row:hover { color: var(--text-1); text-decoration: underline; text-underline-offset: 3px; }
+
+  .ag-picker__side { flex: 0 0 auto; font-size: 13px; font-weight: 400; color: var(--text-2); }
+
+  .ag-picker__rowbtn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    width: 100%;
+    padding: 12px 4px;
+    border: 0;
+    border-top: 1px solid var(--border);
+    background: none;
+    color: var(--text-1);
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.5;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .ag-picker__rowbtn:first-child { border-top: 0; }
+  .ag-picker__rowbtn:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  .ag-picker__actions { display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+
+  /* ---------------- the grid ---------------- */
+  .ag-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 24px;
+    margin-top: clamp(24px, 3.4vh, 32px);
+  }
+
+  .ag-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: clamp(20px, 2vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  [data-theme="dark"] .ag-card { border-color: var(--border); box-shadow: none; }
+
+  .ag-card__icon { width: 24px; height: 24px; color: var(--text-1); }
+
+  .ag-card__name {
+    margin-top: 20px;
+    font-family: var(--font-display);
+    font-size: clamp(20px, 1.7vw, 24px);
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .ag-card__persona { margin-top: 12px; font-size: 14px; line-height: 1.55; color: var(--text-2); }
+  .ag-card__blurb { margin-top: 12px; font-size: 14px; line-height: 1.55; color: var(--text-2); }
+
+  .ag-card__start { width: 100%; margin-top: 20px; }
+
+  /* ---------------- pick-up card ---------------- */
+  .ag-recent {
+    margin-top: clamp(24px, 3.4vh, 32px);
+    padding: clamp(20px, 2vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  [data-theme="dark"] .ag-recent { border-color: var(--border); box-shadow: none; }
+
+  .ag-recent__title {
+    font-family: var(--font-display);
+    font-size: clamp(20px, 1.7vw, 24px);
+    font-weight: 500;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+    overflow-wrap: anywhere;
+  }
+
+  .ag-recent__sub { margin-top: 12px; font-size: 14px; line-height: 1.6; color: var(--text-2); }
+  .ag-recent__meta { margin-top: 12px; font-size: 13px; line-height: 1.5; color: var(--text-3); }
+  .ag-recent__open { margin-top: 20px; }
+
+  /* ---------------- skeleton and error, derived from dashboard.html ---------------- */
+  .ag-skel {
+    border-radius: 8px;
+    background: var(--surface-2);
+    animation: ag-skel 1.4s ease-in-out infinite;
+  }
+
+  @keyframes ag-skel {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+
+  .ag-skel--title { width: min(460px, 100%); height: 40px; }
+  .ag-skel--line { width: min(360px, 100%); height: 16px; margin-top: 14px; }
+  .ag-skel--button { width: 168px; height: 48px; margin-top: 20px; }
+  .ag-skel--card { min-height: clamp(200px, 28vh, 264px); }
+  .ag-skel--panel { min-height: clamp(120px, 18vh, 176px); margin-top: 32px; }
+
+  .ag-error { display: flex; flex-direction: column; align-items: flex-start; }
+  .ag-error__title {
+    margin-top: 20px;
+    font-family: var(--font-display);
+    font-size: clamp(24px, 2vw, 30px);
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--text-1);
+  }
+  .ag-error__text { margin-top: 10px; max-width: 56ch; font-size: 15px; line-height: 1.6; color: var(--text-2); }
+  .ag-error__actions { display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ag-skel { animation: none; }
+  }
+
+  /* ---------------- narrower windows ---------------- */
+  @media (max-width: 1100px) {
+    .ag-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  @media (max-width: 900px) {
+    .ag-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ag-page">
+
+  {% if view == 'loading' %}
+  {# Derived from the dashboard's loading state: same geometry as the real
+     page, so nothing jumps when it arrives. #}
+  <div role="status" aria-live="polite">
+    <span class="o-visually-hidden">Loading the specialists…</span>
+    <div class="ag-skel ag-skel--title" aria-hidden="true"></div>
+    <div class="ag-skel ag-skel--line" aria-hidden="true"></div>
+    <div class="ag-skel ag-skel--button" aria-hidden="true"></div>
+    <div class="ag-skel ag-skel--line" aria-hidden="true"></div>
+    <div class="ag-grid" aria-hidden="true">
+      <div class="ag-skel ag-skel--card"></div>
+      <div class="ag-skel ag-skel--card"></div>
+      <div class="ag-skel ag-skel--card"></div>
+      <div class="ag-skel ag-skel--card"></div>
+      <div class="ag-skel ag-skel--card"></div>
+      <div class="ag-skel ag-skel--card"></div>
+    </div>
+    <div class="ag-skel ag-skel--panel" aria-hidden="true"></div>
+  </div>
+
+  {% elif view == 'error' %}
+  {# Derived from the dashboard's failure state: say what is safe, offer two
+     real ways forward. #}
+  <section class="ag-error" role="alert">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="ag-error__title">We couldn't load the specialists.</h1>
+    <p class="ag-error__text">Nothing has changed and no conversation was touched. Reload this page, or open your projects and come back.</p>
+    <div class="ag-error__actions">
+      <a class="o-btn o-btn--primary" href="/agents">Try again</a>
+      <a class="o-btn o-btn--secondary" href="/projects">Open Projects</a>
+    </div>
+  </section>
+
+  {% else %}
+
+  <header>
+    <h1 class="ag-title">A specialist for every next step.</h1>
+    <p class="ag-sub">Six focused minds. One shared understanding of your project.</p>
+    <a class="o-btn o-btn--primary ag-cta" href="/agents?choose=1#pick">Choose a project</a>
+  </header>
+
+  <p class="ag-intro">Agents explore and propose. Every edit, task update, and external action waits for your approval. Helpful by design. Never on autopilot.</p>
+
+  {% if pick_agent or pick_project or choose %}
+  {# The picker: server-rendered so choosing a project works without
+     JavaScript. Two honest orders — a card starts from its specialty,
+     the header button from the project. #}
+  <section class="ag-picker" id="pick" aria-label="Choose where the specialist works">
+    {% if pick_agent %}
+    <h2 class="ag-picker__title">Where should the {{ pick_agent.name }} agent work?</h2>
+    <p class="ag-picker__text">The conversation opens inside the project you pick, with that project's map and history as its context — nothing else leaks in.</p>
+    <div class="ag-picker__rows">
+      {% for p in picker_projects %}
+      <form method="post" action="/agents/{{ pick_agent.id }}/assign">
+        <input type="hidden" name="project_id" value="{{ p.id }}" />
+        <button type="submit" class="ag-picker__rowbtn">
+          <span>{{ p.name }}</span>
+          <span class="ag-picker__side">{{ p.task_line }}</span>
+        </button>
       </form>
-
-      {% if agents %}
-      <section class="agents-grid" aria-label="Specialties">
-        {% for agent in agents %}
-        <article class="agent-card{% if selected_agent and selected_agent.id == agent.id %} selected{% endif %}">
-          <header class="agent-head">
-            <span class="agent-icon" aria-hidden="true">
-              {%- if agent.id == 'coding' -%}
-              <svg class="oi" viewBox="0 0 24 24"><path d="m8.5 7-4.5 5 4.5 5M15.5 7l4.5 5-4.5 5"/></svg>
-              {%- elif agent.id == 'research' -%}
-              <svg class="oi" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
-              {%- elif agent.id == 'debug' -%}
-              <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="13" r="5.5"/><path d="M9 8.5 7 6M15 8.5 17 6M6.5 13H4M20 13h-2.5M7.5 18l-2 2M16.5 18l2 2M12 4.5v2"/></svg>
-              {%- elif agent.id == 'review' -%}
-              <svg class="oi" viewBox="0 0 24 24"><path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.6"/></svg>
-              {%- elif agent.id == 'testing' -%}
-              <svg class="oi" viewBox="0 0 24 24"><path d="M9.5 3.5h5M11 3.5v5.2L6 17a3 3 0 0 0 2.7 4.5H15.3A3 3 0 0 0 18 17l-5-8.3V3.5"/><path d="m9.8 15.6 2.3 2.2 3.4-3.7"/></svg>
-              {%- else -%}
-              <svg class="oi" viewBox="0 0 24 24"><path d="M5.5 5A2.5 2.5 0 0 1 8 2.5h11v16H8a2.5 2.5 0 0 0-2.5 2.5V5Z"/><path d="M8 18.5A2.5 2.5 0 0 0 5.5 21H19"/></svg>
-              {%- endif -%}
-            </span>
-            <div class="agent-head-text">
-              <div class="agent-name">{{ agent.name }}</div>
-              <div class="agent-role">{{ agent.role }}</div>
-            </div>
-          </header>
-          <p class="agent-detail">{{ agent.detail }}</p>
-          <p class="agent-quote">“{{ agent.quote }}”</p>
-          <div class="agent-actions">
-            {% if selected_agent and selected_agent.id == agent.id %}
-            <span class="agent-selected-flag">Ready to assign ✓</span>
-            <form method="post" action="/agents/deselect" class="inline-form"><button type="submit" class="linkish">Deselect</button></form>
-            {% else %}
-            <form method="post" action="/agents/{{ agent.id }}/select">
-              <input type="hidden" name="q" value="{{ query }}" />
-              <button type="submit" class="btn-ghost">Choose {{ agent.name }} →</button>
-            </form>
-            {% endif %}
-          </div>
-        </article>
-        {% endfor %}
-      </section>
       {% else %}
-      <section class="empty-state" aria-label="No matching specialties">
-        <img class="empty-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-        <h2>No specialty named “{{ query }}”.</h2>
-        <p>The {{ total }} specialties are Coding, Research, Debug, Review, Testing and Documentation.</p>
-        <a class="btn-ghost" href="/agents">See them all</a>
-      </section>
-      {% endif %}
+      <p class="ag-picker__text">No projects yet — a specialist needs a project to work in. Start one, or import something you already have.</p>
+      <div class="ag-picker__actions">
+        <a class="o-btn o-btn--secondary" href="/create">New project</a>
+        <a class="o-btn o-btn--secondary" href="/projects/import">Import a project</a>
+      </div>
+      {% endfor %}
     </div>
-  </main>
-
-  {% if selected_agent %}
-  <div class="assign-bar" id="selection" role="region" aria-label="Assign the selected specialist">
-    <div class="assign-bar-text">
-      <strong>{{ selected_agent.name }}</strong> selected — no project is assigned yet.
+    {% elif pick_project %}
+    <h2 class="ag-picker__title">Who should work on {{ pick_project.name }}?</h2>
+    <p class="ag-picker__text">Each specialist opens its own conversation in this project. Every proposal still waits for your approval.</p>
+    <div class="ag-picker__rows">
+      {% for agent in agents_all %}
+      <form method="post" action="/agents/{{ agent.id }}/assign">
+        <input type="hidden" name="project_id" value="{{ pick_project.id }}" />
+        <button type="submit" class="ag-picker__rowbtn">
+          <span>{{ agent.name }}</span>
+          <span class="ag-picker__side">{{ agent.persona }}</span>
+        </button>
+      </form>
+      {% endfor %}
     </div>
-    {% if assign_targets %}
-    <form method="post" action="/agents/{{ selected_agent.id }}/assign" class="assign-bar-form">
-      <select class="text-input" name="project_id" required aria-label="Choose a project">
-        <option value="" disabled selected>Choose a project</option>
-        {% for p in assign_targets %}
-        <option value="{{ p.id }}">{{ p.name }}</option>
-        {% endfor %}
-      </select>
-      <button type="submit" class="btn-primary">Assign &amp; open the workspace</button>
-    </form>
     {% else %}
-    <div class="assign-bar-none">
-      <span>No project exists to assign it to.</span>
-      <a class="btn-primary" href="/create">Create a project first</a>
+    <h2 class="ag-picker__title">Choose a project</h2>
+    <p class="ag-picker__text">Pick the project first, then the specialist who should work in it.</p>
+    <div class="ag-picker__rows">
+      {% for p in picker_projects %}
+      <a class="ag-picker__row" href="/agents?project={{ p.id }}#pick">
+        <span>{{ p.name }}</span>
+        <span class="ag-picker__side">{{ p.task_line }}</span>
+      </a>
+      {% else %}
+      <p class="ag-picker__text">No projects yet — a specialist needs a project to work in. Start one, or import something you already have.</p>
+      <div class="ag-picker__actions">
+        <a class="o-btn o-btn--secondary" href="/create">New project</a>
+        <a class="o-btn o-btn--secondary" href="/projects/import">Import a project</a>
+      </div>
+      {% endfor %}
     </div>
     {% endif %}
+  </section>
+  {% endif %}
+
+  <div class="ag-grid">
+    {% for agent in agents %}
+    <article class="ag-card">
+      <svg class="ag-card__icon o-icon" viewBox="0 0 24 24" aria-hidden="true">
+        {% if agent.id == 'coding' %}
+        <path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14" />
+        {% elif agent.id == 'research' %}
+        <circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4.5 4.5" />
+        {% elif agent.id == 'debug' %}
+        <path d="M9 6.5 7.5 4.5M15 6.5l1.5-2M8 10h8M8 14h8M6.5 10H4.5M19.5 10h-2M6.5 14h-2M19.5 14h2M12 20v-1" />
+        <rect x="8" y="6.5" width="8" height="12.5" rx="4" />
+        {% elif agent.id == 'review' %}
+        <path d="M4 8V6a2 2 0 0 1 2-2h2M20 8V6a2 2 0 0 0-2-2h-2M4 16v2a2 2 0 0 0 2 2h2M20 16v2a2 2 0 0 1-2 2h-2" />
+        <circle cx="12" cy="12" r="3.5" /><circle cx="12" cy="12" r="0.5" />
+        {% elif agent.id == 'testing' %}
+        <path d="M10 3.5h4M11 3.5v5L5.5 18a2 2 0 0 0 1.8 3h9.4a2 2 0 0 0 1.8-3L13 8.5v-5M8 14.5h8" />
+        {% else %}
+        <path d="M5 4.5h9l5 5v10a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19.5v-15Z" />
+        <path d="M14 4.5v5h5M8.5 13h7M8.5 16.5h5" />
+        {% endif %}
+      </svg>
+      <h2 class="ag-card__name">{{ agent.name }}</h2>
+      <p class="ag-card__persona">{{ agent.persona }}</p>
+      <p class="ag-card__blurb">{{ agent.blurb }}</p>
+      <a class="o-btn o-btn--secondary ag-card__start" href="/agents?pick={{ agent.id }}#pick">Start</a>
+    </article>
+    {% else %}
+    <p class="ag-intro">No specialty matches that search. The six are Coding, Research, Debug, Review, Testing and Documentation — <a class="o-link" href="/agents">clear the search</a>.</p>
+    {% endfor %}
   </div>
+
+  <section class="ag-recent" aria-label="Pick up a recent conversation">
+    {% if recent %}
+    <h2 class="ag-recent__title">{{ recent.title }}</h2>
+    <p class="ag-recent__sub">Your recent conversation with the {{ recent.agent_name }} agent is ready to pick up.</p>
+    <p class="ag-recent__meta">{{ recent.project_name }}{% if recent.waiting %} · Proposal awaiting approval{% endif %} · {{ recent.age }}</p>
+    <a class="o-btn o-btn--secondary ag-recent__open" href="{{ recent.url }}">Open conversation</a>
+    {% else %}
+    <h2 class="ag-recent__title">No specialist conversations yet.</h2>
+    <p class="ag-recent__sub">Pick a specialist above and choose a project — the conversation starts there and will be ready to pick up here.</p>
+    {% endif %}
+  </section>
+
   {% endif %}
 </div>
 {% endblock %}

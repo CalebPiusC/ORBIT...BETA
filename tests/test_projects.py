@@ -313,17 +313,16 @@ class ProjectRouteTests(unittest.TestCase):
         resp = self.client.post("/agents/debug/select")
         self.assertEqual(resp.status_code, 303)
         self.assertEqual(store.selected_agent, "debug")
-        # the sticky bar names the pick and its real next step
+        # the page renders without a selection bar: picking happens in the
+        # picker panel, and the stored selection stays an internal seam
         html = self.client.get("/agents").get_data(as_text=True)
         self.assertIn("Debug", html)
-        self.assertIn("selected — no project is assigned yet", html)
-        self.assertIn('class="assign-bar"', html)  # the bar element, not just its CSS
+        self.assertNotIn("assign-bar", html)
         events = [e for e in self._audit_events() if e.get("event") == "agent_specialist_selected"]
         self.assertEqual(len(events), 1)
         resp = self.client.post("/agents/deselect")
         self.assertEqual(resp.status_code, 303)
         self.assertIsNone(store.selected_agent)
-        self.assertNotIn('class="assign-bar"', self.client.get("/agents").get_data(as_text=True))
         resp = self.client.post("/agents/not-an-agent/select")
         self.assertEqual(resp.status_code, 404)
 
@@ -346,19 +345,22 @@ class ProjectRouteTests(unittest.TestCase):
         html = self.client.get("/agents").get_data(as_text=True)
         for name in ("Coding", "Research", "Debug", "Review", "Testing", "Documentation"):
             self.assertIn(name, html)
-        for quote in ("Add the no-results search state.", "Compare local search approaches.",
-                      "Why are duplicate notes appearing?", "Review this search implementation.",
-                      "Test search with an empty notebook.", "Explain how notes are stored."):
-            self.assertIn(quote, html)
-        self.assertIn("6 specialties", html)
-        self.assertIn("Find an agent by specialty", html)
+        # the frames' persona and best-at lines, from the registry
+        for line in ("The thoughtful builder", "The curious explorer",
+                     "The patient problem-solver", "The second set of eyes",
+                     "The reassuring check", "The clear communicator"):
+            self.assertIn(line, html)
+        # no invented metrics anywhere on the page
+        for banned in ("success rate", "success-rate", "usage", "tasks completed by"):
+            self.assertNotIn(banned, html.lower())
 
-    def test_agents_search_filters_by_specialty(self) -> None:
+    def test_a_deep_linked_search_still_filters(self) -> None:
+        # the frame draws no search box; a ?q= deep link still filters
         html = self.client.get("/agents?q=libraries").get_data(as_text=True)
         self.assertIn("Research", html)
-        self.assertNotIn("Debug<", html)
+        self.assertNotIn("The patient problem-solver", html)
         html = self.client.get("/agents?q=zzz").get_data(as_text=True)
-        self.assertIn("No specialty named", html)
+        self.assertIn("No specialty matches that search", html)
         self.assertIn("Coding, Research, Debug, Review, Testing and Documentation", html)
 
 
