@@ -719,7 +719,7 @@
       {% if selected_state and selected_state[0] == 'needs_approval' %}
       <span class="o-capsule ws-detail__chip"><span class="o-capsule__dot" aria-hidden="true"></span>Needs approval</span>
       <h3 class="ws-detail__proposal">A proposal is ready.</h3>
-      <p class="ws-card__desc">Nothing has been applied. Open the task to review what the run planned and named before you approve anything.</p>
+      <p class="ws-card__desc">Nothing has been applied. Open the task to review what the run planned and named.</p>
       <div class="ws-detail__actions">
         <a class="o-btn o-btn--secondary" href="/task/{{ selected.id }}">Open change review</a>
       </div>
@@ -816,7 +816,7 @@
           <span class="ws-controls" id="wsModeZone"></span>
           <button type="submit" class="o-btn o-btn--secondary" id="wsSend">Send</button>
         </div>
-        <p class="ws-fineprint">Messages don't approve changes. Only change review can do that.</p>
+        <p class="ws-fineprint">Messages don't change your project. Every edit stays a draft you can review.</p>
         <noscript><p class="ws-fineprint">The {{ speaker }} conversation needs JavaScript — replies stream in live.</p></noscript>
       </form>
     </section>
