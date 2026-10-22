@@ -29,7 +29,7 @@ from providers.base import StreamChunk
 from app.projectmap import UNSTAGED, latest_task, map_stages, next_up, progress, row_state
 from app.projects import ProjectStore
 from app.server import create_app
-from app.store import DEFAULT_USER_ID, Store
+from app.store import DEFAULT_USER_ID, Activity, Store
 from app.summaries import clean_summary, request_summary
 from app.taskplan import IDLE, FAILED, new_run
 from tools.registry import AuditLog
@@ -216,7 +216,10 @@ class AgentConversationTests(WorkspaceFixture):
             "/agents/review/assign", data={"project_id": self.project.id}
         )
         self.assertEqual(resp.status_code, 303)
-        self.assertIn("agent=review", resp.headers["Location"])
+        # assign lands on the specialist's conversation screen now
+        self.assertEqual(
+            resp.headers["Location"], f"/projects/{self.project.id}/agents/review"
+        )
         self.assertIsNone(self.view.selected_agent)  # consumed by the assignment
         conv = self.view.project_conversation(self.project.id, agent_id="review")
         self.assertIsNotNone(conv)
@@ -274,21 +277,25 @@ class AgentConversationTests(WorkspaceFixture):
         resp.get_data(as_text=True)
         conv = self.view.project_conversation(self.project.id, agent_id="main")
         self.assertEqual(self.store.threads[conv.id][-1].speaker, "Main Agent")
-        # and the rendered rail shows it over the agent bubble
+        # and the rendered thread carries the reply with no name label: the
+        # column heading already says who is speaking (chat rules).
         html = self.client.get(f"/projects/{self.project.id}").get_data(as_text=True)
-        self.assertIn("chat-speaker", html)
+        self.assertNotIn("chat-speaker", html)
+        self.assertIn('class="ws-msg ws-msg--orbit"', html)
 
 
 class WorkspaceRouteTests(WorkspaceFixture):
     def test_workspace_renders_project_and_empty_map(self) -> None:
         html = self.client.get(f"/projects/{self.project.id}").get_data(as_text=True)
         self.assertIn("whatsapp-bot", html)
-        self.assertIn("Project map", html)
+        self.assertIn("Project Map", html)
         self.assertIn("Main Agent", html)
         self.assertIn("0 of 0 tasks complete", html)
-        self.assertIn("No technology chosen yet", html)
         self.assertIn("No conversation yet", html)
         self.assertIn("The map is empty", html)
+        # the frame's four tabs, all real views
+        for label in ("Tasks", "Files", "Activity"):
+            self.assertIn(f"?tab={label.lower()}", html)
         # no fake completion claim ever slips in through empty states
         self.assertNotIn("All done", html)
 
@@ -298,9 +305,12 @@ class WorkspaceRouteTests(WorkspaceFixture):
         open_ = self.view.create_task("Wire the provider", project_id=self.project.id, stage="Foundation")
         html = self.client.get(f"/projects/{self.project.id}").get_data(as_text=True)
         self.assertIn("Foundation", html)
-        self.assertIn("1/2 complete", html)
-        self.assertIn("state-done", html)
-        self.assertIn("Complete · you marked it", html)
+        # the meta line counts person-marked completes; the open row is the
+        # map's one "Up next" (and its stage carries the capsule), the closed
+        # row reads "Done" with a tick.
+        self.assertIn("1 of 2 tasks complete", html)
+        self.assertIn("Up next", html)
+        self.assertIn(">Done<", html)
         self.assertIn('action="/projects/' + self.project.id + '/tasks"', html)
         self.assertIn('name="stage"', html)
         self.assertIn('name="builds_on"', html)
@@ -323,12 +333,32 @@ class WorkspaceRouteTests(WorkspaceFixture):
         resp = self.client.post(f"/projects/{self.project.id}/tasks/{other.id}/complete")
         self.assertEqual(resp.status_code, 404)
 
-    def test_overview_view_swaps_the_center_panel(self) -> None:
-        html = self.client.get(f"/projects/{self.project.id}?view=overview").get_data(as_text=True)
-        self.assertIn("Project overview", html)
-        self.assertIn("What it is", html)
-        self.assertIn('name="status"', html)
-        self.assertNotIn("Requirements", html)
+    def test_the_other_tabs_list_only_stored_rows(self) -> None:
+        task = self.view.create_task(
+            "Follow the orders flow in checkout.py", project_id=self.project.id, stage="Build"
+        )
+        # an empty files tab says so honestly before anything names a file
+        empty_files = self.client.get(
+            f"/projects/{self.project.id}?tab=files"
+        ).get_data(as_text=True)
+        self.assertIn("No files named yet", empty_files)
+        task.run = new_run(task.description)
+        task.activity.insert(0, Activity(
+            text="You marked this task complete.", time="09:12"))
+        files = self.client.get(f"/projects/{self.project.id}?tab=files").get_data(as_text=True)
+        self.assertIn("checkout.py", files)
+        self.assertIn("Named in the request", files)
+        activity = self.client.get(f"/projects/{self.project.id}?tab=activity").get_data(as_text=True)
+        self.assertIn("You marked this task complete.", activity)
+        rows = self.client.get(f"/projects/{self.project.id}?tab=tasks").get_data(as_text=True)
+        self.assertIn("Follow the orders flow in checkout.py", rows)
+        self.assertIn("Build ·", rows)
+        # an unknown tab falls back to the map rather than emptying the page
+        fallback = self.client.get(f"/projects/{self.project.id}?tab=bogus").get_data(as_text=True)
+        self.assertIn("Project Map", fallback)
+        # activity rows carry the task they belong to, newest task first
+        self.assertLess(activity.index("You marked this task complete."),
+                        activity.index("Task created from your request."))
 
     def test_unknown_project_404s(self) -> None:
         resp = self.client.get("/projects/p-nope")
@@ -365,15 +395,17 @@ class WorkspaceRouteTests(WorkspaceFixture):
         own = self.view.create_task("Own task", project_id=self.project.id)
         other = self.view.create_task("Someone else's task")  # no project
         html = self.client.get(f"/projects/{self.project.id}?task={own.id}").get_data(as_text=True)
-        self.assertIn("Requirements", html)
         self.assertIn("Own task", html)
         self.assertIn("Mark complete", html)
-        self.assertIn("Discuss with Main Agent", html)
-        # a task that is not this project's renders no details at all
+        # the open task is what the conversation focuses on
+        self.assertIn("Focused on: Own task", html)
+        # a task that is not this project's renders nowhere on the page
         html = self.client.get(f"/projects/{self.project.id}?task={other.id}").get_data(as_text=True)
-        self.assertNotIn("Requirements", html)
+        self.assertNotIn("Someone else's task", html)
 
-    def test_details_render_links_and_run_state(self) -> None:
+    def test_details_render_the_run_state_and_a_waiting_proposal(self) -> None:
+        from app.taskplan import IDLE
+
         a = self.view.create_task("Foundation task", project_id=self.project.id, stage="Foundation")
         b = self.view.create_task(
             "Follow the orders flow in checkout.py",
@@ -382,14 +414,23 @@ class WorkspaceRouteTests(WorkspaceFixture):
             builds_on=a.id,
         )
         b.run = new_run(b.description)
+        b.run.status = IDLE  # the turn finished: a draft exists, nothing applied
         html = self.client.get(f"/projects/{self.project.id}?task={b.id}").get_data(as_text=True)
         self.assertIn("FOUNDATION", html)  # the eyebrow is the filed stage
-        self.assertIn("Builds on", html)
-        self.assertIn("Foundation task", html)
-        self.assertIn("Next up", html)
-        self.assertIn("requirement", html.lower())
-        self.assertIn("Associated work", html)
-        self.assertIn("checkout.py", html)  # the file comes from the request itself
+        self.assertIn("What done looks like", html)
+        self.assertIn("A proposal is ready.", html)
+        self.assertIn("Open change review", html)
+        self.assertIn("Needs approval", html)
+        # with nothing selected in the query, the waiting draft opens by default
+        default = self.client.get(f"/projects/{self.project.id}").get_data(as_text=True)
+        self.assertIn("Focused on: Follow the orders flow in checkout.py", default)
+        # the stage capsule carries the copper-dot approval count
+        self.assertIn("1 needs approval", default)
+        # approving moves the row and the details out of the waiting state
+        b.approved = True
+        approved = self.client.get(f"/projects/{self.project.id}?task={b.id}").get_data(as_text=True)
+        self.assertIn("You approved this change.", approved)
+        self.assertNotIn("A proposal is ready.", approved)
 
     def test_stream_appends_project_scoped_thread_and_audits(self) -> None:
         events = self.stream("What is this project?")

@@ -1,0 +1,376 @@
+{% extends "app_shell.html" %}
+{# ===========================================================
+   Agent conversation — one specialist's conversation with one
+   project, on the shared app shell.
+
+   DERIVED SCREEN: no frame exists for it in design/ORBIT UI___2.
+   It is derived from the workspace's chat column (Workspace ·
+   Light/Dark · Desktop, Light Mobile) plus the tokens: the same
+   thread rules (the person's messages right, the agent's left, no
+   name labels), the same composer box and footnote, the same
+   chips — given a full page and a readable measure.
+
+   What it shows is the conversation the store already carries for
+   (project, agent): the thread, the follow-ups the last reply
+   earned, and the specialty's real starters while the thread is
+   empty. The stream endpoint is the workspace's own, so gating,
+   audit and ownership are exactly as they were.
+
+   States (derived from the dashboard's own set, dashboard.html):
+     empty   — no messages yet: the specialty's starters, real prompts.
+     loading — ?view=loading, skeleton on the same geometry.
+     error   — ?view=error, the failure panel with two ways out.
+   =========================================================== #}
+{% block title %}orbit — {{ agent.name }} agent · {{ project.name }}{% endblock %}
+
+{% block head %}
+<style>
+  .cv-page { display: flex; flex-direction: column; }
+
+  .cv-crumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+
+  .cv-crumb a { color: inherit; text-decoration: none; }
+  .cv-crumb a:hover { color: var(--text-1); text-decoration: underline; text-underline-offset: 3px; }
+  .cv-crumb__sep { color: var(--text-3); }
+  .cv-crumb__here { color: var(--text-2); overflow-wrap: anywhere; }
+
+  .cv-title {
+    margin-top: 10px;
+    font-family: var(--font-display);
+    font-size: clamp(28px, 2.5vw, 36px);
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+  }
+
+  .cv-sub {
+    margin-top: 12px;
+    max-width: 62ch;
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
+  .cv-head__actions { display: flex; align-items: center; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
+
+  /* ---------------- the thread panel ---------------- */
+  .cv-card {
+    margin-top: clamp(24px, 3.4vh, 32px);
+    max-width: 768px;
+    padding: clamp(20px, 2vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  [data-theme="dark"] .cv-card { border-color: var(--border); box-shadow: none; }
+
+  .cv-day {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .cv-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 12px;
+    max-height: clamp(320px, 52vh, 640px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 2px;
+  }
+
+  .cv-msg { display: flex; flex-direction: column; align-items: flex-start; }
+  .cv-msg--user { align-items: flex-end; }
+
+  .cv-bubble {
+    max-width: 82%;
+    padding: 10px 14px;
+    border-radius: var(--r-control);
+    background: var(--chip-bg);
+    color: var(--text-1);
+    font-size: 14px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
+  .cv-msg--user .cv-bubble { background: var(--border); }
+
+  [data-theme="dark"] .cv-bubble { background: var(--surface-2); }
+  [data-theme="dark"] .cv-msg--user .cv-bubble { background: var(--border); }
+
+  .cv-bubble pre {
+    margin: 8px 0 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--bg);
+    font-size: 12.5px;
+    line-height: 1.5;
+    overflow-x: auto;
+  }
+
+  .cv-bubble pre:first-child { margin-top: 0; }
+
+  .cv-bubble .cv-thinking {
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+
+  .cv-code-copy {
+    float: right;
+    margin: -2px -2px 6px 8px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .cv-code-copy:hover { color: var(--text-1); }
+
+  .cv-error-line {
+    margin-top: 8px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--danger);
+  }
+
+  .cv-thread__empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .cv-thread__empty p { font-size: 14px; line-height: 1.6; color: var(--text-2); }
+  .cv-thread__empty img { width: 28px; height: 28px; opacity: 0.8; }
+
+  .cv-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .cv-followups { margin-top: 12px; }
+  .cv-followups:empty { margin-top: 0; }
+
+  .cv-chip {
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: 12.5px;
+    line-height: 1.4;
+    cursor: pointer;
+  }
+  .cv-chip:hover { background: var(--surface-2); color: var(--text-1); }
+
+  .cv-turn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    color: var(--text-2);
+    font-size: 12.5px;
+  }
+  .cv-turn[hidden] { display: none; }
+  .cv-turn img { width: 18px; height: 18px; }
+
+  .cv-composer { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .cv-composer__row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+  /* Quick/Deep and Chat/Agent stay two separate controls, as everywhere else. */
+  .cv-controls { display: inline-flex; align-items: center; gap: 8px; margin-right: auto; }
+
+  .cv-seg {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    background: var(--surface);
+  }
+
+  .cv-seg__opt {
+    padding: 5px 12px;
+    border: 0;
+    border-radius: var(--r-pill);
+    background: transparent;
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+  }
+  .cv-seg__opt[aria-pressed="true"] { background: var(--chip-bg); color: var(--text-1); }
+  .cv-seg__opt:disabled { cursor: default; }
+
+  .cv-depth {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+  }
+  .cv-depth:hover { color: var(--text-1); }
+
+  .cv-composer .o-field__input { resize: vertical; min-height: 44px; }
+
+  .cv-fineprint { font-size: 12px; line-height: 1.5; color: var(--text-2); }
+
+  /* ---------------- skeleton and error, derived from dashboard.html ---------------- */
+  .cv-skel {
+    border-radius: 8px;
+    background: var(--surface-2);
+    animation: cv-skel 1.4s ease-in-out infinite;
+  }
+
+  @keyframes cv-skel {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+
+  .cv-skel--eyebrow { width: 200px; height: 12px; }
+  .cv-skel--title { width: min(380px, 100%); height: 40px; margin-top: 16px; }
+  .cv-skel--line { width: min(320px, 100%); height: 16px; margin-top: 14px; }
+  .cv-skel--panel { height: clamp(320px, 52vh, 560px); margin-top: 32px; max-width: 768px; }
+
+  .cv-error { display: flex; flex-direction: column; align-items: flex-start; }
+  .cv-error__title {
+    margin-top: 20px;
+    font-family: var(--font-display);
+    font-size: clamp(24px, 2vw, 30px);
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--text-1);
+  }
+  .cv-error__text { margin-top: 10px; max-width: 56ch; font-size: 15px; line-height: 1.6; color: var(--text-2); }
+  .cv-error__actions { display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cv-skel { animation: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cv-page">
+
+  {% if view == 'loading' %}
+  {# Derived from the dashboard's loading state: same geometry as the real
+     page, so nothing jumps when it arrives. #}
+  <div role="status" aria-live="polite">
+    <span class="o-visually-hidden">Loading the conversation…</span>
+    <div class="cv-skel cv-skel--eyebrow" aria-hidden="true"></div>
+    <div class="cv-skel cv-skel--title" aria-hidden="true"></div>
+    <div class="cv-skel cv-skel--line" aria-hidden="true"></div>
+    <div class="cv-skel cv-skel--panel" aria-hidden="true"></div>
+  </div>
+
+  {% elif view == 'error' %}
+  {# Derived from the dashboard's failure state: say what is safe, offer two
+     real ways forward. #}
+  <section class="cv-error" role="alert">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="cv-error__title">We couldn't load this conversation.</h1>
+    <p class="cv-error__text">Nothing has changed and no message was sent. Reload this page, or open the project's workspace and come back.</p>
+    <div class="cv-error__actions">
+      <a class="o-btn o-btn--primary" href="/projects/{{ project.id }}/agents/{{ agent.id }}">Try again</a>
+      <a class="o-btn o-btn--secondary" href="/projects/{{ project.id }}">Open the workspace</a>
+    </div>
+  </section>
+
+  {% else %}
+
+  <header>
+    <nav class="cv-crumb" aria-label="Breadcrumb">
+      <a href="/projects">Projects</a>
+      <span class="cv-crumb__sep" aria-hidden="true">/</span>
+      <a href="/projects/{{ project.id }}">{{ project.name }}</a>
+      <span class="cv-crumb__sep" aria-hidden="true">/</span>
+      <span class="cv-crumb__here">{{ agent.name }} conversation</span>
+    </nav>
+    <h1 class="cv-title">{% if agent.id == "main" %}{{ agent.name }}{% else %}{{ agent.name }} agent{% endif %}</h1>
+    <p class="cv-sub">Assigned to {{ project.name }} — {{ agent.role }} The project's map and history are its context, and nothing else leaks in.</p>
+    <div class="cv-head__actions">
+      <a class="o-link" href="/projects/{{ project.id }}">Open the {{ project.name }} workspace →</a>
+    </div>
+  </header>
+
+  <section class="cv-card" aria-label="{{ agent.name }} agent conversation">
+    <div class="cv-thread" id="cvThread" aria-live="polite" aria-atomic="false">
+      {% if thread %}
+      <p class="cv-day">Today, {{ thread[0].time }}</p>
+      {% for msg in thread %}
+      <div class="cv-msg {% if msg.is_orbit %}cv-msg--orbit{% else %}cv-msg--user{% endif %}"{% if msg.id %} data-message-id="{{ msg.id }}"{% endif %}>
+        <div class="cv-bubble">{{ msg.body }}</div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="cv-thread__empty">
+        <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+        <p>No conversation yet — this thread is about <strong>{{ project.name }}</strong> only, under the {{ agent.name }} brief.</p>
+        <div class="cv-chips">
+          {% for starter in starters %}
+          <button type="button" class="cv-chip" data-prompt="{{ starter.prompt }}">{{ starter.label }}</button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="cv-turn" id="cvTurnStatus" role="status" aria-live="polite" hidden>
+      <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+      <span id="cvTurnStatusText">Thinking…</span>
+    </div>
+
+    <div class="cv-chips cv-followups" id="cvFollowups">
+      {% for chip in followups %}
+      <button type="button" class="cv-chip" data-prompt="{{ chip.prompt }}">{{ chip.label }}</button>
+      {% endfor %}
+    </div>
+
+    <form class="cv-composer" id="cvComposer" data-project-id="{{ project.id }}" data-agent="{{ agent.id }}"
+          data-mode="{{ mode }}" data-thinking="{{ thinking_level }}">
+      <label class="o-field">
+        <span class="o-field__label">Your message</span>
+        <textarea class="o-field__input" id="cvInput" rows="2" required
+                  placeholder="Ask the {{ agent.name }} agent about {{ project.name }}…"></textarea>
+      </label>
+      <div class="cv-composer__row">
+        <span class="cv-controls" id="cvModeZone"></span>
+        <button type="submit" class="o-btn o-btn--primary" id="cvSend">Send</button>
+      </div>
+      <p class="cv-fineprint">Messages don't change your project. Every edit stays a draft you can review.</p>
+      <noscript><p class="cv-fineprint">This conversation needs JavaScript — replies stream in live.</p></noscript>
+    </form>
+  </section>
+
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="{{ url_for('static', filename='conversation.js') }}"></script>
+{% endblock %}

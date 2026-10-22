@@ -1,11 +1,15 @@
-/* orbit — project workspace client (project.js)
+/* orbit — workspace client (project.js)
  *
- * Drives the Main Agent conversation on /projects/<id>: the composer posts to
- * /api/project/<id>/stream and folds the SSE events into the thread. The rules
- * mirror app.js (fromdocs/handoff §1.8): model text and chips are built as DOM
- * nodes (never innerHTML), every turn ends visibly (a final answer, or an
- * error line naming what happened), and the scroll only follows the stream
- * when the person is already at the bottom.
+ * Drives the project conversation in the workspace's chat column: the
+ * composer posts to /api/project/<id>/stream and folds the SSE events into
+ * the thread. The rules mirror app.js (handoff §1.8): model text and chips
+ * are built as DOM nodes (never innerHTML), every turn ends visibly (a final
+ * answer, or an error line naming what happened), and the scroll only follows
+ * the stream when the person is already at the bottom.
+ *
+ * The thread follows the chat rules the frames draw: the person's messages
+ * sit right, the agent's left, and no row carries a name label — the column
+ * heading already says who is speaking.
  */
 (function () {
   "use strict";
@@ -17,17 +21,14 @@
   const turnStatus = document.getElementById("wsTurnStatus");
   const turnStatusText = document.getElementById("wsTurnStatusText");
   const followupsRow = document.getElementById("wsFollowups");
+  const modeZone = document.getElementById("wsModeZone");
   if (!composer || !input || !thread) return;
 
   const projectId = composer.getAttribute("data-project-id");
   const agentId = composer.getAttribute("data-agent") || "main";
-  const speaker = composer.getAttribute("data-speaker") || "Main Agent";
-  const taskPin = document.getElementById("wsTaskPin");
-  const modeZone = document.getElementById("wsModeZone");
-  // The task the conversation is pinned to right now. Initial value is the
-  // server-rendered "Now discussing" task (when the page opened on one).
+  // The task the conversation is focused on right now (server-rendered from
+  // the open Task Details), so the server can join its real state.
   const pinned = { taskId: composer.getAttribute("data-task-id") || "" };
-  if (taskPin && taskPin.value && !pinned.taskId) pinned.taskId = taskPin.value;
   let streaming = false;
 
   function nearBottom() {
@@ -38,42 +39,14 @@
     if (stick) thread.scrollTop = thread.scrollHeight;
   }
 
-  function addRow(who, text) {
+  function addRow(who) {
     const row = document.createElement("div");
-    row.className = "chat-row " + who;
-    if (who === "orbit") {
-      const label = document.createElement("div");
-      label.className = "chat-speaker";
-      label.textContent = speaker;
-      row.appendChild(label);
-    }
+    row.className = "ws-msg " + (who === "orbit" ? "ws-msg--orbit" : "ws-msg--user");
     const bubble = document.createElement("div");
-    bubble.className = "chat-bubble " + who;
-    const body = document.createElement("div");
-    body.className = "body";
-    if (who === "orbit") {
-      const icon = document.createElement("img");
-      icon.className = "orbit-icon";
-      icon.src = document.querySelector(".brand-mark").src;
-      icon.alt = "";
-      body.appendChild(icon);
-      const reply = document.createElement("span");
-      reply.className = "reply";
-      body.appendChild(reply);
-    } else {
-      body.textContent = text;
-    }
-    bubble.appendChild(body);
+    bubble.className = "ws-bubble";
     row.appendChild(bubble);
     thread.appendChild(row);
     return row;
-  }
-
-  function orbitParts(row) {
-    return {
-      body: row.querySelector(".body"),
-      reply: row.querySelector(".reply"),
-    };
   }
 
   function setStatus(text) {
@@ -87,11 +60,19 @@
   }
 
   function clearEmptyState() {
-    const empty = thread.querySelector(".ws-thread-empty");
+    const empty = thread.querySelector(".ws-thread__empty");
     if (empty) empty.remove();
+    // The day label belongs to a thread with messages; add it with the first.
+    if (!thread.querySelector(".ws-day")) {
+      const day = document.createElement("p");
+      day.className = "ws-day";
+      day.textContent = "Today, " + new Date().toTimeString().slice(0, 5);
+      thread.insertBefore(day, thread.firstChild);
+    }
   }
 
   function renderFollowups(chips) {
+    if (!followupsRow) return;
     followupsRow.textContent = "";
     (chips || []).forEach((chip) => {
       if (!chip || !chip.prompt || !chip.label) return;
@@ -106,17 +87,13 @@
 
   /* Minimal, honest code formatting: fenced blocks become <pre> with a hover
      copy button; nothing claims syntax highlighting it does not do. */
-  function formatReply(span, rawText) {
-    span.textContent = "";
+  function formatReply(bubble, rawText) {
+    bubble.textContent = "";
     const parts = rawText.split(/```(?:([\w+-]*)\n)?/);
-    // With one capture group, split lays parts out as
-    // [text, language, code, text, language, code, ...].
     for (let i = 0; i < parts.length; i++) {
       if (i % 3 === 1) continue; // the language label of a block (unused)
-      const isCode = i % 3 === 2;
-      if (isCode) {
+      if (i % 3 === 2) {
         const pre = document.createElement("pre");
-        pre.className = "ws-code";
         const code = document.createElement("code");
         code.textContent = parts[i].replace(/\n$/, "");
         const copy = document.createElement("button");
@@ -131,9 +108,9 @@
         });
         pre.appendChild(copy);
         pre.appendChild(code);
-        span.appendChild(pre);
+        bubble.appendChild(pre);
       } else if (parts[i]) {
-        span.appendChild(document.createTextNode(parts[i]));
+        bubble.appendChild(document.createTextNode(parts[i]));
       }
     }
   }
@@ -145,11 +122,14 @@
     sendBtn.disabled = true;
     input.disabled = true;
     clearEmptyState();
-    followupsRow.textContent = "";
+    if (followupsRow) followupsRow.textContent = "";
     const stick = nearBottom();
-    addRow("user", message);
+    const userRow = addRow("user");
+    userRow.querySelector(".ws-bubble").textContent = message;
     const row = addRow("orbit");
-    const { body, reply } = orbitParts(row);
+    const bubble = row.querySelector(".ws-bubble");
+    const reply = document.createElement("span");
+    bubble.appendChild(reply);
     setStatus("Thinking…");
     maybeScroll(true);
 
@@ -161,9 +141,8 @@
       const resp = await fetch("/api/project/" + encodeURIComponent(projectId) + "/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // agent: which conversation this turn belongs to (rail picks it);
-        // task_id: the pinned "Now discussing" task, so the server can join
-        // its real state to the prompt.
+        // agent: which conversation this turn belongs to; task_id: the task
+        // the workspace has open, so its real state joins the prompt.
         body: JSON.stringify({ message, agent: agentId, task_id: pinned.taskId || undefined }),
       });
       if (!resp.ok || !(resp.headers.get("content-type") || "").includes("text/event-stream")) {
@@ -195,13 +174,9 @@
           const stickNow = nearBottom();
           if (event === "thinking") {
             if (!thinkingBlock) {
-              thinkingBlock = document.createElement("div");
-              thinkingBlock.className = "thinking-block";
-              const label = document.createElement("span");
-              label.className = "thinking-label";
-              label.textContent = "Narration";
-              thinkingBlock.appendChild(label);
-              body.insertBefore(thinkingBlock, reply);
+              thinkingBlock = document.createElement("pre");
+              thinkingBlock.className = "ws-thinking";
+              bubble.insertBefore(thinkingBlock, reply);
             }
             thinkingBlock.appendChild(document.createTextNode(data));
             setStatus("Working through it…");
@@ -223,9 +198,9 @@
           } else if (event === "error") {
             failed = true;
             const err = document.createElement("div");
-            err.className = "ws-error";
+            err.className = "ws-error-line";
             err.textContent = data || "Something went wrong on this turn.";
-            body.appendChild(err);
+            bubble.appendChild(err);
           } else if (event === "done") {
             // finished below
           }
@@ -235,17 +210,17 @@
     } catch (err) {
       failed = true;
       const errLine = document.createElement("div");
-      errLine.className = "ws-error";
+      errLine.className = "ws-error-line";
       errLine.textContent = (err && err.message) || "The turn failed.";
-      body.appendChild(errLine);
+      bubble.appendChild(errLine);
     } finally {
-      if (raw) formatReply(reply, raw);
+      if (raw) formatReply(bubble, raw);
       if (!raw && !failed) {
         // A silent end looks exactly like a hang; say so instead.
         const errLine = document.createElement("div");
-        errLine.className = "ws-error";
+        errLine.className = "ws-error-line";
         errLine.textContent = "The provider returned an empty reply.";
-        body.appendChild(errLine);
+        bubble.appendChild(errLine);
       }
       setStatus(null);
       streaming = false;
@@ -271,33 +246,34 @@
     if (chip) sendPrompt(chip.getAttribute("data-prompt"));
   });
 
-  /* The task pin ("Task · …" above the composer): switching it redirects to
-     the same workspace discussing that task, so the strip and prompt are
-     server-rendered truth, never a client claim. */
-  if (taskPin) {
-    taskPin.addEventListener("change", () => {
-      const id = taskPin.value;
-      const url = "/projects/" + encodeURIComponent(projectId) +
-        "?task=" + encodeURIComponent(id || "") +
-        (agentId && agentId !== "main" ? "&agent=" + encodeURIComponent(agentId) : "") +
-        "#agent";
-      window.location.href = url;
-    });
-  }
+  /* The header's copper button, when no draft waits, opens the map's add-task
+     form and focuses it — the screen's other real verb. */
+  document.addEventListener("click", (e) => {
+    const opener = e.target.closest("[data-open-add]");
+    if (!opener) return;
+    const details = document.getElementById("add-task");
+    if (!details) return;
+    details.open = true;
+    const field = details.querySelector("input[name='request']");
+    if (field) field.focus();
+  });
 
-  /* Chat / Agent and Quick / Deep: the workspace rail's compact forms of the
-     same global settings the home topbar carries. Rendered by JS (the toggles
-     fetch JSON), so without JavaScript nothing inert shows up. */
+  /* Chat / Agent and Quick / Deep: two separate controls, same global
+     settings as everywhere else. Rendered by JS (the toggles fetch JSON), so
+     without JavaScript nothing inert shows up. */
   function renderModeZone(currentMode, currentThinking) {
     if (!modeZone) return;
     modeZone.textContent = "";
     const seg = document.createElement("span");
-    seg.className = "ws-mode-seg";
+    seg.className = "ws-seg";
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "Workspace mode");
     ["chat", "agent"].forEach((m) => {
       const b = document.createElement("button");
       b.type = "button";
-      b.className = "ws-mode-opt" + (m === currentMode ? " active" : "");
+      b.className = "ws-seg__opt";
       b.textContent = m === "chat" ? "Chat" : "Agent";
+      b.setAttribute("aria-pressed", m === currentMode ? "true" : "false");
       b.title = m === currentMode
         ? "This is the current mode."
         : "Switch to " + (m === "chat" ? "Chat" : "Agent") + " mode everywhere in orbit.";
@@ -316,8 +292,9 @@
     });
     const think = document.createElement("button");
     think.type = "button";
-    think.className = "ws-mode-opt ws-think-opt";
+    think.className = "ws-depth";
     think.textContent = currentThinking === "deep" ? "Deep" : "Quick";
+    think.setAttribute("aria-pressed", currentThinking === "deep" ? "true" : "false");
     think.title = "Switch the Agent-mode narration depth (" +
       (currentThinking === "deep" ? "currently Deep" : "currently Quick") + ").";
     think.addEventListener("click", () => {
@@ -338,7 +315,7 @@
                  composer.getAttribute("data-thinking") || "quick");
 
   /* "Plan with the Main Agent" drops you here ready to type. */
-  if (composer.getAttribute("data-plan-hint") === "1" && !thread.children.length) {
+  if (composer.getAttribute("data-plan-hint") === "1" && !thread.querySelector(".ws-msg")) {
     input.focus();
   }
 

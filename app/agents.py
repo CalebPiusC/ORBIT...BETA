@@ -33,6 +33,11 @@ class AgentType:
     quote: str  # the example task shown on the card, in quotes
     instructions: str  # the system prompt a conversation with it runs under
     starters: tuple[Starter, ...]
+    # The two card lines the owner's Agents frames (ORBIT UI___2) draw: a
+    # one-line persona and a one-line "best at". They are display copy only —
+    # the brief, the starters and the search all keep using role/detail/quote.
+    persona: str = ""
+    blurb: str = ""
 
 
 AGENT_TYPES: tuple[AgentType, ...] = (
@@ -70,6 +75,8 @@ AGENT_TYPES: tuple[AgentType, ...] = (
                 "first, then explain it plainly.",
             ),
         ),
+        persona="The thoughtful builder",
+        blurb="Turn clear tasks into small, understandable proposals.",
     ),
     AgentType(
         id="research",
@@ -106,6 +113,8 @@ AGENT_TYPES: tuple[AgentType, ...] = (
                 "paste them, then turn them into a practical plan I can act on.",
             ),
         ),
+        persona="The curious explorer",
+        blurb="Compare possibilities and find a useful direction.",
     ),
     AgentType(
         id="debug",
@@ -140,6 +149,8 @@ AGENT_TYPES: tuple[AgentType, ...] = (
                 "the error and the setup, then help me work out what is different.",
             ),
         ),
+        persona="The patient problem-solver",
+        blurb="Understand the cause and propose a careful fix.",
     ),
     AgentType(
         id="review",
@@ -174,6 +185,8 @@ AGENT_TYPES: tuple[AgentType, ...] = (
                 "paste it.",
             ),
         ),
+        persona="The second set of eyes",
+        blurb="Look for clarity and details that are easy to miss.",
     ),
     AgentType(
         id="testing",
@@ -208,6 +221,8 @@ AGENT_TYPES: tuple[AgentType, ...] = (
                 "then identify the paths that are easy to miss and untested.",
             ),
         ),
+        persona="The reassuring check",
+        blurb="Explore important journeys and suggest useful tests.",
     ),
     AgentType(
         id="documentation",
@@ -242,6 +257,8 @@ AGENT_TYPES: tuple[AgentType, ...] = (
                 "relevant code first.",
             ),
         ),
+        persona="The clear communicator",
+        blurb="Turn project knowledge into helpful, readable guides.",
     ),
 )
 

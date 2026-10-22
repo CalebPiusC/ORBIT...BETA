@@ -65,10 +65,20 @@ from app.accounts import (
 )
 from app.actions import PendingActions, ProposalRejected
 from app.age import human_age
+from types import SimpleNamespace
+
 from app.agents import MAIN_AGENT_ID, agent_types, get_agent, search_agents
 from app.analytics import RATING_LABELS, build_analytics
 from app.followups import followups_for
-from app.projectmap import latest_task, map_stages, next_up, progress, row_state
+from app.projectmap import (
+    latest_task,
+    map_stages,
+    progress,
+    proposal_ready,
+    row_state,
+    workspace_state,
+    workspace_stages,
+)
 from app.projects import (
     IMPORT_SOURCES,
     SOURCE_LABELS,
@@ -812,6 +822,62 @@ def create_app(
         card["age"] = human_age(project.updated_at)
         return card
 
+    def _recent_specialist_conversation(
+        st: AccountView, own_projects: list[Any]
+    ) -> dict[str, Any] | None:
+        """The newest specialist conversation worth picking up, or None.
+
+        Real data only: a project conversation that carries a specialty and
+        at least one message. Conversations hold no timestamp of their own,
+        so recency is the project's updated_at — the same clock the workspace
+        meta line uses. The card's title is the last thing the person asked
+        in that thread, trimmed; the meta names the project, whether a draft
+        waits for approval there, and the project's age.
+        """
+        best: tuple[Any, Any, list[Any]] | None = None
+        best_key = ""
+        for project in own_projects:
+            for conv in st.project_conversations(project.id):
+                if conv.agent_id == MAIN_AGENT_ID:
+                    continue
+                thread = st.thread(conv.id)
+                if not thread:
+                    continue
+                key = project.updated_at or ""
+                if best is None or key > best_key:
+                    best = (conv, project, thread)
+                    best_key = key
+        if best is None:
+            return None
+        conv, project, thread = best
+        try:
+            agent_name = get_agent(conv.agent_id).name
+        except KeyError:
+            return None
+        subject = ""
+        for message in reversed(thread):
+            if not message.is_orbit:
+                subject = message.body
+                break
+        if not subject:
+            subject = thread[0].body
+        subject = " ".join(subject.split())
+        if len(subject) > 70:
+            subject = subject[:67].rsplit(" ", 1)[0] + "…"
+        tasks = st.tasks_for_project(project.id)
+        return {
+            "title": subject,
+            "agent_name": agent_name,
+            "agent_id": conv.agent_id,
+            "project_name": project.name,
+            "project_id": project.id,
+            "waiting": any(proposal_ready(t) for t in tasks),
+            "age": human_age(project.updated_at) or "just now",
+            "url": url_for(
+                "agent_conversation", project_id=project.id, agent_id=conv.agent_id
+            ),
+        }
+
     @app.get("/projects")
     def projects_page() -> str:
         st = _scoped_store()
@@ -956,25 +1022,63 @@ def create_app(
 
     @app.get("/agents")
     def agents_page() -> str:
+        """The six specialists, and the two honest ways into a conversation.
+
+        A card's Start opens the picker at its specialty; the header's copper
+        button opens it at the project. Both end in the same POST assign the
+        Agents page has always used, so the conversation lands in the project
+        the person picked. ``?view=loading`` / ``?view=error`` are the
+        presentation-only switches, derived from the dashboard's own set.
+        """
         st = _scoped_store()
         project_store = _scoped_projects()
         query = request.args.get("q", "").strip()
-        selected = None
         if st.selected_agent:
             try:
-                selected = get_agent(st.selected_agent)
+                get_agent(st.selected_agent)
             except KeyError:
                 # A selection pointing nowhere clears itself rather than
-                # showing a bar that names a specialty that does not exist.
+                # naming a specialty that does not exist.
                 st.selected_agent = None
-        assign_targets = [{"id": p.id, "name": p.name} for p in project_store.list()]
+        own_projects = project_store.list()
+        picker_projects = []
+        for p in own_projects:
+            tasks = st.tasks_for_project(p.id)
+            done, total = progress(tasks)
+            picker_projects.append(
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "task_line": f"{done} of {total} tasks complete",
+                }
+            )
+        pick_agent = None
+        pick_id = request.args.get("pick", "").strip()
+        if pick_id:
+            try:
+                pick_agent = get_agent(pick_id)
+            except KeyError:
+                pick_agent = None
+        pick_project = None
+        pick_project_id = request.args.get("project", "").strip()
+        if pick_project_id:
+            pick_project = project_store.get(pick_project_id)
+        choose = request.args.get("choose", "").strip() == "1"
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
         return render_template(
             "agents.html",
             agents=search_agents(query),
+            agents_all=agent_types(),
             query=query,
             total=len(agent_types()),
-            selected_agent=selected,
-            assign_targets=assign_targets,
+            picker_projects=picker_projects,
+            pick_agent=pick_agent,
+            pick_project=pick_project.card() if pick_project is not None else None,
+            choose=choose,
+            recent=_recent_specialist_conversation(st, own_projects),
+            view=view,
             projects_active=False,
             agents_active=True,
             **_sidebar_context(),
@@ -1018,7 +1122,9 @@ def create_app(
             "agent_specialist_assigned", agent_id=agent.id, project_id=project_id
         )
         return redirect(
-            url_for("project_workspace", project_id=project_id, agent=agent.id) + "#agent",
+            url_for(
+                "agent_conversation", project_id=project_id, agent_id=agent.id
+            ),
             code=303,
         )
 
@@ -1027,6 +1133,26 @@ def create_app(
     @app.get("/projects/<project_id>")
     @ownership_checked("project_id", "task (query)")
     def project_workspace(project_id: str) -> str:
+        """The workspace: Project Map, Task Details and the project's chat.
+
+        Three pieces, drawn from design/ORBIT UI___2 (Workspace - Light/Dark
+        Desktop, Light Mobile) on the shared app shell:
+
+          * the map is a stack of stage cards with task rows — derived state
+            per row and per stage capsule, never a node-and-line graph;
+          * Task Details opens for a task of THIS project only (same rule as
+            before, now defaulting to the first task whose draft waits for
+            approval, which is what the frame shows open);
+          * the chat column is this project's own conversation: the Main
+            Agent by default; ``?agent=`` still opens an assigned specialist
+            here until the conversation screen arrives.
+
+        The header's one copper button reviews this project's waiting drafts
+        (a finished run nobody approved or applied); with none waiting it
+        becomes the map's real other verb, adding a task. ``?view=loading``
+        and ``?view=error`` are presentation-only switches, derived from the
+        dashboard's own state set.
+        """
         st = _scoped_store()
         project, not_owned = _owned_project_or_404(project_id, template=True)
         if not_owned is not None:
@@ -1038,8 +1164,7 @@ def create_app(
         selected = st.get_task(selected_id) if selected_id else None
         if selected is not None and selected.project_id != project_id:
             selected = None
-        panel = _panel_state(selected) if selected is not None else None
-        # Which agent's conversation the rail shows. "main" by default; a
+        # Which agent's conversation the column shows. "main" by default; a
         # specialist id is honoured only when the specialty exists — an id the
         # Agents page could not have produced falls back to the Main Agent.
         agent_id = request.args.get("agent", "").strip() or MAIN_AGENT_ID
@@ -1048,72 +1173,160 @@ def create_app(
                 get_agent(agent_id)
             except KeyError:
                 agent_id = MAIN_AGENT_ID
+            else:
+                # A specialist conversation has its own screen now; the
+                # workspace column stays the Main Agent's.
+                return redirect(
+                    url_for(
+                        "agent_conversation",
+                        project_id=project_id,
+                        agent_id=agent_id,
+                    ),
+                    code=303,
+                )
         thread = st.project_thread(project_id, agent_id=agent_id)
         speaker = (
             "Main Agent" if agent_id == MAIN_AGENT_ID else get_agent(agent_id).name
         )
-        # The conversations this project carries, so the rail can offer
-        # exactly the agents that have one here — nothing speculative, and a
-        # conversation whose specialty no longer exists simply drops out.
-        rail_agents: list[dict[str, str]] = []
-        seen: set[str] = set()
+        # The specialist conversations this project carries, with messages, so
+        # the column can link exactly the conversations that really exist.
+        specialist_links: list[dict[str, str]] = []
         for conv in st.project_conversations(project_id):
             cid = conv.agent_id or MAIN_AGENT_ID
-            if cid in seen:
+            if cid == MAIN_AGENT_ID or not st.thread(conv.id):
                 continue
-            name = (
-                "Main Agent"
-                if cid == MAIN_AGENT_ID
-                else (get_agent(cid).name if cid in {a.id for a in agent_types()} else None)
-            )
-            if name is None:
+            try:
+                name = get_agent(cid).name
+            except KeyError:
                 continue
-            seen.add(cid)
-            rail_agents.append({"id": cid, "name": name})
-        if MAIN_AGENT_ID not in seen:
-            rail_agents.insert(0, {"id": MAIN_AGENT_ID, "name": "Main Agent"})
-        builds_on = (
-            st.get_task(selected.builds_on)
-            if selected is not None and selected.builds_on
-            else None
-        )
+            specialist_links.append({"id": cid, "name": name})
+        stages = workspace_stages(tasks)
+        proposals = [t for t in tasks if proposal_ready(t)]
+        if selected is None and proposals:
+            # The frame opens on the task whose draft waits for approval.
+            selected = proposals[0]
+        panel = _panel_state(selected) if selected is not None else None
+        selected_state = workspace_state(selected) if selected is not None else None
+        tab = request.args.get("tab", "").strip() or "map"
+        if tab not in ("map", "tasks", "files", "activity"):
+            tab = "map"
+        task_rows = [
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "stage": stage["name"],
+                "state": row["state"],
+                "state_label": row["state_label"],
+                "done": row["done"],
+            }
+            for stage in stages
+            for row in stage["rows"]
+        ]
+        file_rows = [
+            {"name": f.name, "source": f.source, "task": t.title, "task_id": t.id}
+            for t in tasks
+            if getattr(t, "run", None) is not None
+            for f in t.run.files
+        ]
+        activity_rows = [
+            {"text": a.text, "time": a.time, "task": t.title, "task_id": t.id}
+            for t in reversed(tasks)
+            for a in t.activity
+        ]
         done_tasks, total_tasks = progress(tasks)
         stage_names = [s["name"] for s in map_stages(tasks)]
+        card = project.card()
+        summary = (project.summary or "").strip()
+        description = (project.description or "").strip()
+        if summary:
+            headline, subline = summary, description
+        else:
+            headline = project.name
+            subline = description or "No description yet."
+        updated_age = human_age(project.updated_at)
         view = request.args.get("view", "").strip()
-        if view not in ("", "overview"):
+        if view not in ("loading", "error"):
             view = ""
         return render_template(
             "project.html",
-            project=project.card(),
-            project_obj=project,
-            created_label=_date_label(project.created_at),
-            updated_age=human_age(project.updated_at),
-            statuses=[(key, STATUS_LABELS[key]) for key in STATUSES],
-            map=map_stages(tasks),
+            project=card,
+            headline=headline,
+            subline=subline,
+            status_label=card["status_label"],
+            updated_age=updated_age,
+            tab=tab,
+            stages=stages,
+            task_rows=task_rows,
+            file_rows=file_rows,
+            activity_rows=activity_rows,
             done_tasks=done_tasks,
             total_tasks=total_tasks,
             tasks=tasks,
-            pin_tasks=[
-                {"id": t.id, "title": t.title, "state_label": row_state(t)[1]}
-                for t in tasks
-            ],
             stage_names=stage_names,
             selected=selected,
-            selected_state=(row_state(selected) if selected is not None else None),
-            builds_on=builds_on if builds_on is not None and builds_on.project_id == project_id else None,
-            next_task=next_up(tasks, selected) if selected is not None else None,
+            selected_state=selected_state,
             panel=panel,
+            proposals_count=len(proposals),
+            first_proposal_id=proposals[0].id if proposals else "",
             thread=thread,
             followups=followups_for(thread),
             agent_id=agent_id,
             speaker=speaker,
-            rail_agents=rail_agents,
+            specialist_links=specialist_links,
             starters=(
                 get_agent(agent_id).starters if agent_id != MAIN_AGENT_ID else PROJECT_STARTERS
             ),
             plan_hint=request.args.get("plan", "") == "1",
             view=view,
-            discuss_task=request.args.get("task", "").strip() and selected or None,
+            projects_active=True,
+            agents_active=False,
+            active_project_id=project_id,
+            **_sidebar_context(),
+        )
+
+    @app.get("/projects/<project_id>/agents/<agent_id>")
+    @ownership_checked("project_id", "agent_id (catalog)")
+    def agent_conversation(project_id: str, agent_id: str) -> str:
+        """One specialist's conversation with one project, full page.
+
+        No frame exists for this screen: it is derived from the workspace's
+        chat column (same thread rules — the person's messages right, the
+        agent's left, no name labels — same composer, same footnote), given
+        the room a full page affords. It renders the conversation the store
+        already carries for (project, agent); nothing new is stored here and
+        the stream endpoint is the workspace's own, so gating, audit and
+        ownership are unchanged. An agent id the Agents page could not have
+        produced falls back to the Main Agent, exactly as the workspace rail
+        always has. ``?view=loading`` / ``?view=error`` are the shared
+        presentation-only switches.
+        """
+        st = _scoped_store()
+        project, not_owned = _owned_project_or_404(project_id, template=True)
+        if not_owned is not None:
+            return not_owned
+        try:
+            agent = get_agent(agent_id)
+        except KeyError:
+            # The Main Agent has no registry card — give the template the
+            # same display fields from the workspace's own constants.
+            agent = SimpleNamespace(
+                id=MAIN_AGENT_ID,
+                name="Main Agent",
+                role="The project's primary assistant.",
+                starters=PROJECT_STARTERS,
+            )
+        thread = st.project_thread(project_id, agent_id=agent.id)
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
+        return render_template(
+            "conversation.html",
+            project=project.card(),
+            agent=agent,
+            thread=thread,
+            followups=followups_for(thread),
+            starters=agent.starters,
+            view=view,
             projects_active=True,
             agents_active=False,
             active_project_id=project_id,

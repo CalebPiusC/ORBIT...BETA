@@ -30,6 +30,16 @@ class AgentRegistryTests(unittest.TestCase):
             self.assertIn("orbit", agent.instructions.lower(), agent.id)
             self.assertGreaterEqual(len(agent.starters), 3, agent.id)
 
+    def test_the_frame_card_lines_exist_for_every_specialty(self) -> None:
+        # The Agents frames (ORBIT UI___2) draw a persona line and a best-at
+        # line per card; the registry carries both so the page never invents
+        # them at render time.
+        for agent in AGENT_TYPES:
+            self.assertTrue(agent.persona, agent.id)
+            self.assertTrue(agent.blurb, agent.id)
+        personas = [a.persona for a in AGENT_TYPES]
+        self.assertEqual(len(personas), len(set(personas)))
+
     def test_starters_are_real_prompts_not_labels(self) -> None:
         # Same rule as the welcome screen: a chip sends a prompt the person
         # could have typed; it is never a bare label left in the box.

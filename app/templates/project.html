@@ -1,322 +1,879 @@
-{% extends "layout.html" %}
+{% extends "app_shell.html" %}
+{# ===========================================================
+   Workspace — Project Map, Task Details and the project's own
+   chat, on the shared app shell.
+
+   Drawn from design/ORBIT UI___2/:
+     Workspace · Light · Desktop.png   (1440)
+     Workspace · Dark  · Desktop.png
+     Workspace · Light · Mobile.png    (390)
+   (Workspace Dark Mobile does not exist in the frame set; it is
+   derived from the dark tokens plus this screen's mobile layout.)
+
+   Measured from the frames at 1440 (they are 2x exports):
+     header rhythm = crumb 11 / title 36 / sub 15 / button 48;
+     tabs 14 with 24 between; meta line 13; stage cards 24 padding,
+     16 radius, 24 between cards, stage head 28 display, rows 14;
+     the orbit arc divider sits 32 below the map; the two working
+     columns split the content width evenly with 24 between them.
+
+   What the three pieces show is what the store holds: stages and
+   tasks as filed, row and capsule states derived in app.projectmap
+   (workspace_stages), the run's own checklist and named files, the
+   approval flags, and this project's conversation — nothing else.
+   The map is a stack of stage cards, never a node-and-line graph.
+
+   States (derived from the dashboard's own set, dashboard.html):
+     empty   — a project with no tasks / no thread yet says so and
+               names the two real ways in (add a task, talk).
+     loading — ?view=loading, skeleton on the same geometry.
+     error   — ?view=error, the failure panel with two ways out.
+   =========================================================== #}
 {% block title %}orbit — {{ project.name }}{% endblock %}
-{% block body_class %}v2{% endblock %}
-{% block body %}
-<div class="screen screen--active screen-ws" id="screen-project">
-{% include "_sidebar.html" %}
 
-  <main class="page-main ws-main">
-    {% include "_topbar.html" %}
+{% block head %}
+<style>
+  /* ---------------- header ---------------- */
+  .ws-page { display: flex; flex-direction: column; }
 
-    <div class="page-topline">
-      <nav class="page-crumb" aria-label="Breadcrumb"><a href="/projects">Projects</a><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">{{ project.name }}</span></nav>
-      <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
+  .ws-crumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+
+  .ws-crumb a { color: inherit; text-decoration: none; }
+  .ws-crumb a:hover { color: var(--text-1); text-decoration: underline; text-underline-offset: 3px; }
+  .ws-crumb__sep { color: var(--text-3); }
+  .ws-crumb__here { color: var(--text-2); overflow-wrap: anywhere; }
+
+  .ws-title {
+    margin-top: 10px;
+    font-family: var(--font-display);
+    font-size: clamp(28px, 2.5vw, 36px);
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+    overflow-wrap: anywhere;
+  }
+
+  .ws-sub {
+    margin-top: 12px;
+    max-width: 62ch;
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
+  .ws-sub.is-empty { color: var(--text-3); }
+
+  .ws-cta { margin-top: 20px; }
+
+  /* ---------------- tabs and meta ---------------- */
+  .ws-tabs {
+    display: flex;
+    align-items: center;
+    gap: clamp(16px, 1.7vw, 24px);
+    margin-top: clamp(24px, 3.4vh, 32px);
+    overflow-x: auto;
+  }
+
+  .ws-tab {
+    padding: 4px 0;
+    border: 0;
+    background: none;
+    color: var(--text-2);
+    font-family: var(--font-body);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.4;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .ws-tab:hover { color: var(--text-1); }
+
+  .ws-tab[aria-current="page"] {
+    color: var(--text-1);
+    font-weight: 600;
+  }
+
+  .ws-meta {
+    margin-top: clamp(16px, 2.6vh, 24px);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  /* ---------------- stage cards ---------------- */
+  .ws-map { display: flex; flex-direction: column; gap: 24px; margin-top: 24px; }
+
+  .ws-stage {
+    padding: clamp(20px, 2vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  [data-theme="dark"] .ws-stage { border-color: var(--border); box-shadow: none; }
+
+  .ws-stage__name {
+    margin-top: 16px;
+    font-family: var(--font-display);
+    font-size: clamp(22px, 1.9vw, 28px);
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .ws-stage__rows { margin-top: 16px; display: flex; flex-direction: column; }
+
+  .ws-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 -8px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    color: var(--text-2);
+    font-size: 14px;
+    line-height: 1.5;
+    text-decoration: none;
+  }
+
+  .ws-row:hover { background: var(--surface-2); color: var(--text-1); }
+
+  .ws-row[aria-current="true"] { background: var(--surface-2); color: var(--text-1); }
+
+  .ws-row__tick { flex: 0 0 auto; color: var(--text-2); }
+
+  .ws-row__title { overflow-wrap: anywhere; }
+
+  .ws-row__state { color: var(--text-2); }
+
+  .ws-row__state::before { content: "— "; color: var(--text-3); }
+
+  /* ---------------- add a task ---------------- */
+  .ws-add { margin-top: 24px; }
+
+  .ws-add__summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    color: var(--text-1);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .ws-add__summary::-webkit-details-marker { display: none; }
+  .ws-add__summary:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  .ws-add__form { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+
+  .ws-add__row { display: flex; flex-wrap: wrap; gap: 12px; }
+  .ws-add__row .o-field { flex: 1 1 200px; }
+
+  /* ---------------- divider ---------------- */
+  .ws-divider {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-top: clamp(24px, 3.4vh, 32px);
+    color: var(--ring);
+  }
+
+  .ws-divider::before,
+  .ws-divider::after {
+    content: "";
+    flex: 1 1 auto;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ---------------- the two working columns ---------------- */
+  .ws-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 24px;
+    margin-top: clamp(24px, 3.4vh, 32px);
+    align-items: start;
+  }
+
+  .ws-card {
+    padding: clamp(20px, 2vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  [data-theme="dark"] .ws-card { border-color: var(--border); box-shadow: none; }
+
+  .ws-eyebrow {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+
+  .ws-card__title {
+    margin-top: 12px;
+    font-family: var(--font-display);
+    font-size: clamp(20px, 1.7vw, 24px);
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+    overflow-wrap: anywhere;
+  }
+
+  .ws-card__desc { margin-top: 12px; font-size: 14px; line-height: 1.6; color: var(--text-2); }
+
+  .ws-checks { margin-top: 20px; }
+
+  .ws-checks__head {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+
+  .ws-checks__list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+
+  .ws-check {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+
+  .ws-check__mark { flex: 0 0 auto; }
+
+  .ws-check.is-done .ws-check__mark { color: var(--text-2); }
+  .ws-check.is-open .ws-check__mark { color: var(--text-3); }
+
+  .ws-detail__meta { margin-top: 16px; font-size: 12px; line-height: 1.5; color: var(--text-3); }
+
+  .ws-detail__chip { margin-top: 16px; }
+
+  .ws-detail__proposal {
+    margin-top: 20px;
+    font-family: var(--font-display);
+    font-size: clamp(18px, 1.5vw, 22px);
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--text-1);
+  }
+
+  .ws-detail__actions { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
+  .ws-detail__actions .o-btn { width: 100%; }
+
+  .ws-detail__close {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--text-2);
+    text-decoration: none;
+  }
+  .ws-detail__close:hover { color: var(--text-1); text-decoration: underline; text-underline-offset: 3px; }
+
+  /* ---------------- the chat column ---------------- */
+  .ws-chat__sub { margin-top: 10px; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+
+  .ws-chat__links { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+
+  .ws-chat__link {
+    align-self: flex-start;
+    color: var(--text-1);
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+  }
+  .ws-chat__link:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  .ws-day {
+    margin-top: 16px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .ws-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 12px;
+    max-height: clamp(280px, 44vh, 520px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 2px;
+  }
+
+  .ws-msg { display: flex; flex-direction: column; align-items: flex-start; }
+  .ws-msg--user { align-items: flex-end; }
+
+  .ws-bubble {
+    max-width: 82%;
+    padding: 10px 14px;
+    border-radius: var(--r-control);
+    background: var(--chip-bg);
+    color: var(--text-1);
+    font-size: 14px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+
+  .ws-msg--user .ws-bubble { background: var(--border); }
+
+  [data-theme="dark"] .ws-bubble { background: var(--surface-2); }
+  [data-theme="dark"] .ws-msg--user .ws-bubble { background: var(--border); }
+
+  .ws-bubble pre {
+    margin: 8px 0 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--bg);
+    font-size: 12.5px;
+    line-height: 1.5;
+    overflow-x: auto;
+  }
+
+  .ws-bubble pre:first-child { margin-top: 0; }
+
+  .ws-bubble .ws-thinking {
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+
+  .ws-code-copy {
+    float: right;
+    margin: -2px -2px 6px 8px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .ws-code-copy:hover { color: var(--text-1); }
+
+  .ws-error-line {
+    margin-top: 8px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--danger);
+  }
+
+  .ws-thread__empty { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .ws-thread__empty p { font-size: 14px; line-height: 1.6; color: var(--text-2); }
+  .ws-thread__empty img { width: 28px; height: 28px; opacity: 0.8; }
+
+  .ws-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .ws-followups { margin-top: 12px; }
+  .ws-followups:empty { margin-top: 0; }
+
+  .ws-chip {
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: 12.5px;
+    line-height: 1.4;
+    cursor: pointer;
+  }
+  .ws-chip:hover { background: var(--surface-2); color: var(--text-1); }
+
+  .ws-turn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    color: var(--text-2);
+    font-size: 12.5px;
+  }
+  .ws-turn[hidden] { display: none; }
+  .ws-turn img { width: 18px; height: 18px; }
+
+  .ws-composer { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+
+  .ws-composer__row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+  /* Chat/Agent and Quick/Deep stay two separate controls, as everywhere else. */
+  .ws-controls { display: inline-flex; align-items: center; gap: 8px; margin-right: auto; }
+
+  .ws-seg {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    background: var(--surface);
+  }
+
+  .ws-seg__opt {
+    padding: 5px 12px;
+    border: 0;
+    border-radius: var(--r-pill);
+    background: transparent;
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+  }
+  .ws-seg__opt[aria-pressed="true"] { background: var(--chip-bg); color: var(--text-1); }
+  .ws-seg__opt:disabled { cursor: default; }
+
+  .ws-depth {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    cursor: pointer;
+  }
+  .ws-depth:hover { color: var(--text-1); }
+
+  .ws-composer .o-field__input { resize: vertical; min-height: 44px; }
+
+  .ws-fineprint { font-size: 12px; line-height: 1.5; color: var(--text-2); }
+
+  /* ---------------- list tabs ---------------- */
+  .ws-list { margin-top: 24px; }
+
+  .ws-list__row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 4px;
+    border-top: 1px solid var(--border);
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-2);
+  }
+  .ws-list__row:first-of-type { border-top: 0; }
+
+  .ws-list__main { color: var(--text-1); overflow-wrap: anywhere; }
+  .ws-list__main a { color: inherit; text-decoration: none; }
+  .ws-list__main a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .ws-list__side { flex: 0 0 auto; font-size: 13px; color: var(--text-2); text-align: right; }
+
+  .ws-list__empty { margin-top: 12px; font-size: 14px; line-height: 1.6; color: var(--text-2); }
+
+  /* ---------------- panel empty states ---------------- */
+  .ws-state { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .ws-state img { width: 32px; height: 32px; opacity: 0.85; }
+  .ws-state__title {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--text-1);
+  }
+  .ws-state__text { max-width: 52ch; font-size: 14px; line-height: 1.6; color: var(--text-2); }
+
+  /* ---------------- skeleton and error, derived from dashboard.html ---------------- */
+  .ws-skel {
+    border-radius: 8px;
+    background: var(--surface-2);
+    animation: ws-skel 1.4s ease-in-out infinite;
+  }
+
+  [data-theme="dark"] .ws-skel { background: var(--surface-2); }
+
+  @keyframes ws-skel {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+
+  .ws-skel--eyebrow { width: 140px; height: 12px; }
+  .ws-skel--title { width: min(420px, 100%); height: 40px; margin-top: 16px; }
+  .ws-skel--line { width: min(320px, 100%); height: 16px; margin-top: 14px; }
+  .ws-skel--button { width: 168px; height: 48px; margin-top: 20px; }
+  .ws-skel--tabs { width: min(280px, 100%); height: 20px; margin-top: 28px; }
+  .ws-skel--stage { height: clamp(140px, 21vh, 200px); margin-top: 24px; }
+  .ws-skel--col { height: clamp(240px, 36vh, 360px); }
+  .ws-skel__cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 24px;
+    margin-top: 32px;
+  }
+
+  .ws-error { display: flex; flex-direction: column; align-items: flex-start; }
+  .ws-error__title {
+    margin-top: 20px;
+    font-family: var(--font-display);
+    font-size: clamp(24px, 2vw, 30px);
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--text-1);
+  }
+  .ws-error__text { margin-top: 10px; max-width: 56ch; font-size: 15px; line-height: 1.6; color: var(--text-2); }
+  .ws-error__actions { display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ws-skel { animation: none; }
+  }
+
+  /* ---------------- phone ---------------- */
+  @media (max-width: 900px) {
+    .ws-cols { grid-template-columns: minmax(0, 1fr); }
+    .ws-skel__cols { grid-template-columns: minmax(0, 1fr); }
+    .ws-thread { max-height: clamp(240px, 38vh, 420px); }
+    .ws-list__row { flex-direction: column; gap: 2px; }
+    .ws-list__side { text-align: left; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ws-page">
+
+  {% if view == 'loading' %}
+  {# Derived from the dashboard's loading state: same geometry as the real
+     page, so nothing jumps when it arrives. #}
+  <div role="status" aria-live="polite">
+    <span class="o-visually-hidden">Loading the workspace…</span>
+    <div class="ws-skel ws-skel--eyebrow" aria-hidden="true"></div>
+    <div class="ws-skel ws-skel--title" aria-hidden="true"></div>
+    <div class="ws-skel ws-skel--line" aria-hidden="true"></div>
+    <div class="ws-skel ws-skel--button" aria-hidden="true"></div>
+    <div class="ws-skel ws-skel--tabs" aria-hidden="true"></div>
+    <div class="ws-skel ws-skel--stage" aria-hidden="true"></div>
+    <div class="ws-skel ws-skel--stage" aria-hidden="true"></div>
+    <div class="ws-skel ws-skel--stage" aria-hidden="true"></div>
+    <div class="ws-skel__cols" aria-hidden="true">
+      <div class="ws-skel ws-skel--col"></div>
+      <div class="ws-skel ws-skel--col"></div>
     </div>
+  </div>
 
-    {# ============ project header ============ #}
-    <header class="ws-head">
-      <div class="ws-head-main">
-        <div class="ws-title-row">
-          <h1 class="page-title">{{ project.name }}</h1>
-          <span class="status-badge st-{{ project.status }}"><span class="dot"></span>{{ project.status_label }}</span>
-        </div>
-        {% if project.summary %}
-        <p class="ws-desc">{{ project.summary }} <span class="ws-desc-origin">· AI summary by orbit's {{ speaker }}</span></p>
-        {% elif project.description %}
-        <p class="ws-desc">{{ project.description }}</p>
-        {% else %}
-        <p class="ws-desc ws-desc-empty">No description yet.</p>
-        {% endif %}
-        <div class="ws-progress-row">
-          <span class="ws-progress-label">{{ done_tasks }} of {{ total_tasks }} tasks complete</span>
-          <span class="ws-progress-track" role="presentation"><span class="ws-progress-fill" style="width: {{ (done_tasks / total_tasks * 100) | round(0) if total_tasks else 0 }}%"></span></span>
-        </div>
-        <p class="ws-tech">{{ project.languages|join(' · ') if project.languages else 'No technology chosen yet' }}{% if updated_age %} · Updated {{ updated_age }}{% endif %}</p>
-      </div>
-      <a class="btn-ghost ws-info-btn" href="/projects/{{ project.id }}?view=overview">Project info</a>
-    </header>
+  {% elif view == 'error' %}
+  {# Derived from the dashboard's failure state: say what is safe, offer two
+     real ways forward. #}
+  <section class="ws-error" role="alert">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="ws-error__title">We couldn't load this workspace.</h1>
+    <p class="ws-error__text">Nothing has changed and no files were touched. Reload this page, or go back to your projects and open it again.</p>
+    <div class="ws-error__actions">
+      <a class="o-btn o-btn--primary" href="/projects/{{ project.id }}">Try again</a>
+      <a class="o-btn o-btn--secondary" href="/projects">Open Projects</a>
+    </div>
+  </section>
 
-    <nav class="ws-tabs" aria-label="Workspace view">
-      <a class="ws-tab{% if view != 'overview' %} active{% endif %}" href="/projects/{{ project.id }}">Map &amp; tasks</a>
-      <a class="ws-tab{% if view == 'overview' %} active{% endif %}" href="/projects/{{ project.id }}?view=overview">Project overview</a>
+  {% else %}
+
+  <header>
+    <nav class="ws-crumb" aria-label="Breadcrumb">
+      <a href="/projects">Projects</a>
+      <span class="ws-crumb__sep" aria-hidden="true">/</span>
+      <span class="ws-crumb__here">{{ project.name }}</span>
     </nav>
+    <h1 class="ws-title">{{ headline }}</h1>
+    <p class="ws-sub{% if subline == 'No description yet.' %} is-empty{% endif %}">{{ subline }}</p>
+    {% if proposals_count %}
+    <a class="o-btn o-btn--primary ws-cta" href="/projects/{{ project.id }}?task={{ first_proposal_id }}#details">Review {{ proposals_count }} proposal{{ 's' if proposals_count != 1 }}</a>
+    {% else %}
+    <button type="button" class="o-btn o-btn--primary ws-cta" data-open-add>Add a task</button>
+    {% endif %}
+  </header>
 
-    <div class="ws-grid">
+  <nav class="ws-tabs" aria-label="Workspace view">
+    <a class="ws-tab" href="/projects/{{ project.id }}" {% if tab == 'map' %}aria-current="page"{% endif %}>Project Map</a>
+    <a class="ws-tab" href="/projects/{{ project.id }}?tab=tasks" {% if tab == 'tasks' %}aria-current="page"{% endif %}>Tasks</a>
+    <a class="ws-tab" href="/projects/{{ project.id }}?tab=files" {% if tab == 'files' %}aria-current="page"{% endif %}>Files</a>
+    <a class="ws-tab" href="/projects/{{ project.id }}?tab=activity" {% if tab == 'activity' %}aria-current="page"{% endif %}>Activity</a>
+  </nav>
 
-      {# ============ LEFT: the Project map ============ #}
-      <section class="ws-panel ws-map" id="map" aria-label="Project map">
-        <div class="ws-panel-head">
-          <h2 class="ws-panel-title">Project map</h2>
-          <span class="ws-panel-sub">{{ total_tasks }} task{{ 's' if total_tasks != 1 }}</span>
+  <p class="ws-meta">{{ status_label }} · {{ done_tasks }} of {{ total_tasks }} tasks complete{% if updated_age %} · Updated {{ updated_age }}{% endif %}</p>
+
+  {% if tab == 'map' %}
+
+  {# ============ the Project Map: stage cards, never a graph ============ #}
+  <section class="ws-map" aria-label="Project map">
+    {% for stage in stages %}
+    <article class="ws-stage">
+      <span class="o-capsule">{% if stage.chip.dot %}<span class="o-capsule__dot" aria-hidden="true"></span>{% endif %}{{ stage.chip.label }}</span>
+      <h2 class="ws-stage__name">{{ '%02d' % stage.index }} / {{ stage.name }}</h2>
+      <div class="ws-stage__rows">
+        {% for row in stage.rows %}
+        <a class="ws-row" href="/projects/{{ project.id }}?task={{ row.id }}#details"{% if selected and selected.id == row.id %} aria-current="true"{% endif %}>
+          {% if row.state in ('done', 'approved', 'applied') %}<span class="ws-row__tick" aria-hidden="true">✓</span>{% endif %}
+          <span class="ws-row__title">{{ row.title }}</span>
+          <span class="ws-row__state">{{ row.state_label }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </article>
+    {% else %}
+    <div class="ws-card ws-state">
+      <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+      <h2 class="ws-state__title">The map is empty.</h2>
+      <p class="ws-state__text">Add the first task below, or talk it through with the {{ speaker }} on the right — a plan agreed in conversation becomes tasks on this map.</p>
+    </div>
+    {% endfor %}
+
+    <details class="ws-add" id="add-task">
+      <summary class="ws-add__summary"><span aria-hidden="true">+</span> Add a task</summary>
+      <form class="ws-add__form" method="post" action="/projects/{{ project.id }}/tasks">
+        <label class="o-field">
+          <span class="o-field__label">What is the work?</span>
+          <input class="o-field__input" name="request" type="text" required autocomplete="off" maxlength="400"
+                 placeholder="e.g. “Fix the crash in checkout.py”" aria-label="Task request" />
+        </label>
+        <div class="ws-add__row">
+          <label class="o-field">
+            <span class="o-field__label">Stage (optional)</span>
+            <input class="o-field__input" name="stage" type="text" list="stageList" autocomplete="off" maxlength="60"
+                   placeholder="e.g. Build" aria-label="Stage" />
+          </label>
+          <label class="o-field">
+            <span class="o-field__label">Builds on</span>
+            <select class="o-field__input" name="builds_on" aria-label="Builds on">
+              <option value="">Nothing</option>
+              {% for t in tasks %}
+              <option value="{{ t.id }}">{{ t.title }}</option>
+              {% endfor %}
+            </select>
+          </label>
         </div>
+        {% if stage_names %}
+        <datalist id="stageList">
+          {% for name in stage_names %}<option value="{{ name }}">{% endfor %}
+        </datalist>
+        {% endif %}
+        <div><button type="submit" class="o-btn o-btn--secondary">Add to the map</button></div>
+      </form>
+    </details>
+  </section>
 
-        {% for stage in map %}
-        <div class="ws-stage">
-          <div class="ws-stage-head">
-            <h3 class="ws-stage-name">{{ stage.name }}</h3>
-            <span class="ws-stage-count">{{ stage.done }}/{{ stage.total }} complete</span>
-          </div>
-          <div class="ws-stage-tasks">
-            {% for t in stage.tasks %}
-            <a class="ws-task-row state-{{ t.state }}{% if selected and selected.id == t.id %} active{% endif %}"
-               href="/projects/{{ project.id }}?task={{ t.id }}{% if agent_id != 'main' %}&agent={{ agent_id }}{% endif %}#details">
-              <span class="ws-task-ico" aria-hidden="true">
-                {%- if t.state == 'done' -%}
-                <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="m8.5 12.4 2.5 2.4 4.7-5.1"/></svg>
-                {%- elif t.state == 'in_progress' or t.state == 'needs_attention' -%}
-                <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3" /></svg>
-                {%- else -%}
-                <svg class="oi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/></svg>
-                {%- endif -%}
-              </span>
-              <span class="ws-task-text">
-                <span class="ws-task-title">{{ t.title }}</span>
-                <span class="ws-task-sub">{% if t.done %}Complete · you marked it{% elif t.steps_total %}{{ t.steps_done }}/{{ t.steps_total }} steps · {{ t.state_label }}{% else %}{{ t.state_label }}{% endif %}</span>
-              </span>
-            </a>
-            {% endfor %}
-          </div>
+  <div class="ws-divider" aria-hidden="true">
+    <svg class="o-orbit-arc" width="40" height="40" viewBox="0 0 40 40">
+      <path d="M32 10a14 14 0 1 0 2 14" />
+      <circle class="o-satellite" cx="33" cy="11" r="1.6" />
+    </svg>
+  </div>
+
+  {# ============ Task Details + the project conversation ============ #}
+  <div class="ws-cols">
+
+    <section class="ws-card" id="details" aria-label="Task details">
+      {% if selected %}
+      <span class="ws-eyebrow">{{ (selected.stage or 'Tasks') | upper }} / Task details</span>
+      <h2 class="ws-card__title">{{ selected.title }}</h2>
+      {% if selected.description %}
+      <p class="ws-card__desc">{{ selected.description }}</p>
+      {% else %}
+      <p class="ws-card__desc is-empty">No description was filed with this task.</p>
+      {% endif %}
+
+      {% if panel and panel.steps %}
+      <div class="ws-checks">
+        <h3 class="ws-checks__head">What done looks like</h3>
+        <ul class="ws-checks__list">
+          {% for step in panel.steps %}
+          <li class="ws-check {% if step.status == 'done' %}is-done{% else %}is-open{% endif %}">
+            <span class="ws-check__mark" aria-hidden="true">{% if step.status == 'done' %}✓{% else %}○{% endif %}</span>
+            <span>{{ step.title }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      <p class="ws-detail__meta">{% if panel %}{{ panel.steps | selectattr('status', 'equalto', 'done') | list | length }} of {{ panel.steps | length }} steps done · {{ panel.files | length }} file{{ 's' if panel.files | length != 1 }} named{% else %}Not run yet — the checklist appears after the first run{% endif %}</p>
+
+      {% if selected_state and selected_state[0] == 'needs_approval' %}
+      <span class="o-capsule ws-detail__chip"><span class="o-capsule__dot" aria-hidden="true"></span>Needs approval</span>
+      <h3 class="ws-detail__proposal">A proposal is ready.</h3>
+      <p class="ws-card__desc">Nothing has been applied. Open the task to review what the run planned and named.</p>
+      <div class="ws-detail__actions">
+        <a class="o-btn o-btn--secondary" href="/task/{{ selected.id }}">Open change review</a>
+      </div>
+      {% elif selected_state and selected_state[0] == 'approved' %}
+      <span class="o-capsule ws-detail__chip">Approved</span>
+      <h3 class="ws-detail__proposal">You approved this change.</h3>
+      <p class="ws-card__desc">Nothing has been applied yet — applying stays a separate, explicit step on the task.</p>
+      <div class="ws-detail__actions">
+        <a class="o-btn o-btn--secondary" href="/task/{{ selected.id }}">Open the task</a>
+      </div>
+      {% elif selected_state and selected_state[0] == 'applied' %}
+      <span class="o-capsule ws-detail__chip">Applied</span>
+      <h3 class="ws-detail__proposal">The change was applied.</h3>
+      {% endif %}
+
+      <div class="ws-detail__actions">
+        <form method="post" action="/projects/{{ project.id }}/tasks/{{ selected.id }}/complete">
+          <input type="hidden" name="agent" value="{{ agent_id }}" />
+          <button type="submit" class="o-btn o-btn--secondary">
+            {% if selected.done %}Reopen this task{% else %}Mark complete{% endif %}
+          </button>
+        </form>
+      </div>
+      <a class="ws-detail__close" href="/projects/{{ project.id }}#details">Close the details</a>
+      {% elif tasks %}
+      <div class="ws-state">
+        <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+        <h2 class="ws-state__title">Pick a task on the map.</h2>
+        <p class="ws-state__text">Its checklist, named files and approval state show up here — and the conversation on the right focuses on it while it is open.</p>
+      </div>
+      {% else %}
+      <div class="ws-state">
+        <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+        <h2 class="ws-state__title">Nothing selected yet.</h2>
+        <p class="ws-state__text">The map is empty, so there is no task to detail. Add the first task, or ask the {{ speaker }} to help shape it.</p>
+      </div>
+      {% endif %}
+    </section>
+
+    <section class="ws-card" id="agent" aria-label="{{ speaker }}">
+      <h2 class="ws-card__title">{{ speaker }}</h2>
+      <p class="ws-chat__sub">
+        {%- if selected %}Focused on: {{ selected.title }}{% else %}Scoped to {{ project.name }} — nothing else leaks in.{% endif %}
+      </p>
+      {% if plan_hint %}
+      <p class="ws-chat__sub">You chose “Plan with the {{ speaker }}” — describe the goal and it shapes the first tasks with you.</p>
+      {% endif %}
+      {% for link in specialist_links %}
+      {% if loop.first %}<div class="ws-chat__links">{% endif %}
+        <a class="ws-chat__link" href="/projects/{{ project.id }}/agents/{{ link.id }}">Open the {{ link.name }} conversation →</a>
+      {% if loop.last %}</div>{% endif %}
+      {% endfor %}
+
+      <div class="ws-thread" id="wsThread" aria-live="polite" aria-atomic="false">
+        {% if thread %}
+        <p class="ws-day">Today, {{ thread[0].time }}</p>
+        {% for msg in thread %}
+        <div class="ws-msg {% if msg.is_orbit %}ws-msg--orbit{% else %}ws-msg--user{% endif %}"{% if msg.id %} data-message-id="{{ msg.id }}"{% endif %}>
+          <div class="ws-bubble">{{ msg.body }}</div>
         </div>
         {% endfor %}
-
-        <details class="ws-add" id="add-task">
-          <summary><span class="ws-add-plus" aria-hidden="true">+</span> Add a task</summary>
-          <form class="ws-add-form" method="post" action="/projects/{{ project.id }}/tasks">
-            <input class="text-input" name="request" type="text" required autocomplete="off" maxlength="400"
-                   placeholder="What is the work? e.g. “Fix the crash in checkout.py”" aria-label="Task request" />
-            <div class="ws-add-row">
-              <input class="text-input" name="stage" type="text" list="stageList" autocomplete="off" maxlength="60"
-                     placeholder="Stage (optional)" aria-label="Stage" />
-              {% if stage_names %}
-              <datalist id="stageList">
-                {% for name in stage_names %}<option value="{{ name }}">{% endfor %}
-              </datalist>
-              {% endif %}
-              <select class="text-input" name="builds_on" aria-label="Builds on">
-                <option value="">Builds on: nothing</option>
-                {% for t in tasks %}
-                <option value="{{ t.id }}">Builds on: {{ t.title }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <button type="submit" class="btn-primary">Add to the map</button>
-          </form>
-        </details>
-      </section>
-
-      {# ============ CENTER: the selected task's details, or the overview ============ #}
-      <section class="ws-panel ws-center" id="details" aria-label="{% if view == 'overview' %}Project overview{% else %}Task details{% endif %}">
-        {% if view == 'overview' %}
-        <div class="ws-panel-head">
-          <h2 class="ws-panel-title">Project overview</h2>
-        </div>
-        <div class="ws-overview">
-          <div class="ws-ov-block">
-            <h3 class="ws-ov-label">What it is</h3>
-            {% if project.summary %}
-            <p>{{ project.summary }} <span class="ws-desc-origin">· AI summary, written by orbit's {{ speaker }} from your conversation.</span></p>
-            {% elif project.description %}
-            <p>{{ project.description }} <span class="ws-desc-origin">· your words, from when you created it.</span></p>
-            {% else %}
-            <p class="ws-desc-empty">Nothing describes this project yet. Talk with the Main Agent in the rail on the right and the conversation can produce a summary.</p>
-            {% endif %}
-          </div>
-          <div class="ws-ov-grid">
-            <div class="ws-ov-block"><h3 class="ws-ov-label">Status</h3>
-              <form method="post" action="/projects/{{ project.id }}/status" class="ws-ov-status">
-                <select class="text-input" name="status">
-                  {% for key, label in statuses %}
-                  <option value="{{ key }}"{% if project.status == key %} selected{% endif %}>{{ label }}</option>
-                  {% endfor %}
-                </select>
-                <button type="submit" class="btn-ghost">Update</button>
-              </form>
-            </div>
-            <div class="ws-ov-block"><h3 class="ws-ov-label">Came from</h3><p>{{ project.source_label }}</p></div>
-            <div class="ws-ov-block"><h3 class="ws-ov-label">Created</h3><p>{{ created_label or '—' }}</p></div>
-            <div class="ws-ov-block"><h3 class="ws-ov-label">Last updated</h3><p>{% if updated_age %}{{ updated_age }}{% else %}—{% endif %}</p></div>
-            <div class="ws-ov-block"><h3 class="ws-ov-label">Technology</h3><p>{{ project.languages|join(' · ') if project.languages else 'No technology chosen yet.' }}</p></div>
-            <div class="ws-ov-block"><h3 class="ws-ov-label">Tasks</h3><p>{{ done_tasks }} of {{ total_tasks }} complete — the count is what you marked, on the map.</p></div>
-          </div>
-        </div>
-        {% elif selected %}
-        <div class="ws-panel-head">
-          <div class="ws-eyebrow-row">
-            <span class="ws-detail-eyebrow">{{ (selected.stage or 'Tasks') | upper }}</span>
-            <a class="ws-details-close" href="/projects/{{ project.id }}{% if agent_id != 'main' %}?agent={{ agent_id }}{% endif %}#map" title="Close the details">×</a>
-          </div>
-          <h2 class="ws-detail-title">{{ selected.title }}</h2>
-          <div class="ws-detail-badges">
-            <span class="state-badge state-{{ selected_state[0] }}">{{ selected_state[1] }}</span>
-            {% if selected.done %}<span class="state-badge state-done">You marked it complete</span>{% endif %}
-          </div>
-        </div>
-        <p class="ws-detail-desc">{{ selected.description }}</p>
-
-        <dl class="ws-links">
-          <div class="ws-link-row">
-            <dt>Builds on</dt>
-            <dd>{% if builds_on %}<a href="/projects/{{ project.id }}?task={{ builds_on.id }}{% if agent_id != 'main' %}&agent={{ agent_id }}{% endif %}#details">{{ builds_on.title }}</a>{% else %}<span class="ws-none">Nothing — no dependency was set.</span>{% endif %}</dd>
-          </div>
-          <div class="ws-link-row">
-            <dt>Next up</dt>
-            <dd>{% if next_task %}<a href="/projects/{{ project.id }}?task={{ next_task.id }}{% if agent_id != 'main' %}&agent={{ agent_id }}{% endif %}#details">{{ next_task.title }} →</a>{% else %}<span class="ws-none">Nothing else in this stage is open.</span>{% endif %}</dd>
-          </div>
-        </dl>
-
-        <div class="ws-req">
-          <h3 class="ws-ov-label">Requirements</h3>
-          {% if panel and panel.steps %}
-          <p class="ws-req-count">{{ panel.steps | selectattr('status', 'equalto', 'done') | list | length }} of {{ panel.steps | length }} done — {{ panel.operation }}</p>
-          <ul class="ws-req-list">
-            {% for step in panel.steps %}
-            <li class="ws-req-item st-{{ step.status }}">
-              <span class="req-check" aria-hidden="true">{% if step.status == 'done' %}☑{% else %}☐{% endif %}</span>
-              <span class="req-text">{{ step.title }}{% if step.evidence %} <span class="req-evidence">“{{ step.evidence }}”</span>{% endif %}</span>
-            </li>
-            {% endfor %}
-          </ul>
-          {% else %}
-          <p class="ws-none">Planned requirements appear here after this task runs — the agent writes its checklist from the request itself. <a href="/task/{{ selected.id }}">Open the task to run it →</a></p>
-          {% endif %}
-        </div>
-
-        {% if panel and panel.files %}
-        <div class="ws-files">
-          <h3 class="ws-ov-label">Associated work <span class="ws-files-count">{{ panel.files | length }} file{{ 's' if panel.files | length != 1 }}</span></h3>
-          <div class="ws-file-list">
-            {% for f in panel.files %}
-            <span class="ws-file-chip" title="{% if f.source == 'request' %}Named in your request{% else %}Named by orbit while planning{% endif %}">{{ f.name }}</span>
-            {% endfor %}
-          </div>
-        </div>
-        {% endif %}
-
-        {% if selected.activity %}
-        <div class="ws-activity-line">
-          <span class="ws-ov-label ws-ov-inline">Latest activity ·</span>
-          <span class="ws-activity-text">{{ selected.activity[0].text }}</span>
-          <span class="ws-activity-time">{{ selected.activity[0].time }}</span>
-        </div>
-        {% endif %}
-
-        <div class="ws-detail-actions">
-          <form method="post" action="/projects/{{ project.id }}/tasks/{{ selected.id }}/complete">
-            <input type="hidden" name="agent" value="{{ agent_id }}" />
-            <button type="submit" class="{% if selected.done %}btn-ghost{% else %}btn-primary{% endif %}">
-              {% if selected.done %}Reopen this task{% else %}Mark complete{% endif %}
-            </button>
-          </form>
-          <a class="btn-ghost" href="/projects/{{ project.id }}?task={{ selected.id }}&agent={{ agent_id }}#agent">Discuss with {{ speaker }} →</a>
-        </div>
         {% else %}
-        <div class="ws-center-empty">
-          <img class="empty-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-          {% if total_tasks %}
-          <h3>Pick a task on the map.</h3>
-          <p>Its requirements, links and latest activity show up here — and “Discuss” pins the agent's conversation to it.</p>
-          {% else %}
-          <h3>The map is empty.</h3>
-          <p>Add the first task on the left, or talk it through with the {{ speaker }} on the right — the plan becomes tasks on your map.</p>
-          {% endif %}
-        </div>
-        {% endif %}
-      </section>
-
-      {# ============ RIGHT: the agent conversation rail ============ #}
-      <aside class="ws-agent" id="agent" aria-label="{{ speaker }}">
-        <div class="ws-agent-head">
-          <div class="ws-agent-title-row">
-            <h2 class="ws-panel-title">{{ speaker }}</h2>
-            {% if rail_agents | length > 1 %}
-            <form method="get" action="/projects/{{ project.id }}" class="ws-agent-picker">
-              {% if selected %}<input type="hidden" name="task" value="{{ selected.id }}" />{% endif %}
-              <select class="text-input" name="agent" aria-label="Switch the agent in this project" onchange="this.form.submit()">
-                {% for a in rail_agents %}
-                <option value="{{ a.id }}"{% if a.id == agent_id %} selected{% endif %}>{{ a.name }}</option>
-                {% endfor %}
-              </select>
-            </form>
-            {% endif %}
-          </div>
-          <p class="ws-agent-sub">{% if agent_id == 'main' %}Ask about this project, plan its work, or shape the next task. The context is {{ project.name }} — nothing else leaks in.{% else %}Assigned to {{ project.name }} as its {{ speaker }} specialist. Ask it anything in that specialty — the project context comes with it.{% endif %}</p>
-        </div>
-
-        {% if discuss_task %}
-        <div class="ws-discussing" id="wsDiscussing">
-          <span class="ws-discussing-label">Now discussing</span>
-          <span class="ws-discussing-title">{{ discuss_task.title }}</span>
-          <a class="ws-discussing-clear" href="/projects/{{ project.id }}{% if agent_id != 'main' %}?agent={{ agent_id }}{% endif %}#agent" title="Stop discussing this task">×</a>
-        </div>
-        {% endif %}
-
-        <div class="ws-thread" id="wsThread" aria-live="polite" aria-atomic="false">
-          {% if thread %}
-            {% for msg in thread %}
-            <div class="chat-row {% if msg.is_orbit %}orbit{% else %}user{% endif %}"{% if msg.id %} data-message-id="{{ msg.id }}"{% endif %}>
-              {% if msg.is_orbit %}<div class="chat-speaker">{{ msg.speaker or speaker }}</div>{% endif %}
-              <div class="chat-bubble {% if msg.is_orbit %}orbit{% else %}user{% endif %}">
-                {% if msg.is_orbit %}
-                <div class="body"><img class="orbit-icon" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" /><span class="reply">{{ msg.body }}</span></div>
-                {% else %}
-                <div class="body">{{ msg.body }}</div>
-                {% endif %}
-              </div>
-              <div class="chat-meta">{{ msg.time }}</div>
-            </div>
+        <div class="ws-thread__empty">
+          <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+          <p>No conversation yet — this thread is about <strong>{{ project.name }}</strong> only.</p>
+          <div class="ws-chips">
+            {% for starter in starters %}
+            <button type="button" class="ws-chip" data-prompt="{{ starter.prompt }}">{{ starter.label }}</button>
             {% endfor %}
-          {% else %}
-          <div class="ws-thread-empty">
-            <img class="empty-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-            <p>No conversation yet — this thread is about <strong>{{ project.name }}</strong> only.</p>
-            <div class="ws-chips">
-              {% for starter in starters %}
-              <button type="button" class="ws-chip" data-prompt="{{ starter.prompt }}">{{ starter.label }}</button>
-              {% endfor %}
-            </div>
           </div>
-          {% endif %}
-        </div>
-
-        <div class="ws-turn-status" id="wsTurnStatus" role="status" aria-live="polite" hidden>
-          <img class="ws-turn-mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
-          <span id="wsTurnStatusText">Thinking…</span>
-        </div>
-
-        <div class="ws-followups ws-chips" id="wsFollowups">
-          {% for chip in followups %}
-          <button type="button" class="ws-chip" data-prompt="{{ chip.prompt }}">{{ chip.label }}</button>
-          {% endfor %}
-        </div>
-
-        {% if plan_hint %}<p class="ws-plan-hint" id="wsPlanHint">You chose “Plan with the {{ speaker }}” — describe the goal and it shapes the first tasks with you.</p>{% endif %}
-
-        {% if tasks %}
-        <div class="ws-task-pin">
-          <label class="ws-task-pin-label" for="wsTaskPin">Task</label>
-          <select class="text-input" id="wsTaskPin">
-            <option value="">None — just the project</option>
-            {% for t in pin_tasks %}
-            <option value="{{ t.id }}"{% if discuss_task and discuss_task.id == t.id %} selected{% endif %}>{{ t.title }} — {{ t.state_label }}</option>
-            {% endfor %}
-          </select>
         </div>
         {% endif %}
+      </div>
 
-        <form class="ws-composer" id="wsComposer" data-project-id="{{ project.id }}" data-agent="{{ agent_id }}" data-task-id="{{ discuss_task.id if discuss_task else '' }}" data-speaker="{{ speaker }}"
-              data-mode="{{ mode }}" data-thinking="{{ thinking_level }}" data-plan-hint="{{ '1' if plan_hint else '' }}">
-          <textarea class="text-input" id="wsInput" rows="2" required
-                    placeholder="{% if plan_hint %}Tell the {{ speaker }} what you want this project to be…{% elif discuss_task %}About “{{ discuss_task.title }}”…{% else %}Talk to the {{ speaker }} about {{ project.name }}…{% endif %}"></textarea>
-          <div class="ws-composer-row">
-            <span class="ws-mode-zone" id="wsModeZone"></span>
-            <button type="submit" class="btn-primary" id="wsSend">Send</button>
-          </div>
-          <noscript><p class="ws-noscript">The {{ speaker }} conversation needs JavaScript — replies stream in live.</p></noscript>
-        </form>
-      </aside>
+      <div class="ws-turn" id="wsTurnStatus" role="status" aria-live="polite" hidden>
+        <img src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+        <span id="wsTurnStatusText">Thinking…</span>
+      </div>
 
-    </div>
-  </main>
+      <div class="ws-chips ws-followups" id="wsFollowups">
+        {% for chip in followups %}
+        <button type="button" class="ws-chip" data-prompt="{{ chip.prompt }}">{{ chip.label }}</button>
+        {% endfor %}
+      </div>
+
+      <form class="ws-composer" id="wsComposer" data-project-id="{{ project.id }}" data-agent="{{ agent_id }}" data-task-id="{{ selected.id if selected else '' }}"
+            data-mode="{{ mode }}" data-thinking="{{ thinking_level }}" data-plan-hint="{{ '1' if plan_hint else '' }}">
+        <label class="o-field">
+          <span class="o-field__label">Your message</span>
+          <textarea class="o-field__input" id="wsInput" rows="2" required
+                    placeholder="{% if plan_hint %}Tell the {{ speaker }} what you want this project to be…{% elif selected %}About “{{ selected.title }}”…{% else %}Ask a question or suggest a revision…{% endif %}"></textarea>
+        </label>
+        <div class="ws-composer__row">
+          <span class="ws-controls" id="wsModeZone"></span>
+          <button type="submit" class="o-btn o-btn--secondary" id="wsSend">Send</button>
+        </div>
+        <p class="ws-fineprint">Messages don't change your project. Every edit stays a draft you can review.</p>
+        <noscript><p class="ws-fineprint">The {{ speaker }} conversation needs JavaScript — replies stream in live.</p></noscript>
+      </form>
+    </section>
+
+  </div>
+
+  {% elif tab == 'tasks' %}
+  <section class="ws-card ws-list" aria-label="Every task on this map">
+    <span class="ws-eyebrow">Tasks / {{ project.name }}</span>
+    {% if task_rows %}
+      {% for row in task_rows %}
+      <div class="ws-list__row">
+        <span class="ws-list__main"><a href="/projects/{{ project.id }}?task={{ row.id }}#details">{% if row.done %}✓ {% endif %}{{ row.title }}</a></span>
+        <span class="ws-list__side">{{ row.stage }} · {{ row.state_label }}</span>
+      </div>
+      {% endfor %}
+    {% else %}
+    <p class="ws-list__empty">No tasks yet. The Project Map tab takes the first one.</p>
+    {% endif %}
+  </section>
+
+  {% elif tab == 'files' %}
+  <section class="ws-card ws-list" aria-label="Files named on this project">
+    <span class="ws-eyebrow">Files / {{ project.name }}</span>
+    {% if file_rows %}
+      {% for row in file_rows %}
+      <div class="ws-list__row">
+        <span class="ws-list__main"><a href="/projects/{{ project.id }}?task={{ row.task_id }}#details">{{ row.name }}</a></span>
+        <span class="ws-list__side">{% if row.source == 'request' %}Named in the request{% else %}Named by orbit{% endif %} · {{ row.task }}</span>
+      </div>
+      {% endfor %}
+    {% else %}
+    <p class="ws-list__empty">No files named yet. Files appear here when a task's request names them or a run mentions them — never guessed.</p>
+    {% endif %}
+  </section>
+
+  {% elif tab == 'activity' %}
+  <section class="ws-card ws-list" aria-label="Activity on this project">
+    <span class="ws-eyebrow">Activity / {{ project.name }}</span>
+    {% if activity_rows %}
+      {% for row in activity_rows %}
+      <div class="ws-list__row">
+        <span class="ws-list__main">{{ row.text }}</span>
+        <span class="ws-list__side">{{ row.task }} · {{ row.time }}</span>
+      </div>
+      {% endfor %}
+    {% else %}
+    <p class="ws-list__empty">No activity yet. Runs, approvals and the marks you make on tasks appear here as they happen.</p>
+    {% endif %}
+  </section>
+
+  {% endif %}
+  {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
 <script src="{{ url_for('static', filename='project.js') }}"></script>
 {% endblock %}
