@@ -1,100 +1,327 @@
-{% extends "layout.html" %}
+{% extends "app_shell.html" %}
 {#
-  The dedicated feedback space. The same form also floats on every page (the
-  Feedback button bottom-right) — both paths write to the same store, and the
-  floating one never navigates away, so a report never costs work on screen.
+  Feedback — DERIVED from Settings · Light/Dark · Desktop. There is no
+  Feedback frame in design/ORBIT UI___2; the group's rule is to derive it
+  from the Settings frame and flag it, so this screen keeps that frame's
+  bones: the headline block, the field-card shapes, the two-column body
+  with an honest side rail, and one copper button ("Send feedback", the
+  analog of "Save preferences").
+
+  Everything here is real: the kinds are the account store's own
+  FEEDBACK_KINDS, the form posts to the same /feedback handler the
+  floating Feedback dialog writes to, and the list below is the account's
+  own sent notes (store.feedback_for) — "No notes yet" until one exists.
 #}
-{% block title %}orbit — Beta feedback{% endblock %}
-{% block body_class %}v2{% endblock %}
-{% block body %}
-<div class="screen screen--active" id="screen-feedback">
-{% include "_sidebar.html" %}
+{% block title %}orbit — Feedback{% endblock %}
+{% block head %}
+<style>
+  .fb-page { display: flex; flex-direction: column; gap: clamp(16px, 2.4vh, 24px); }
 
-  <main class="page-main">
-    {% include "_topbar.html" %}
-    <div class="page-wrap feedback-wrap">
+  .fb-head { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .fb-head h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(28px, 3vw, 40px);
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    color: var(--text-1);
+  }
+  .fb-head__sub { margin: 0; font-size: 15px; line-height: 1.6; color: var(--text-2); max-width: 62ch; }
 
-      <div class="page-topline">
-        <nav class="page-crumb" aria-label="Breadcrumb"><a href="/dashboard">Dashboard</a><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Feedback</span></nav>
-        <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
-      </div>
+  .fb-notice {
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-1);
+    margin: 0;
+  }
+  .fb-notice--error { border-color: var(--danger); color: var(--danger); }
 
-      <header class="page-head-block">
-        <p class="page-eyebrow">Beta feedback</p>
-        <h1 class="page-title">Tell us what to build — or what to fix.</h1>
-        <p class="page-sub">Feature suggestions, bug reports, and everything in between. Feedback here is read by the people building ORBIT, and it shapes what ships next.</p>
-      </header>
+  .fb-cols { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
+  .fb-main { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+  .fb-rail { display: flex; flex-direction: column; gap: 24px; }
 
-      {% if sent %}
-      <div class="notice-bar notice-ok" role="status">
-        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 5-5.5"/></svg>
-        <span>Thank you — your feedback is in. It landed in the list below.</span>
-      </div>
-      {% endif %}
-      {% if error %}
-      <div class="notice-bar notice-error" role="alert">
-        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v5M12 16h.01"/></svg>
-        <span>{{ error }}</span>
-      </div>
-      {% endif %}
+  .fb-card {
+    padding: clamp(20px, 3vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .fb-card__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 1.9vw, 23px);
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--text-1);
+  }
+  .fb-card__text { margin: 0; font-size: 14px; line-height: 1.65; color: var(--text-2); }
+  .fb-card__foot { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-3); }
 
-      <div class="feedback-grid">
-        <section class="settings-card" aria-label="Send feedback">
-          <form method="post" action="/feedback" class="settings-form" data-feedback-page-form>
-            <div class="field">
-              <span class="field-label">What kind of feedback is it?</span>
-              <div class="chip-grid">
-                {% for key, label in kinds.items() %}
-                <label class="pick-chip">
-                  <input type="radio" name="kind" value="{{ key }}"{% if values.get('kind', 'feature') == key %} checked{% endif %} />
-                  <span class="chip-face">{{ label }}</span>
-                </label>
-                {% endfor %}
-              </div>
-            </div>
-            <div class="field">
-              <label class="field-label" for="fbTitle">Give it a short title</label>
-              <input class="text-input" id="fbTitle" name="title" type="text" maxlength="120"
-                     placeholder="e.g. Import should accept .zip files" value="{{ values.get('title', '') }}" required />
-            </div>
-            <div class="field">
-              <label class="field-label" for="fbBody">The details</label>
-              <textarea class="text-area" id="fbBody" name="body" rows="6" maxlength="2000"
-                        placeholder="What were you trying to do? What happened — or what do you wish happened?">{{ values.get('body', '') }}</textarea>
-              <p class="field-hint" style="margin-top:4px;">Please don't include secrets, keys, or personal data.</p>
-            </div>
-            <div class="settings-actions">
-              <button class="btn-primary" type="submit" data-busy-label="Sending…">
-                <span class="btn-spin" aria-hidden="true"></span><span class="btn-label">Send feedback</span>
-              </button>
-            </div>
-          </form>
-        </section>
+  .fb-form { width: 100%; display: flex; flex-direction: column; gap: 14px; }
 
-        <section aria-label="Your previous feedback">
-          <h2 class="dash-section-title">Your previous notes {% if entries %}<span class="settings-count">({{ entries | length }})</span>{% endif %}</h2>
-          {% if entries %}
-          <div class="feedback-list">
-            {% for entry in entries[:20] %}
-            <article class="feedback-item">
-              <header class="feedback-item-head">
-                <span class="feedback-kind kind-{{ entry.kind }}">{{ kinds.get(entry.kind, entry.kind) }}</span>
-                <span class="feedback-date">{{ (entry.created_at or '')[:10] }}</span>
-              </header>
-              <h3 class="feedback-item-title">{{ entry.title }}</h3>
-              <p class="feedback-item-body">{{ entry.body }}</p>
-              {% if entry.page %}<p class="feedback-item-page">Sent from {{ entry.page }}</p>{% endif %}
-            </article>
-            {% endfor %}
-          </div>
-          {% else %}
-          <div class="feedback-empty">
-            <p>No notes yet. The first one you send lands here — bugs, ideas, or a quick "this feels off" are all useful.</p>
-          </div>
-          {% endif %}
-        </section>
-      </div>
+  .fb-field {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+  }
+  .fb-field__label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+  .fb-field__input {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    font-size: 15px;
+    color: var(--text-1);
+    width: 100%;
+    resize: vertical;
+    min-height: 96px;
+    font-family: inherit;
+    line-height: 1.6;
+  }
+  .fb-field__input:focus { outline: 2px solid var(--border); outline-offset: 2px; }
+  .fb-field__note { font-size: 12px; color: var(--text-3); }
+
+  .fb-kinds { display: flex; flex-wrap: wrap; gap: 10px; }
+  .fb-kind { position: relative; }
+  .fb-kind input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    margin: 0;
+  }
+  .fb-kind span {
+    display: inline-flex;
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .fb-kind input:checked + span {
+    border-color: var(--text-1);
+    color: var(--text-1);
+    font-weight: 600;
+  }
+  .fb-kind input:focus-visible + span { outline: 2px solid var(--border); outline-offset: 2px; }
+
+  /* ---------------- the sent list ---------------- */
+  .fb-list { width: 100%; display: flex; flex-direction: column; gap: 12px; }
+  .fb-entry {
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .fb-entry__meta {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+  .fb-entry__title { font-size: 14px; font-weight: 500; color: var(--text-1); }
+  .fb-entry__body { font-size: 13px; line-height: 1.55; color: var(--text-2); }
+
+  .fb-note {
+    width: 100%;
+    padding: 16px 18px;
+    border: 1px dashed var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-2);
+    margin: 0;
+  }
+
+  .fb-rail__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 1.9vw, 23px);
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--text-1);
+  }
+  .fb-rail__text { margin: 0; font-size: 14px; line-height: 1.65; color: var(--text-2); }
+  .fb-rail__facts { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+  .fb-rail__fact { font-size: 13px; line-height: 1.55; color: var(--text-2); }
+
+  /* ---------------- states ---------------- */
+  .fb-state {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: clamp(24px, 4vh, 40px) clamp(20px, 3vw, 32px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+  .fb-state__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(22px, 2.4vw, 28px);
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+  .fb-state__text { margin: 0; font-size: 15px; line-height: 1.65; color: var(--text-2); max-width: 56ch; }
+  .fb-state__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+
+  .fb-skel {
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    animation: fb-pulse 1.4s ease-in-out infinite;
+  }
+  .fb-skel--title { width: min(520px, 100%); height: 44px; }
+  .fb-skel--line { width: min(360px, 100%); height: 18px; margin-top: 16px; }
+  .fb-skel--card { min-height: clamp(120px, 18vh, 180px); margin-top: 24px; }
+  @keyframes fb-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  /* ---------------- dark edges ---------------- */
+  [data-theme="dark"] .fb-card,
+  [data-theme="dark"] .fb-state { border-color: var(--border); box-shadow: none; }
+
+  /* ---------------- phone ---------------- */
+  @media (max-width: 1000px) {
+    .fb-cols { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fb-skel { animation: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fb-page">
+
+  {% if view == 'loading' %}
+  <div role="status" aria-live="polite">
+    <span class="o-visually-hidden">Loading your feedback…</span>
+    <div class="fb-skel fb-skel--title" aria-hidden="true"></div>
+    <div class="fb-skel fb-skel--line" aria-hidden="true"></div>
+    <div class="fb-skel fb-skel--card" aria-hidden="true"></div>
+    <div class="fb-skel fb-skel--card" aria-hidden="true"></div>
+  </div>
+
+  {% elif view == 'error' %}
+  <section class="fb-state" role="alert">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="fb-state__title">We couldn't load your feedback.</h1>
+    <p class="fb-state__text">Nothing you sent was lost — the list is stored with your account. Reload the page to try again.</p>
+    <div class="fb-state__actions">
+      <a class="o-btn o-btn--primary" href="/feedback">Try again</a>
     </div>
-  </main>
+  </section>
+
+  {% else %}
+
+  <header class="fb-head">
+    <h1>Tell us what to build — or what to fix.</h1>
+    <p class="fb-head__sub">Feature suggestions, bug reports, and everything in between. Feedback here is read by the people building ORBIT, and it shapes what ships next.</p>
+    {% if sent %}<p class="fb-notice" role="status">Thank you — your feedback is in. It landed in the list below.</p>{% endif %}
+    {% if error %}<p class="fb-notice fb-notice--error" role="alert">{{ error }}</p>{% endif %}
+  </header>
+
+  <div class="fb-cols">
+    <div class="fb-main">
+      <section class="fb-card">
+        <h2 class="fb-card__title">Send feedback</h2>
+        <form method="post" action="/feedback" class="fb-form">
+          <div class="fb-field">
+            <span class="fb-field__label">What kind of feedback is it?</span>
+            <div class="fb-kinds">
+              {% for key, label in kinds.items() %}
+              <label class="fb-kind">
+                <input type="radio" name="kind" value="{{ key }}"{% if values.get('kind', 'feature') == key %} checked{% endif %} />
+                <span>{{ label }}</span>
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="fb-field">
+            <label class="fb-field__label" for="fbTitle">Short title</label>
+            <input class="fb-field__input" id="fbTitle" name="title" type="text" maxlength="120"
+                   placeholder="In a sentence — what is it?" required value="{{ values.get('title', '') }}" />
+          </div>
+          <div class="fb-field">
+            <label class="fb-field__label" for="fbBody">Details</label>
+            <textarea class="fb-field__input" id="fbBody" name="body" maxlength="2000"
+                      placeholder="What happened, or what do you wish happened?">{{ values.get('body', '') }}</textarea>
+          </div>
+          <div>
+            <button type="submit" class="o-btn o-btn--primary">Send feedback</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="fb-card">
+        <h2 class="fb-card__title">What you've sent</h2>
+        {% if entries %}
+        <div class="fb-list">
+          {% for item in entries %}
+          <div class="fb-entry">
+            <span class="fb-entry__meta">{{ kinds.get(item.kind, item.kind) }} · {{ (item.created_at or '')[:10] }}</span>
+            <span class="fb-entry__title">{{ item.title }}</span>
+            {% if item.body %}<span class="fb-entry__body">{{ item.body }}</span>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="fb-note">No notes yet. Anything you send lands here, newest first.</p>
+        {% endif %}
+      </section>
+    </div>
+
+    <aside class="fb-rail">
+      <section class="fb-card">
+        <h2 class="fb-rail__title">Where this goes</h2>
+        <p class="fb-rail__text">Feedback is stored with your account in this build, and the floating Feedback button on the chat pages writes to this same list.</p>
+        <div class="fb-rail__facts">
+          <span class="fb-rail__fact">One list per account — yours only</span>
+          <span class="fb-rail__fact">A short title and the details you write</span>
+          <span class="fb-rail__fact">Never any message text from your chats</span>
+        </div>
+        <p class="fb-card__foot">There is no public board and no reactions here — just your notes to the builders.</p>
+      </section>
+    </aside>
+  </div>
+
+  {% endif %}
 </div>
 {% endblock %}

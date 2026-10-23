@@ -655,7 +655,7 @@ class FeedbackTests(unittest.TestCase):
     def test_page_form_posts_and_lists(self) -> None:
         resp = self.client.post("/feedback", data={"kind": "feature", "title": "ZIP import", "body": "Let me drop a zip"})
         self.assertIn("sent=1", resp.headers["Location"])
-        text = self.client.get("/feedback").get_data(as_text=True)
+        text = self.client.get("/feedback?sent=1").get_data(as_text=True)
         self.assertIn("ZIP import", text)
         self.assertIn("Thank you", text)
 

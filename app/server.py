@@ -3562,6 +3562,26 @@ def create_app(
         account = _require_account()
         if store is None or account is None:
             return redirect(url_for("home"))
+
+        def _page(**overrides: Any) -> str:
+            view = request.args.get("view", "").strip()
+            if view not in ("loading", "error"):
+                view = ""
+            return render_template(
+                "feedback.html",
+                kinds=FEEDBACK_KINDS,
+                view=view,
+                projects_active=False,
+                agents_active=False,
+                settings_active=False,
+                dashboard_active=False,
+                analytics_active=False,
+                reminders_active=False,
+                connected_apps_active=False,
+                **_sidebar_context(),
+                **overrides,
+            )
+
         if request.method == "POST":
             kind = request.form.get("kind", "")
             title = request.form.get("title", "")
@@ -3569,29 +3589,19 @@ def create_app(
             try:
                 entry = store.add_feedback(account["id"], kind, title, body, page=request.form.get("page", "/feedback"))
             except ValueError as exc:
-                return render_template(
-                    "feedback.html",
-                    kinds=FEEDBACK_KINDS,
+                return _page(
                     error=str(exc),
                     values={"kind": kind, "title": title, "body": body},
                     entries=store.feedback_for(account["id"]),
                     sent=False,
-                    projects_active=False,
-                    agents_active=False,
-                    **_sidebar_context(),
                 ), 422
             _record_event("beta_feedback_submitted", account_id=account["id"], kind=kind, feedback_id=entry["id"])
             return redirect(url_for("feedback_page", sent="1"), code=303)
-        return render_template(
-            "feedback.html",
-            kinds=FEEDBACK_KINDS,
+        return _page(
             error="",
             values={},
             entries=store.feedback_for(account["id"]),
             sent=request.args.get("sent") == "1",
-            projects_active=False,
-            agents_active=False,
-            **_sidebar_context(),
         )
 
     @app.post("/api/feedback")
