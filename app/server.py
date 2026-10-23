@@ -2469,6 +2469,21 @@ def create_app(
             **_sidebar_context(),
         )
 
+    # ----- States gallery ---------------------------------------------------
+
+    @app.get("/states")
+    def states() -> str:
+        """The Empty, loading & error states screen.
+
+        A pattern sheet in the frame's own shape (wordmark, no rail): the
+        four states the app really renders, with the live copy and real
+        destinations of each. Not in the rail — the frame has no rail.
+        """
+        return render_template(
+            "states.html",
+            home_href="/dashboard" if _accounts() is not None else "/",
+        )
+
     # ----- Connected apps ---------------------------------------------------
 
     @app.get("/connected")
