@@ -27,7 +27,7 @@ import logging
 import os
 import sys
 from collections.abc import Iterable, Iterator
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -529,8 +529,11 @@ def create_app(
 
         The Analytics view reads back exactly these lines, so a rating or a sent
         message is recorded here rather than in a second store. Fields are ids,
-        counts and labels -- never message text.
+        counts and labels -- never message text. Every line carries the account
+        it happened to (unless the caller named one), so the file-backed reader
+        can keep accounts as separate as the SQLite rows do.
         """
+        fields.setdefault("account_id", _current_account_id())
         audit = _audit_for_account(fields.get("account_id"))
         if audit is None:
             return
@@ -2228,32 +2231,213 @@ def create_app(
             **_sidebar_context(),
         )
 
-    @app.get("/analytics")
-    def analytics() -> str:
-        """The Analytics view: audit.log read back, nothing tracked separately."""
+    # ----- Analytics ---------------------------------------------------------
+
+    def _analytics_report(*, window_days: int, compare: bool = False):
+        """The report for one window, from the same log the app writes to."""
         st = _scoped_store()
         audit: AuditLog | None = app.config["MODEL_AUDIT"]
-        # The same file the rest of the app logs to, so the view cannot drift
-        # onto a different path from the records it counts.
         store_obj = app.config.get("STORE")
         database = getattr(store_obj, "database", None)
         if database is not None and not app.config.get("MODEL_AUDIT_INJECTED"):
-            report = build_analytics(database, account_id=st.account_id)
+            return build_analytics(
+                database,
+                account_id=st.account_id,
+                window_days=window_days,
+                compare=compare,
+            )
+        log_path = audit.path if audit is not None else DEFAULT_AUDIT_LOG_PATH
+        return build_analytics(
+            log_path, window_days=window_days, compare=compare, account_id=st.account_id
+        )
+
+    # The "All time" probe: wide enough to hold any recorded history, trimmed
+    # to the real span before it reaches the page. Nothing is invented when
+    # the log is younger than the tab claims.
+    ALL_TIME_DAYS = 365 * 5
+
+    def _analytics_view_data(window: str) -> dict[str, Any]:
+        """Everything the Analytics screen renders — store state and log."""
+        st = _scoped_store()
+        if window == "week":
+            report = _analytics_report(window_days=7, compare=True)
+            compare_label = "last week"
+        elif window == "month":
+            report = _analytics_report(window_days=30, compare=True)
+            compare_label = "last month"
         else:
-            log_path = audit.path if audit is not None else DEFAULT_AUDIT_LOG_PATH
-            report = build_analytics(log_path)
+            window = "all"
+            report = _analytics_report(window_days=ALL_TIME_DAYS, compare=False)
+            compare_label = ""
+
+        # Trim the all-time lists to the real recorded span.
+        completion_days = list(report.completions_per_day)
+        if window == "all":
+            first = next((d for d in completion_days if d.count), None)
+            if first is not None:
+                completion_days = [d for d in completion_days if d.date >= first.date]
+
+        done_total = sum(1 for t in st.tasks_for() if t.done)
+        approved_total = sum(
+            1 for t in st.tasks_for() if getattr(t, "approved", False) or t.applied
+        )
+        rejected_total = sum(
+            1 for t in st.tasks_for() if getattr(t, "rejected", False)
+        )
+        pending_total = sum(1 for t in st.tasks_for() if proposal_ready(t))
+        decided_total = approved_total + rejected_total + pending_total
+        approved_share = (
+            round(approved_total * 100 / decided_total) if decided_total else 0
+        )
+
+        projects_rows = []
+        for project in _scoped_projects().list():
+            tasks = st.tasks_for_project(project.id)
+            complete, total = progress(tasks)
+            stage = ""
+            for t in tasks:
+                if not t.done and getattr(t, "stage", ""):
+                    stage = t.stage
+                    break
+            if not stage:
+                for t in reversed(tasks):
+                    if getattr(t, "stage", ""):
+                        stage = t.stage
+                        break
+            projects_rows.append(
+                {
+                    "name": project.name,
+                    "stage": stage,
+                    "complete": complete,
+                    "total": total,
+                    "percent": round(complete * 100 / total) if total else 0,
+                }
+            )
+
+        today = date.today()
+        if completion_days:
+            start = completion_days[0].date
+            end = completion_days[-1].date
+            if window == "all":
+                range_label = f"Since {_month_day(start)} · All projects"
+            elif start.month == end.month and start.year == end.year:
+                range_label = (
+                    f"{start.strftime('%B').upper()} {start.day}–{end.day}, {end.year}"
+                    " · All projects"
+                )
+            else:
+                range_label = f"{_month_day(start)} – {_month_day(end)} · All projects"
+        else:
+            range_label = f"{today.strftime('%B').upper()} · All projects"
+
+        return {
+            "report": report,
+            "window": window,
+            "compare_label": compare_label,
+            "completion_days": completion_days,
+            "day_caption": (
+                " · ".join(f"{d.weekday} {d.count}" for d in completion_days)
+                if len(completion_days) <= 7
+                else ""
+            ),
+            "done_total": done_total,
+            "approved_total": approved_total,
+            "rejected_total": rejected_total,
+            "pending_total": pending_total,
+            "approved_share": approved_share,
+            "projects_rows": projects_rows,
+            "range_label": range_label,
+        }
+
+    def _month_day(day: Any) -> str:
+        return f"{day.strftime('%B').upper()} {day.day}, {day.year}"
+
+    @app.get("/analytics")
+    def analytics() -> str:
+        """The Analytics view: what the log recorded and the store holds.
+
+        Every figure on the page is read back from real records — the audit
+        log (or its per-account SQLite rows) for dated counts, the store for
+        the decision state — and ``?window=week|month|all`` selects the real
+        span. ``?view=loading`` / ``?view=error`` are presentation-only.
+        """
+        st = _scoped_store()
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
+        window = request.args.get("window", "week").strip()
+        if window not in ("week", "month", "all"):
+            window = "week"
+        data = _analytics_view_data(window)
         return render_template(
             "analytics.html",
-            report=report,
-            user=st.user,
-            mode=st.mode,
-            thinking_level=st.thinking_level,
-            conversations=st.conversations_grouped(),
-            active_conversation_id=st.active_conversation_id,
-            active_conversation_title=PLACEHOLDER_TITLE,
-            connections=st.connections,
-            connected_count=st.connected_count(),
-            heartbeat=_heartbeat_view(),
+            view=view,
+            analytics_active=True,
+            projects_active=False,
+            agents_active=False,
+            settings_active=False,
+            dashboard_active=False,
+            **data,
+            **_sidebar_context(),
+        )
+
+    @app.get("/analytics/export")
+    def analytics_export() -> Response:
+        """A plain-text summary of exactly what the screen shows. Real file."""
+        window = request.args.get("window", "week").strip()
+        if window not in ("week", "month", "all"):
+            window = "week"
+        data = _analytics_view_data(window)
+        report = data["report"]
+        lines = [
+            "orbit — activity summary",
+            f"Window: {window} ({report.window_days} days) · {data['range_label']}",
+            "",
+            f"Tasks completed (in window): {report.completions_total}",
+            f"Changes approved (all time): {data['approved_total']}",
+            f"Pending proposals: {data['pending_total']}",
+            f"Rejected drafts: {data['rejected_total']}",
+            "",
+            "Completions per day:",
+        ]
+        for day in data["completion_days"]:
+            lines.append(f"  {day.date.isoformat()} ({day.weekday}): {day.count}")
+        lines += [
+            "",
+            "Decisions, not autopilot:",
+            f"  {data['approved_total']} approved",
+            f"  {data['pending_total']} pending",
+            f"  {data['rejected_total']} rejected",
+            "",
+            "The bigger picture:",
+        ]
+        for row in data["projects_rows"]:
+            stage = f" · {row['stage']}" if row["stage"] else ""
+            lines.append(
+                f"  {row['name']}{stage} · {row['percent']}%"
+                f" ({row['complete']} of {row['total']} tasks complete)"
+            )
+        lines += [
+            "",
+            "Messages in window: "
+            f"{report.messages_total} (models: "
+            + (
+                ", ".join(f"{name} ×{count}" for _m, name, count in report.models)
+                if report.models
+                else "none recorded"
+            )
+            + ")",
+            f"Ratings: {report.ratings_up} up, {report.ratings_down} down",
+            f"Reminders fired: {report.heartbeat_fired}"
+            f" (dismissed {report.heartbeat_dismissed}) · check-ins {report.checkins}",
+            "",
+            "Progress reflects completed tasks, not agent messages or unapproved proposals.",
+        ]
+        filename = f"orbit-summary-{date.today().isoformat()}.txt"
+        return Response(
+            "\n".join(lines) + "\n",
+            mimetype="text/plain",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
     @app.post("/api/task/<task_id>/stream")

@@ -65,6 +65,11 @@ class AnalyticsReport:
     ratings_down: int = 0
     summary: str = ""
     notes: list[str] = field(default_factory=list)
+    # Completions — ``task_completion`` events with state "complete", the same
+    # log read back for the weekly chart and its window-over-window line.
+    completions_total: int = 0
+    completions_previous: int = 0
+    completions_per_day: list[DayCount] = field(default_factory=list)
 
     @property
     def has_data(self) -> bool:
@@ -89,6 +94,12 @@ class AnalyticsReport:
             "heartbeat_dismissed": self.heartbeat_dismissed,
             "checkins": self.checkins,
             "ratings": {"up": self.ratings_up, "down": self.ratings_down},
+            "completions_total": self.completions_total,
+            "completions_previous": self.completions_previous,
+            "completions_per_day": [
+                {"date": day.date.isoformat(), "count": day.count}
+                for day in self.completions_per_day
+            ],
             "summary": self.summary,
             "notes": list(self.notes),
         }
@@ -137,6 +148,12 @@ def _read_events(path: Path, since: datetime) -> tuple[list[dict[str, Any]], int
     return events, read, True
 
 
+def _in_window(event: dict[str, Any], since: datetime) -> bool:
+    """Events at or after ``since`` — and un-stamped rows, as before."""
+    stamp = _parse_timestamp(event.get("timestamp"))
+    return stamp is None or stamp >= since
+
+
 def _day_label(day: date, today: date) -> str:
     if day == today:
         return "Today"
@@ -168,13 +185,22 @@ def build_analytics(
     now: datetime | None = None,
     window_days: int = WINDOW_DAYS,
     account_id: str | None = None,
+    compare: bool = False,
 ) -> AnalyticsReport:
-    """Read an audit file, or one account's SQLite analytics rows."""
+    """Read an audit file, or one account's SQLite analytics rows.
+
+    ``compare=True`` also reads the equally long window just before this one,
+    so the completions line can say "more than last week" only when there is
+    a real count to compare against.
+    """
     moment = now or datetime.now(timezone.utc)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     start_day = moment.date() - timedelta(days=window_days - 1)
     since = datetime.combine(start_day, datetime.min.time(), tzinfo=timezone.utc)
+    # With compare, read one extra window back; the earlier slice is counted
+    # only into ``completions_previous`` and never into this window's totals.
+    read_since = since - timedelta(days=window_days) if compare else since
     database_source = hasattr(audit_path, "connect") and hasattr(audit_path, "path")
     if database_source:
         if not account_id:
@@ -192,28 +218,39 @@ def build_analytics(
                 continue
             if isinstance(item, dict):
                 stamp = _parse_timestamp(item.get("timestamp"))
-                if stamp is None or stamp >= since:
+                if stamp is None or stamp >= read_since:
                     events.append(item)
         lines_read = len(rows)
         present = bool(rows)
         log_label = f"sqlite:{audit_path.path}"
     else:
         path = Path(audit_path)
-        events, lines_read, present = _read_events(path, since)
+        events, lines_read, present = _read_events(path, read_since)
+        if account_id is not None:
+            # Tagged lines only: one account's events are that account's
+            # counts, exactly as the SQLite rows are.
+            events = [e for e in events if e.get("account_id") == account_id]
         log_label = str(path)
 
+    in_window = [e for e in events if _in_window(e, since)]
+    earlier = [e for e in events if not _in_window(e, since)]
+
     messages_by_day: Counter[str] = Counter()
+    completions_by_day: Counter[str] = Counter()
     models: Counter[tuple[str, str | None]] = Counter()
     ratings: Counter[str] = Counter()
     fired = dismissed = checkins = 0
 
-    for event in events:
+    for event in in_window:
         name = event.get("event")
         stamp = _parse_timestamp(event.get("timestamp"))
         day_key = stamp.date().isoformat() if stamp else None
         if name == "chat_message_received":
             if day_key:
                 messages_by_day[day_key] += 1
+        elif name == "task_completion":
+            if event.get("state") == "complete" and day_key:
+                completions_by_day[day_key] += 1
         elif name == "model_answered":
             model = event.get("model")
             persona = event.get("persona")
@@ -231,8 +268,16 @@ def build_analytics(
         elif name == "heartbeat_checkin_recorded":
             checkins += 1
 
+    completions_previous = sum(
+        1
+        for event in earlier
+        if event.get("event") == "task_completion" and event.get("state") == "complete"
+    )
+
     days: list[DayCount] = []
     peak = max(messages_by_day.values(), default=0)
+    completion_days: list[DayCount] = []
+    completion_peak = max(completions_by_day.values(), default=0)
     for offset in range(window_days):
         day = start_day + timedelta(days=offset)
         days.append(
@@ -243,6 +288,16 @@ def build_analytics(
                 count=messages_by_day.get(day.isoformat(), 0),
                 is_today=day == moment.date(),
                 peak_count=peak,
+            )
+        )
+        completion_days.append(
+            DayCount(
+                date=day,
+                label=_day_label(day, moment.date()),
+                weekday=day.strftime("%a"),
+                count=completions_by_day.get(day.isoformat(), 0),
+                is_today=day == moment.date(),
+                peak_count=completion_peak,
             )
         )
 
@@ -270,7 +325,7 @@ def build_analytics(
             else "No audit.log yet, so there is nothing to count. It is written on the first "
             "message, tool call, rating or reminder."
         )
-    elif not events:
+    elif not in_window:
         notes.append(
             "This account has no analytics events in this window yet."
             if database_source
@@ -291,6 +346,9 @@ def build_analytics(
         checkins=checkins,
         ratings_up=ratings.get("up", 0),
         ratings_down=ratings.get("down", 0),
+        completions_total=sum(completions_by_day.values()),
+        completions_previous=completions_previous,
+        completions_per_day=completion_days,
         summary=_summarize(
             messages_today=messages_today,
             messages_total=messages_total,

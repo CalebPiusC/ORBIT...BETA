@@ -1,113 +1,353 @@
-{% extends "layout.html" %}
+{% extends "app_shell.html" %}
+{#
+  Analytics, from Analytics · Light/Dark · Desktop (1440) and Mobile (390).
+
+  Every figure is read back from real records: dated counts from the audit
+  log (or its per-account SQLite rows) via app.analytics.build_analytics,
+  decision state from the store. The frames' sample numbers ("8 / 3 more
+  than last week", "67%", the project percentages) are placeholders there —
+  here each one is computed or its line is honestly absent. Where the frame
+  shows "This week · This month · All time", the window really selects the
+  span. Copper is the Export summary button alone; it downloads a plain
+  text file of exactly these numbers.
+#}
 {% block title %}orbit — Analytics{% endblock %}
-{% block body %}
-{# Counts read back out of audit.log. Descriptive only: what happened, in
-   numbers, with no streaks, comparisons or targets. #}
-<div class="screen screen--active" id="screen-analytics">
-{% include "_sidebar.html" %}
+{% block head %}
+<style>
+  .an-page { display: flex; flex-direction: column; gap: clamp(16px, 2.4vh, 24px); }
 
-  <div class="analytics-main">
-    <div class="home-topbar app-topbar">
-      <div class="topbar-title" id="currentConversationTitle" title="Analytics">
-        <span class="topbar-eyebrow">Weekly</span>
-        <span class="topbar-name">Analytics</span>
-      </div>
-      <div class="home-topbar-controls topbar-controls">
-        <div class="mode-toggle" aria-label="Workspace mode">
-          <a class="topbar-icon-button" href="/" aria-label="Back to chat" title="Back to chat">←</a>
-        </div>
-      </div>
-      <div class="topbar-actions">
-        <button type="button" class="topbar-icon-button" data-open-settings aria-label="Settings" title="Settings">⚙</button>
-        <button type="button" class="topbar-account" data-open-settings title="{{ user.name }} · {{ user.workspace }}" aria-label="Account and settings for {{ user.name }}">
-          <span class="topbar-avatar">{{ user.name[:2]|upper }}</span>
-          <span class="topbar-account-name">{{ user.name }}</span>
-        </button>
-      </div>
+  .an-head { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .an-head h1 {
+    font-family: var(--font-display);
+    font-size: clamp(28px, 3vw, 40px);
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    color: var(--text-1);
+    margin: 0;
+  }
+  .an-head__sub { margin: 0; font-size: 15px; line-height: 1.6; color: var(--text-2); }
+
+  .an-tabs { display: flex; gap: 24px; }
+  .an-tabs a {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-3);
+    text-decoration: none;
+    padding-bottom: 6px;
+  }
+  .an-tabs a:hover { color: var(--text-1); }
+  .an-tabs a.is-active {
+    color: var(--text-1);
+    box-shadow: 0 1px 0 0 var(--text-3);
+  }
+
+  .an-range {
+    margin: 4px 0 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .an-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+
+  .an-card {
+    padding: clamp(20px, 3vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .an-stat__figure {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 1.9vw, 24px);
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--text-1);
+  }
+  .an-stat__sub { margin: 14px 0 0; font-size: 13px; line-height: 1.55; color: var(--text-2); }
+
+  .an-row { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: stretch; }
+  .an-main { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+  .an-rail { display: flex; flex-direction: column; gap: 24px; }
+
+  .an-card__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 1.9vw, 24px);
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--text-1);
+  }
+  .an-card__text { margin: 12px 0 0; font-size: 14px; line-height: 1.65; color: var(--text-2); }
+  .an-card__foot { margin: 16px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-3); }
+
+  /* ---------------- completions chart ---------------- */
+  .an-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: clamp(6px, 1.4vw, 18px);
+    height: clamp(180px, 30vh, 300px);
+    margin-top: 22px;
+  }
+
+  .an-bar {
+    flex: 1;
+    min-width: 0;
+    border-radius: 999px;
+    background: var(--surface-3);
+    height: 4%;
+  }
+
+  /* Bucketed heights (percent of the chart's peak): per-bar values without
+     a single inline style. */
+  .an-bar--0  { height: 4%; }
+  .an-bar--10 { height: 10%; }
+  .an-bar--20 { height: 20%; }
+  .an-bar--30 { height: 30%; }
+  .an-bar--40 { height: 40%; }
+  .an-bar--50 { height: 50%; }
+  .an-bar--60 { height: 60%; }
+  .an-bar--70 { height: 70%; }
+  .an-bar--80 { height: 80%; }
+  .an-bar--90 { height: 90%; }
+  .an-bar--100 { height: 100%; }
+
+  .an-caption { margin: 18px 0 0; font-size: 13px; line-height: 1.6; color: var(--text-2); }
+
+  /* ---------------- decisions ring ---------------- */
+  .an-ring-card { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
+  .an-ring { width: 128px; height: 128px; }
+  .an-ring__track { fill: none; stroke: var(--border); stroke-width: 7; }
+  .an-ring__arc {
+    fill: none;
+    stroke: var(--text-3);
+    stroke-width: 7;
+    stroke-linecap: round;
+    transform: rotate(-90deg);
+    transform-origin: 64px 64px;
+  }
+  .an-ring__value {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 500;
+    fill: var(--text-1);
+  }
+
+  .an-ring-title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 1.9vw, 24px);
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--text-1);
+  }
+
+  .an-decisions { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+  .an-decisions span { font-size: 13px; line-height: 1.55; color: var(--text-2); }
+
+  /* ---------------- the bigger picture ---------------- */
+  .an-projects { margin-top: 20px; display: flex; flex-direction: column; gap: 18px; }
+  .an-project__name { margin: 0; font-size: 15px; line-height: 1.5; color: var(--text-1); }
+  .an-project__meta { margin: 4px 0 0; font-size: 13px; line-height: 1.55; color: var(--text-2); }
+
+  /* ---------------- states ---------------- */
+  .an-state {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: clamp(24px, 4vh, 40px) clamp(20px, 3vw, 32px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+  .an-state__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(22px, 2.4vw, 28px);
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+  .an-state__text { margin: 0; font-size: 15px; line-height: 1.65; color: var(--text-2); max-width: 56ch; }
+  .an-state__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+
+  .an-skel {
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    animation: an-pulse 1.4s ease-in-out infinite;
+  }
+  .an-skel--title { width: min(520px, 100%); height: 44px; }
+  .an-skel--line { width: min(360px, 100%); height: 18px; margin-top: 16px; }
+  .an-skel--card { min-height: clamp(110px, 16vh, 150px); margin-top: 24px; }
+  .an-skel--wide { min-height: clamp(180px, 28vh, 280px); margin-top: 24px; }
+  @keyframes an-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  /* ---------------- dark edges ---------------- */
+  [data-theme="dark"] .an-card,
+  [data-theme="dark"] .an-state { border-color: var(--border); box-shadow: none; }
+
+  /* ---------------- phone ---------------- */
+  @media (max-width: 1000px) {
+    .an-row { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 800px) {
+    .an-stats { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .an-skel { animation: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="an-page">
+
+  {% if view == 'loading' %}
+  <div role="status" aria-live="polite">
+    <span class="o-visually-hidden">Loading your progress…</span>
+    <div class="an-skel an-skel--title" aria-hidden="true"></div>
+    <div class="an-skel an-skel--line" aria-hidden="true"></div>
+    <div class="an-skel an-skel--card" aria-hidden="true"></div>
+    <div class="an-skel an-skel--wide" aria-hidden="true"></div>
+    <div class="an-skel an-skel--card" aria-hidden="true"></div>
+  </div>
+
+  {% elif view == 'error' %}
+  <section class="an-state" role="alert">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="an-state__title">We couldn't load your progress.</h1>
+    <p class="an-state__text">Nothing changed on our side and nothing about your work was lost. Reload the page to try again.</p>
+    <div class="an-state__actions">
+      <a class="o-btn o-btn--primary" href="/analytics">Try again</a>
     </div>
+  </section>
 
-    <div class="analytics-body">
-      <div class="analytics-inner">
-        <p class="analytics-summary">{{ report.summary }}</p>
-        <p class="analytics-sub">
-          Last {{ report.window_days }} days · {{ report.events_read }} audit events read from
-          <code>{{ report.log_path }}</code>. Counts of what happened, nothing else.
+  {% else %}
+
+  <header class="an-head">
+    <h1>See how far you've come.</h1>
+    <p class="an-head__sub">A thoughtful view of your progress. No pressure to move faster.</p>
+    <a class="o-btn o-btn--primary" href="/analytics/export?window={{ window }}">Export summary</a>
+  </header>
+
+  <nav class="an-tabs" aria-label="Window">
+    <a href="/analytics?window=week" class="{% if window == 'week' %}is-active{% endif %}"{% if window == 'week' %} aria-current="page"{% endif %}>This week</a>
+    <a href="/analytics?window=month" class="{% if window == 'month' %}is-active{% endif %}"{% if window == 'month' %} aria-current="page"{% endif %}>This month</a>
+    <a href="/analytics?window=all" class="{% if window == 'all' %}is-active{% endif %}"{% if window == 'all' %} aria-current="page"{% endif %}>All time</a>
+  </nav>
+
+  <p class="an-range">{{ range_label }}</p>
+
+  {% for note in report.notes %}
+  <p class="an-card__text">{{ note }}</p>
+  {% endfor %}
+
+  <div class="an-stats">
+    <section class="an-card">
+      <h2 class="an-stat__figure">{{ report.completions_total }} / Tasks completed</h2>
+      {% if compare_label %}
+        {% set delta = report.completions_total - report.completions_previous %}
+        <p class="an-stat__sub">
+          {%- if report.completions_total == 0 and report.completions_previous == 0 -%}
+          No completions recorded in this window.
+          {%- elif delta > 0 -%}
+          {{ delta }} more than {{ compare_label }}
+          {%- elif delta < 0 -%}
+          {{ -delta }} fewer than {{ compare_label }}
+          {%- else -%}
+          Same as {{ compare_label }}
+          {%- endif -%}
         </p>
+      {% else %}
+        <p class="an-stat__sub">Counted across all recorded time.</p>
+      {% endif %}
+    </section>
+    <section class="an-card">
+      <h2 class="an-stat__figure">{{ approved_total }} / Changes approved</h2>
+      <p class="an-stat__sub">Applied only by your choice</p>
+    </section>
+    <section class="an-card">
+      <h2 class="an-stat__figure">{{ pending_total }} / Pending proposals</h2>
+      <p class="an-stat__sub">Not counted as completed work</p>
+    </section>
+  </div>
 
-        {% for note in report.notes %}
-        <p class="analytics-note">{{ note }}</p>
-        {% endfor %}
+  <div class="an-row">
+    <div class="an-main">
+      <section class="an-card">
+        <h2 class="an-card__title">
+          {%- if window == 'week' -%}A week of small steps
+          {%- elif window == 'month' -%}A month of small steps
+          {%- else -%}Small steps, over time
+          {%- endif -%}
+        </h2>
+        <p class="an-card__text">Tasks you marked complete, day by day. Quiet days count, too.</p>
+        <div class="an-chart" role="img" aria-label="{{ report.completions_total }} completions across the window">
+          {% for day in completion_days %}
+          <span class="an-bar an-bar--{{ (day.bar_percent // 10) * 10 }}" title="{{ day.date.isoformat() }}: {{ day.count }}"></span>
+          {% endfor %}
+        </div>
+        {% if day_caption %}
+        <p class="an-caption">{{ day_caption }}</p>
+        {% elif report.completions_total %}
+        <p class="an-caption">{{ report.completions_total }} completion{{ '' if report.completions_total == 1 else 's' }} in this window.</p>
+        {% else %}
+        <p class="an-caption">No completions recorded in this window yet.</p>
+        {% endif %}
+      </section>
 
-        <div class="analytics-grid">
-          <div class="analytics-card">
-            <h3>Messages per day</h3>
-            <div class="analytics-days">
-              {% for day in report.messages_per_day %}
-              <div class="analytics-day{% if day.is_today %} is-today{% endif %}">
-                <span class="label">{{ day.label }}</span>
-                <span class="analytics-bar"><span style="width: {{ day.bar_percent }}%"></span></span>
-                <span class="count">{{ day.count }}</span>
-              </div>
-              {% endfor %}
-            </div>
-            <div class="analytics-figure-note">{{ report.messages_total }} message{{ '' if report.messages_total == 1 else 's' }} in the window · {{ report.messages_today }} today</div>
-          </div>
-
-          <div class="analytics-card">
-            <h3>Which model answered</h3>
-            {% if report.models %}
-            <div class="analytics-rows">
-              {% for model, name, count in report.models %}
-              <div class="analytics-row">
-                <span class="key">{{ name }}{% if name != model %} <span class="model-id">{{ model }}</span>{% endif %}</span>
-                <span class="value">{{ count }}</span>
-              </div>
-              {% endfor %}
-            </div>
+      <section class="an-card">
+        <h2 class="an-card__title">The bigger picture</h2>
+        <div class="an-projects">
+          {% for row in projects_rows %}
+          <div class="an-project">
+            <p class="an-project__name">{{ row.name }}{% if row.stage %} · {{ row.stage }}{% endif %} · {{ row.percent }}%</p>
+            {% if row.total %}
+            <p class="an-project__meta">{{ row.complete }} of {{ row.total }} task{{ '' if row.total == 1 else 's' }} complete</p>
             {% else %}
-            <p class="analytics-empty">No model replies recorded in this window.</p>
+            <p class="an-project__meta">No tasks yet.</p>
             {% endif %}
           </div>
-
-          <div class="analytics-card">
-            <h3>Reminders</h3>
-            <div class="analytics-rows">
-              <div class="analytics-row"><span class="key">Notices fired</span><span class="value">{{ report.heartbeat_fired }}</span></div>
-              <div class="analytics-row"><span class="key">Notices dismissed</span><span class="value">{{ report.heartbeat_dismissed }}</span></div>
-              <div class="analytics-row"><span class="key">Check-ins logged</span><span class="value">{{ report.checkins }}</span></div>
-            </div>
-          </div>
-
-          <div class="analytics-card">
-            <h3>Message ratings</h3>
-            <div class="analytics-rows">
-              <div class="analytics-row"><span class="key">Thumbs up</span><span class="value">{{ report.ratings_up }}</span></div>
-              <div class="analytics-row"><span class="key">Thumbs down</span><span class="value">{{ report.ratings_down }}</span></div>
-            </div>
-            <div class="analytics-figure-note">Recorded from the buttons under each reply.</div>
-          </div>
+          {% else %}
+          <p class="an-card__text">No projects yet. Your progress appears here as projects and their tasks arrive.</p>
+          {% endfor %}
         </div>
-      </div>
+        <p class="an-card__foot">Progress reflects completed tasks, not agent messages or unapproved proposals.</p>
+      </section>
     </div>
+
+    <aside class="an-rail">
+      <section class="an-card an-ring-card">
+        <svg class="an-ring" viewBox="0 0 128 128" aria-hidden="true">
+          <circle class="an-ring__track" cx="64" cy="64" r="56" />
+          <circle class="an-ring__arc" cx="64" cy="64" r="56"
+                  stroke-dasharray="{{ (approved_share * 3.5186) | round(1) }} 351.9" />
+          <text class="an-ring__value" x="64" y="72" text-anchor="middle">{{ approved_share }}%</text>
+        </svg>
+        <h2 class="an-ring-title">Decisions, not autopilot.</h2>
+        <p class="an-decisions">
+          <span>{{ approved_total }} approved · Applied by your choice</span>
+          <span>{{ pending_total }} pending · Waiting for your decision</span>
+          <span>{{ rejected_total }} rejected · Your call, either way</span>
+        </p>
+      </section>
+    </aside>
   </div>
+
+  {% endif %}
 </div>
-<script src="{{ url_for('static', filename='app.js') }}"></script>
-<script>
-  // The sidebar's collapse toggle and tooltips work here too; the view itself is
-  // rendered server-side from audit.log.
-  try {
-    if (typeof Orbit === "undefined" || !Orbit || typeof Orbit.bootstrapSidebar !== "function") {
-      throw new Error("app.js did not load (window.Orbit is missing).");
-    }
-    Orbit.bootstrapSidebar();
-  } catch (err) {
-    var sidebar = document.getElementById("sidebar");
-    if (sidebar) {
-      var note = document.createElement("div");
-      note.className = "analytics-note";
-      note.textContent = "Sidebar controls unavailable: " + (err && err.message ? err.message : err);
-      sidebar.parentNode.insertBefore(note, sidebar);
-    }
-  }
-</script>
 {% endblock %}
