@@ -27,7 +27,7 @@ import logging
 import os
 import sys
 from collections.abc import Iterable, Iterator
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -2351,6 +2351,123 @@ def create_app(
 
     def _month_day(day: Any) -> str:
         return f"{day.strftime('%B').upper()} {day.day}, {day.year}"
+
+    # ----- Reminders: the heartbeat's real notices and settings --------------
+
+    def _notice_row(notice: dict[str, Any]) -> dict[str, Any]:
+        """One reminder card from one stored notice — dates included."""
+        kind = str(notice.get("kind") or "")
+        kind_label = {
+            "plan_missing": "No plan for today",
+            "checkin_gap": "Check-in gap",
+        }.get(kind, "Reminder")
+        created = _parse_iso(str(notice.get("created_at") or ""))
+        if created is not None:
+            local = created.astimezone(_heartbeat_tz())
+            today = datetime.now(_heartbeat_tz()).date()
+            day = local.date()
+            if day == today:
+                when = "Today"
+            elif day == today - timedelta(days=1):
+                when = "Yesterday"
+            else:
+                when = f"{day.strftime('%b')} {day.day}, {day.year}"
+            stamp = f"{when} · {local.strftime('%H:%M')}"
+        else:
+            stamp = "Undated"
+        push = str(notice.get("push") or "")
+        push_label = {
+            "sent": "Pushed to your phone",
+            "failed": "Phone push failed",
+        }.get(push, "In-app only")
+        return {
+            "id": str(notice.get("id") or ""),
+            "kind_label": kind_label,
+            "text": str(notice.get("text") or ""),
+            "stamp": stamp,
+            "push_label": push_label,
+            "open": notice.get("dismissed_at") is None,
+        }
+
+    def _parse_iso(text: str) -> datetime | None:
+        if not text:
+            return None
+        try:
+            value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+    def _heartbeat_tz() -> Any:
+        from heartbeat.schedule import LAGOS
+
+        return LAGOS
+
+    @app.get("/reminders")
+    def reminders() -> str | Response:
+        """The Reminders screen: this account's heartbeat notices, with dates.
+
+        Everything here is the heartbeat's own: the notices it fired (each
+        with its real date and delivery), the quiet hours and check rules it
+        runs by, and the pause switch that really pauses it. ``Mark done``
+        dismisses through the existing API; ``Snooze`` and custom reminders
+        are not built and say so. ``?view=loading`` / ``?view=error`` are
+        presentation-only switches.
+        """
+        st = _scoped_store()
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
+        tab = request.args.get("tab", "upcoming").strip()
+        if tab not in ("upcoming", "completed", "all"):
+            tab = "upcoming"
+        hb = _heartbeat_or_none()
+        checked = request.args.get("checked", "").strip()
+
+        notices: list[dict[str, Any]] = []
+        settings_view: dict[str, Any] | None = None
+        running = hb is not None
+        if running:
+            snap = hb.snapshot()
+            history = hb.history()
+            open_rows = [_notice_row(n) for n in snap["notices"]]
+            completed_rows = [_notice_row(n) for n in history if n.get("dismissed_at")]
+            all_rows = [_notice_row(n) for n in history]
+            notices = {
+                "upcoming": open_rows,
+                "completed": completed_rows,
+                "all": all_rows,
+            }[tab]
+            from config import HEARTBEAT_TIMEZONE
+            from heartbeat.schedule import QUIET_END_HOUR, QUIET_START_HOUR
+
+            settings_view = {
+                "push_enabled": bool(snap["push_enabled"]),
+                "plan_hour": snap["plan_hour"],
+                "checkin_gap_days": snap["checkin_gap_days"],
+                "quiet_label": f"{QUIET_START_HOUR:02d}:00 – {QUIET_END_HOUR:02d}:00",
+                "timezone_label": HEARTBEAT_TIMEZONE,
+                "paused": bool(snap["paused"]),
+                "open_count": len(open_rows),
+                "completed_count": len(completed_rows),
+            }
+
+        return render_template(
+            "reminders.html",
+            view=view,
+            tab=tab,
+            notices=notices,
+            settings_view=settings_view,
+            running=running,
+            checked=checked,
+            reminders_active=True,
+            projects_active=False,
+            agents_active=False,
+            analytics_active=False,
+            settings_active=False,
+            dashboard_active=False,
+            **_sidebar_context(),
+        )
 
     @app.get("/analytics")
     def analytics() -> str:

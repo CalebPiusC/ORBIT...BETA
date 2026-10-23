@@ -201,6 +201,19 @@ class Heartbeat:
             "quiet_hours": is_quiet_hours(local_time(now or utc_now())),
         }
 
+    def history(self) -> list[dict[str, Any]]:
+        """Every notice, open or dismissed, newest first.
+
+        ``snapshot`` answers "what is nudging me now"; this answers "what has
+        this reminder service ever said" — read-only, one account's own rows,
+        duplicates collapsed but never deleted.
+        """
+        state = self._store.read()
+        notices = [dict(n) for n in state.get("notices") or [] if isinstance(n, dict)]
+        notices = [n for n in notices if not n.get("duplicate_of")]
+        notices.sort(key=lambda n: str(n.get("created_at") or ""), reverse=True)
+        return notices
+
     # ----- writes -----
     def record_checkin(self, now: datetime | None = None) -> None:
         moment = now or utc_now()

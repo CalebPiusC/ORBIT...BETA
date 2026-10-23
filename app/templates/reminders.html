@@ -1,0 +1,331 @@
+{% extends "app_shell.html" %}
+{#
+  Reminders, from Reminders · Light/Dark · Desktop (1440) and Mobile (390).
+  The Dark Mobile frame is missing — the single-column stack is derived
+  from the other three.
+
+  Every notice is one the heartbeat really fired, with its real date and
+  delivery; every setting on the right is the heartbeat's own (quiet hours
+  22:00–08:00, the check rules, the pause switch that really pauses it).
+  The frames' sample reminder ("A fresh set of eyes · TOMORROW · 10:00 AM")
+  and its project chips have no data behind them here. "New reminder" and
+  "Snooze" are not built and say so; the one copper action is "Check now",
+  which runs the real checks on demand (POST /api/heartbeat/check). Mark
+  done dismisses through the existing notices API.
+#}
+{% block title %}orbit — Reminders{% endblock %}
+{% block head %}
+<style>
+  .rm-page { display: flex; flex-direction: column; gap: clamp(16px, 2.4vh, 24px); }
+
+  .rm-head { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .rm-head h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(28px, 3vw, 40px);
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    color: var(--text-1);
+  }
+  .rm-head__sub { margin: 0; font-size: 15px; line-height: 1.6; color: var(--text-2); }
+  .rm-head__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; }
+
+  .rm-tabs { display: flex; gap: 24px; }
+  .rm-tabs a {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-3);
+    text-decoration: none;
+    padding-bottom: 6px;
+  }
+  .rm-tabs a:hover { color: var(--text-1); }
+  .rm-tabs a.is-active { color: var(--text-1); box-shadow: 0 1px 0 0 var(--text-3); }
+
+  .rm-checked {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+
+  .rm-cols { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
+  .rm-list { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+  .rm-rail { display: flex; flex-direction: column; gap: 24px; }
+
+  .rm-card {
+    padding: clamp(20px, 3vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .rm-stamp {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .rm-title {
+    margin: 12px 0 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 1.9vw, 23px);
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--text-1);
+  }
+
+  .rm-text { margin: 12px 0 0; font-size: 15px; line-height: 1.65; color: var(--text-2); }
+  .rm-meta { margin: 14px 0 0; font-size: 12px; color: var(--text-3); }
+
+  .rm-card__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+
+  .rm-soon {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+
+  .rm-done .rm-title { color: var(--text-2); }
+  .rm-done .rm-text { color: var(--text-3); }
+
+  .rm-note {
+    padding: 16px 18px;
+    border: 1px dashed var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-2);
+    margin: 0;
+  }
+
+  /* ---------------- side card ---------------- */
+  .rm-rail__mark { margin-bottom: 14px; }
+  .rm-rail__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 1.9vw, 23px);
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--text-1);
+  }
+  .rm-rail__text { margin: 12px 0 0; font-size: 14px; line-height: 1.65; color: var(--text-2); }
+
+  .rm-defs { margin: 18px 0 0; display: flex; flex-direction: column; gap: 14px; }
+  .rm-def__term {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+  .rm-def__value { margin: 4px 0 0; font-size: 14px; line-height: 1.55; color: var(--text-1); }
+
+  .rm-check {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-top: 18px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .rm-check input { margin: 2px 0 0; flex: 0 0 auto; accent-color: var(--text-1); }
+
+  .rm-rail__foot { margin: 16px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-3); }
+  .rm-rail__actions { margin-top: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .rm-rail__actions .o-btn { width: 100%; }
+
+  .rm-error-line { margin: 12px 0 0; font-size: 13px; line-height: 1.55; color: var(--danger); }
+
+  /* ---------------- states ---------------- */
+  .rm-state {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: clamp(24px, 4vh, 40px) clamp(20px, 3vw, 32px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+  .rm-state__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(22px, 2.4vw, 28px);
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+  .rm-state__text { margin: 0; font-size: 15px; line-height: 1.65; color: var(--text-2); max-width: 56ch; }
+  .rm-state__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+
+  .rm-skel {
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    animation: rm-pulse 1.4s ease-in-out infinite;
+  }
+  .rm-skel--title { width: min(520px, 100%); height: 44px; }
+  .rm-skel--line { width: min(360px, 100%); height: 18px; margin-top: 16px; }
+  .rm-skel--card { min-height: clamp(120px, 18vh, 180px); margin-top: 24px; }
+  @keyframes rm-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  /* ---------------- dark edges ---------------- */
+  [data-theme="dark"] .rm-card,
+  [data-theme="dark"] .rm-state { border-color: var(--border); box-shadow: none; }
+
+  /* ---------------- phone ---------------- */
+  @media (max-width: 1000px) {
+    .rm-cols { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rm-skel { animation: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rm-page">
+
+  {% if view == 'loading' %}
+  <div role="status" aria-live="polite">
+    <span class="o-visually-hidden">Loading your reminders…</span>
+    <div class="rm-skel rm-skel--title" aria-hidden="true"></div>
+    <div class="rm-skel rm-skel--line" aria-hidden="true"></div>
+    <div class="rm-skel rm-skel--card" aria-hidden="true"></div>
+    <div class="rm-skel rm-skel--card" aria-hidden="true"></div>
+  </div>
+
+  {% elif view == 'error' or not running %}
+  <section class="rm-state" role="alert">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="rm-state__title">We couldn't load your reminders.</h1>
+    <p class="rm-state__text">Nothing was lost — your reminders are stored with your account and no check ran while this page failed. Reload the page to try again.</p>
+    <div class="rm-state__actions">
+      <a class="o-btn o-btn--primary" href="/reminders">Try again</a>
+    </div>
+  </section>
+
+  {% else %}
+
+  <header class="rm-head">
+    <h1>A nudge, not a deadline.</h1>
+    <p class="rm-head__sub">Make a little room for the work you want to return to.</p>
+    <div class="rm-head__actions">
+      <button type="button" class="o-btn o-btn--primary" id="rmCheck">Check now</button>
+      <button type="button" class="o-btn o-btn--secondary" disabled aria-disabled="true"
+              title="Creating your own reminders opens in a later build">New reminder<span class="rm-soon">Coming soon</span></button>
+    </div>
+    <p class="rm-error-line" id="rmError" hidden></p>
+  </header>
+
+  <nav class="rm-tabs" aria-label="Reminder views">
+    <a href="/reminders?tab=upcoming" class="{% if tab == 'upcoming' %}is-active{% endif %}">Upcoming{% if settings_view.open_count %} · {{ settings_view.open_count }}{% endif %}</a>
+    <a href="/reminders?tab=completed" class="{% if tab == 'completed' %}is-active{% endif %}">Completed</a>
+    <a href="/reminders?tab=all" class="{% if tab == 'all' %}is-active{% endif %}">All</a>
+  </nav>
+
+  {% if checked %}
+  <p class="rm-checked" role="status">
+    {%- if checked == '0' -%}
+    Checked just now. Nothing new is due — once-a-day checks stay once a day.
+    {%- elif checked == 'paused' -%}
+    Your reminders are paused, so the check ran nothing.
+    {%- else -%}
+    Checked just now · {{ checked }} new reminder{{ '' if checked == '1' else 's' }}.
+    {%- endif -%}
+  </p>
+  {% endif %}
+
+  <div class="rm-cols">
+    <div class="rm-list">
+      {% for item in notices %}
+      <section class="rm-card{% if not item.open %} rm-done{% endif %}" data-notice="{{ item.id }}">
+        <p class="rm-stamp">{{ item.stamp }}</p>
+        <h2 class="rm-title">{{ item.kind_label }}</h2>
+        <p class="rm-text">{{ item.text }}</p>
+        <p class="rm-meta">In-app · {{ item.push_label }}{% if not item.open %} · Completed{% endif %}</p>
+        {% if item.open %}
+        <div class="rm-card__actions">
+          <button type="button" class="o-btn o-btn--secondary" data-dismiss="{{ item.id }}">Mark done</button>
+          <button type="button" class="o-btn o-btn--secondary" disabled aria-disabled="true"
+                  title="Snoozing opens in a later build">Snooze<span class="rm-soon">Coming soon</span></button>
+        </div>
+        {% endif %}
+      </section>
+      {% else %}
+      <p class="rm-note">
+        {% if tab == 'completed' %}
+        You haven't completed a reminder yet. Ones you mark done collect here.
+        {% elif tab == 'all' %}
+        No reminders yet. The heartbeat's checks write one when a day slips by without a plan or a check-in.
+        {% else %}
+        Nothing is nudging you right now. When a check fires, the reminder lands here — with its date on it.
+        {% endif %}
+      </p>
+      {% endfor %}
+    </div>
+
+    <aside class="rm-rail">
+      <section class="rm-card">
+        <svg class="o-orbit-arc rm-rail__mark" width="56" height="56" viewBox="0 0 72 72" aria-hidden="true">
+          <path d="M58 18a24 24 0 1 0 4 26" />
+          <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+        </svg>
+        <h2 class="rm-rail__title">Work at your own pace.</h2>
+        <p class="rm-rail__text">Reminders are just for you. They never start agents, apply changes, or approve proposals.</p>
+        <div class="rm-defs">
+          <div>
+            <p class="rm-def__term">Delivery</p>
+            <p class="rm-def__value">In-app, delivered here in Orbit{% if settings_view.push_enabled %} · phone push on{% else %} · phone push off{% endif %}</p>
+          </div>
+          <div>
+            <p class="rm-def__term">Quiet hours</p>
+            <p class="rm-def__value">{{ settings_view.quiet_label }}</p>
+          </div>
+          <div>
+            <p class="rm-def__term">Your time zone</p>
+            <p class="rm-def__value">{{ settings_view.timezone_label }}</p>
+          </div>
+          <div>
+            <p class="rm-def__term">The two checks</p>
+            <p class="rm-def__value">A missing plan after {{ '%02d:00' % settings_view.plan_hour }} · a check-in gap of {{ settings_view.checkin_gap_days }} day{{ '' if settings_view.checkin_gap_days == 1 else 's' }}</p>
+          </div>
+        </div>
+        <label class="rm-check" for="rmPause">
+          <input type="checkbox" id="rmPause"{% if settings_view.paused %} checked{% endif %} />
+          <span>Pause reminders{% if settings_view.paused %} — paused right now{% endif %}</span>
+        </label>
+        <p class="rm-rail__foot">Missed a reminder? It stays here until you complete or dismiss it.</p>
+        <div class="rm-rail__actions">
+          <a class="o-btn o-btn--secondary" href="/settings?tab=notifications">Reminder settings</a>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="{{ url_for('static', filename='reminders.js') }}"></script>
+{% endblock %}

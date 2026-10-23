@@ -4,10 +4,10 @@
    invented. The active item is marked by the 2px copper bar at the left edge
    (one of copper's four permitted uses), everything else is ink and surface.
 
-   Approvals links to the change review and carries its real pending count.
-   Reminders and Connected apps are drawn in the frame but have no page in
-   this build yet. They render as disabled rows marked "Soon" rather than
-   links to nowhere. #}
+   Approvals links to the change review and carries its real pending count;
+   Reminders links to the heartbeat's own notices. Connected apps is drawn in
+   the frame but has no page in this build yet. It renders as a disabled row
+   marked "Soon" rather than a link to nowhere. #}
 <aside class="app-side" id="appSidebar">
   <a class="app-brand" href="{% if accounts_enabled %}/dashboard{% else %}/{% endif %}" aria-label="orbit — overview">
     <img class="app-brand__mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
@@ -27,7 +27,7 @@
     <a class="app-nav__item{% if agents_active %} is-active{% endif %}" href="/agents"{% if agents_active %} aria-current="page"{% endif %}>Agents</a>
     <a class="app-nav__item{% if approvals_active %} is-active{% endif %}" href="/approvals"{% if approvals_active %} aria-current="page"{% endif %}>Approvals{% if approvals_count %} <span class="app-nav__count">{{ approvals_count }}</span>{% endif %}</a>
     <a class="app-nav__item{% if analytics_active %} is-active{% endif %}" href="/analytics"{% if analytics_active %} aria-current="page"{% endif %}>Analytics</a>
-    <span class="app-nav__item is-soon" aria-disabled="true" title="Reminders opens in a later build">Reminders<span class="app-nav__soon">Soon</span></span>
+    <a class="app-nav__item{% if reminders_active %} is-active{% endif %}" href="/reminders"{% if reminders_active %} aria-current="page"{% endif %}>Reminders</a>
     <span class="app-nav__item is-soon" aria-disabled="true" title="Connected apps opens in a later build">Connected apps<span class="app-nav__soon">Soon</span></span>
     <a class="app-nav__item{% if settings_active %} is-active{% endif %}" href="/settings"{% if settings_active %} aria-current="page"{% endif %}>Settings</a>
   </nav>
