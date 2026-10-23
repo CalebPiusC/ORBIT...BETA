@@ -48,6 +48,11 @@ ConnectionStatus = Literal["connected", "not_connected"]
 class Connection:
     name: str
     status: ConnectionStatus
+    # Display copy for the Connected apps screen — what this integration is
+    # for and the smallest scope it would ask for. Never a claim about state:
+    # ``status`` alone says connected or not.
+    blurb: str = ""
+    scope: str = ""
 
 
 @dataclass
@@ -164,10 +169,35 @@ class User:
 
 # No integration is built yet, so nothing is connected. Every row stays visibly
 # "not connected" until it is a real integration — never faked as active.
+# The four integrations the Connected apps frame draws, seeded honestly: none
+# of them is built, so every one starts "not_connected" and stays that way
+# until real integration code exists. The blurbs and scope notes are the
+# frame's copy about what each one is for.
 _SEED_CONNECTIONS: list[Connection] = [
-    Connection(name="GitHub", status="not_connected"),
-    Connection(name="Linear", status="not_connected"),
-    Connection(name="Vercel", status="not_connected"),
+    Connection(
+        name="GitHub",
+        status="not_connected",
+        blurb="Bring repositories into Orbit and review proposed commits before they leave.",
+        scope="Read only · Selected repositories",
+    ),
+    Connection(
+        name="Figma",
+        status="not_connected",
+        blurb="Give agents design context with the files and frames you choose.",
+        scope="Read only · Selected files",
+    ),
+    Connection(
+        name="Notion",
+        status="not_connected",
+        blurb="Keep project notes close and turn approved plans into clear documentation.",
+        scope="Selected pages only",
+    ),
+    Connection(
+        name="Slack",
+        status="not_connected",
+        blurb="Receive gentle reminders and share updates only when you choose.",
+        scope="Chosen channels",
+    ),
 ]
 
 _SEED_USER = User(name="Caleb", workspace="Personal space", id=DEFAULT_USER_ID)  # owner's design frames name the workspace
@@ -261,7 +291,8 @@ class Store:
         # used to change the module-level seed, and with it every other store
         # in the process (and the next test).
         self.connections: list[Connection] = [
-            Connection(name=c.name, status=c.status) for c in _SEED_CONNECTIONS
+            Connection(name=c.name, status=c.status, blurb=c.blurb, scope=c.scope)
+            for c in _SEED_CONNECTIONS
         ]
         # No seeded history: a conversation exists only once the person has
         # sent something. Invented titles in the rail read as work that

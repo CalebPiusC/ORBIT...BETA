@@ -89,7 +89,8 @@ class StoreSeedTests(unittest.TestCase):
         store = Store().for_account(DEFAULT_USER_ID)
         self.assertEqual(store.connected_count(), 0)
         self.assertEqual(
-            [c.name for c in store.connections], ["GitHub", "Linear", "Vercel"]
+            [c.name for c in store.connections],
+            ["GitHub", "Figma", "Notion", "Slack"],
         )
         self.assertTrue(all(c.status == "not_connected" for c in store.connections))
 

@@ -2469,6 +2469,48 @@ def create_app(
             **_sidebar_context(),
         )
 
+    # ----- Connected apps ---------------------------------------------------
+
+    @app.get("/connected")
+    def connected_apps() -> str:
+        """The Connected apps screen: one honest status row per integration.
+
+        The rows come from the store's connections, never from the template.
+        No integration is built in this build, so every status reads
+        "Not connected" and every connect button is disabled with
+        "Coming soon" — the same honesty rule the provider buttons follow.
+        ``?view=loading`` / ``?view=error`` are presentation-only switches.
+        """
+        st = _scoped_store()
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
+        rows = [
+            {
+                "name": item.name,
+                "blurb": item.blurb,
+                "scope": item.scope,
+                "connected": item.status == "connected",
+                "status_label": (
+                    "Connected" if item.status == "connected" else "Not connected"
+                ),
+            }
+            for item in st.connections
+        ]
+        return render_template(
+            "connected_apps.html",
+            view=view,
+            rows=rows,
+            connected_apps_active=True,
+            projects_active=False,
+            agents_active=False,
+            analytics_active=False,
+            reminders_active=False,
+            settings_active=False,
+            dashboard_active=False,
+            **_sidebar_context(),
+        )
+
     @app.get("/analytics")
     def analytics() -> str:
         """The Analytics view: what the log recorded and the store holds.

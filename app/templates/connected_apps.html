@@ -1,0 +1,230 @@
+{% extends "app_shell.html" %}
+{#
+  Connected apps, from Connected apps · Light/Dark · Desktop (1440) and
+  Mobile (390). The Dark Desktop frame is missing — the dark theme is the
+  shared token swap, exactly like every other screen.
+
+  The rows come from the store's connections (app/store.py), never from
+  this template. No integration is built in this build: every status is
+  honestly "Not connected", every connect button is disabled with
+  "Coming soon", and the privacy-guide link is the same. The frames'
+  brand marks (the GitHub/Figma/Notion/Slack glyphs) are artwork that
+  ships nowhere in this build — none is invented here. The one copper
+  slot this screen would use is deliberately empty: nothing on it works
+  yet, and copper marks only actions that do.
+#}
+{% block title %}orbit — Connected apps{% endblock %}
+{% block head %}
+<style>
+  .cn-page { display: flex; flex-direction: column; gap: clamp(16px, 2.4vh, 24px); }
+
+  .cn-head { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .cn-head h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(28px, 3vw, 40px);
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    color: var(--text-1);
+  }
+  .cn-head__sub { margin: 0; font-size: 15px; line-height: 1.6; color: var(--text-2); }
+
+  .cn-rule {
+    margin: 4px 0 0;
+    padding: 18px 20px;
+    border-left: 2px solid var(--border);
+    background: var(--surface-2);
+    border-radius: var(--r-control);
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--text-1);
+  }
+
+  .cn-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+
+  .cn-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: clamp(20px, 3vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .cn-card__name {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 1.9vw, 23px);
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--text-1);
+  }
+
+  .cn-card__blurb { margin: 14px 0 0; font-size: 14px; line-height: 1.65; color: var(--text-2); }
+  .cn-card__meta {
+    margin: 16px 0 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+  .cn-card__action { margin-top: 18px; width: 100%; }
+  .cn-card__action .o-btn { width: 100%; }
+
+  .cn-soon {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+
+  .cn-note {
+    padding: clamp(20px, 3vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+  .cn-note__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 1.9vw, 23px);
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--text-1);
+  }
+  .cn-note__text { margin: 12px 0 0; font-size: 14px; line-height: 1.65; color: var(--text-2); }
+  .cn-note__link { margin: 16px 0 0; }
+
+  .cn-state {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: clamp(24px, 4vh, 40px) clamp(20px, 3vw, 32px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+  .cn-state__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(22px, 2.4vw, 28px);
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+  .cn-state__text { margin: 0; font-size: 15px; line-height: 1.65; color: var(--text-2); max-width: 56ch; }
+  .cn-state__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+
+  .cn-skel {
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    animation: cn-pulse 1.4s ease-in-out infinite;
+  }
+  .cn-skel--title { width: min(520px, 100%); height: 44px; }
+  .cn-skel--line { width: min(360px, 100%); height: 18px; margin-top: 16px; }
+  .cn-skel--card { min-height: clamp(140px, 20vh, 200px); }
+  .cn-skel--grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin-top: 24px; }
+  @keyframes cn-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  /* ---------------- dark edges ---------------- */
+  [data-theme="dark"] .cn-card,
+  [data-theme="dark"] .cn-note,
+  [data-theme="dark"] .cn-state { border-color: var(--border); box-shadow: none; }
+
+  /* ---------------- phone ---------------- */
+  @media (max-width: 800px) {
+    .cn-grid, .cn-skel--grid { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cn-skel { animation: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cn-page">
+
+  {% if view == 'loading' %}
+  <div role="status" aria-live="polite">
+    <span class="o-visually-hidden">Loading your connections…</span>
+    <div class="cn-skel cn-skel--title" aria-hidden="true"></div>
+    <div class="cn-skel cn-skel--line" aria-hidden="true"></div>
+    <div class="cn-skel--grid" aria-hidden="true">
+      <div class="cn-skel cn-skel--card"></div>
+      <div class="cn-skel cn-skel--card"></div>
+      <div class="cn-skel cn-skel--card"></div>
+      <div class="cn-skel cn-skel--card"></div>
+    </div>
+  </div>
+
+  {% elif view == 'error' %}
+  <section class="cn-state" role="alert">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="cn-state__title">We couldn't load your connections.</h1>
+    <p class="cn-state__text">Nothing was connected or disconnected while this page failed. Reload the page to try again.</p>
+    <div class="cn-state__actions">
+      <a class="o-btn o-btn--primary" href="/connected">Try again</a>
+    </div>
+  </section>
+
+  {% else %}
+
+  <header class="cn-head">
+    <h1>Keep your tools in good company.</h1>
+    <p class="cn-head__sub">Connect what helps. Leave the rest. Every connection is optional.</p>
+    <p class="cn-rule">A connection isn't permission to change things. Every edit, issue, or external update still needs your approval.</p>
+  </header>
+
+  {% if rows %}
+  <div class="cn-grid">
+    {% for row in rows %}
+    <section class="cn-card">
+      <h2 class="cn-card__name">{{ row.name }}</h2>
+      {% if row.blurb %}<p class="cn-card__blurb">{{ row.blurb }}</p>{% endif %}
+      <p class="cn-card__meta">{{ row.status_label }}{% if row.scope %} · {{ row.scope }}{% endif %}</p>
+      <div class="cn-card__action">
+        {% if row.connected %}
+        <button type="button" class="o-btn o-btn--secondary" disabled aria-disabled="true"
+                title="Managing access opens in a later build">Manage access<span class="cn-soon">Coming soon</span></button>
+        {% else %}
+        <button type="button" class="o-btn o-btn--secondary" disabled aria-disabled="true"
+                title="{{ row.name }} integration opens in a later build">Connect {{ row.name }}<span class="cn-soon">Coming soon</span></button>
+        {% endif %}
+      </div>
+    </section>
+    {% endfor %}
+  </div>
+  {% else %}
+  <section class="cn-state">
+    <h1 class="cn-state__title">No connections are offered yet.</h1>
+    <p class="cn-state__text">When an integration is really built, its row lands here — with its honest status.</p>
+  </section>
+  {% endif %}
+
+  <section class="cn-note">
+    <h2 class="cn-note__title">Only the access you choose.</h2>
+    <p class="cn-note__text">Orbit asks for the smallest useful scope. Review permissions before connecting, and disconnect any time. Disconnecting stops future access; it doesn't delete your project.</p>
+    <p class="cn-note__link">
+      <button type="button" class="o-btn o-btn--ghost" disabled aria-disabled="true"
+              title="The connected-app privacy guide opens in a later build">Read our connected-app privacy guide<span class="cn-soon">Coming soon</span></button>
+    </p>
+  </section>
+
+  {% endif %}
+</div>
+{% endblock %}

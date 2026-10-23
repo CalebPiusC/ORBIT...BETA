@@ -152,7 +152,7 @@ class AppRoutesTests(unittest.TestCase):
         body = resp.get_data(as_text=True)
         self.assertIn("No apps connected yet", body)
         self.assertIn("Nothing is connected", body)
-        for name in ("GitHub", "Linear", "Vercel"):
+        for name in ("GitHub", "Figma", "Notion", "Slack"):
             self.assertNotIn(name, body)
         self.assertNotIn('class="tool-pill', body)
         self.assertNotIn("Your development tools", body)
@@ -170,7 +170,7 @@ class AppRoutesTests(unittest.TestCase):
         body = self.client.get("/").get_data(as_text=True)
         self.assertIn('class="tool-pill connected"', body)
         self.assertIn("GitHub", body)  # named only because it is connected
-        self.assertNotIn("Linear", body)
+        self.assertNotIn("Figma", body)
         self.assertNotIn("No apps connected yet", body)
         self.assertIn("Connected apps · 1 active", body)
 
