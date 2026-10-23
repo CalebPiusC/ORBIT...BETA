@@ -1,0 +1,244 @@
+{# The Empty, loading & error states screen — the frame is a spec sheet:
+   wordmark top-left, no rail, the state patterns in their own cards. It
+   documents the states the app really renders: each card carries the exact
+   copy and the real destinations of the live state on the Projects screen
+   (empty / loading / error / no search results). The frame's sample
+   specifics (Fieldnotes, "26 of 38 files read", IMPORT-004, the "garden"
+   query) are placeholders there and are not reproduced. Only the Dark
+   Desktop frame exists; light is the shared token swap, flagged.
+
+   This page is deliberately not in the rail — the frame has no rail. #}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>orbit — States</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='orbit-mark.svg') }}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    // Theme before first paint: an explicit saved choice wins, otherwise the
+    // system setting — the same rule as the app shell.
+    (function () {
+      try {
+        var saved = window.localStorage.getItem("orbit.theme");
+        var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        var choice = (saved === "light" || saved === "dark") ? saved : (dark ? "dark" : "light");
+        document.documentElement.dataset.theme = choice;
+      } catch (_error) {
+        document.documentElement.dataset.theme = "light";
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='orbit.css') }}" />
+  <style>
+    .stg {
+      min-height: 100vh;
+      padding: clamp(24px, 4.4vh, 40px) clamp(24px, 2.8vw, 40px) clamp(32px, 6vh, 64px);
+      background: var(--bg);
+      color: var(--text-1);
+    }
+    .stg-inner { max-width: 1136px; margin: 0 auto; display: flex; flex-direction: column; gap: clamp(24px, 4vh, 40px); }
+
+    .stg-brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-1);
+      text-decoration: none;
+      align-self: flex-start;
+    }
+    .stg-brand__mark { width: 28px; height: 28px; }
+    .stg-brand__word {
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+    }
+
+    .stg-head h1 {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: clamp(28px, 3.4vw, 44px);
+      font-weight: 500;
+      line-height: 1.15;
+      letter-spacing: -0.015em;
+      color: var(--text-1);
+    }
+    .stg-head p {
+      margin: 14px 0 0;
+      font-size: 15px;
+      line-height: 1.65;
+      color: var(--text-2);
+    }
+
+    .stg-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+
+    .stg-card {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
+      padding: clamp(20px, 3vw, 28px);
+      border: 1px solid transparent;
+      border-radius: var(--r-card);
+      background: var(--surface);
+      box-shadow: var(--shadow-card);
+    }
+
+    .stg-eyebrow {
+      margin: 0;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-3);
+    }
+
+    .stg-title {
+      margin: 0;
+      font-family: var(--font-display);
+      font-size: clamp(19px, 1.9vw, 23px);
+      font-weight: 500;
+      line-height: 1.35;
+      color: var(--text-1);
+    }
+    .stg-text { margin: 0; font-size: 14px; line-height: 1.65; color: var(--text-2); }
+    .stg-note { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-3); }
+    .stg-actions { display: flex; flex-direction: column; gap: 12px; width: 100%; margin-top: auto; padding-top: 18px; }
+    .stg-actions .o-btn { width: 100%; }
+    .stg-link {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--text-2);
+    }
+    .stg-link a { color: var(--text-1); text-underline-offset: 3px; }
+
+    .stg-bar {
+      width: 100%;
+      height: 4px;
+      border-radius: 999px;
+      background: var(--surface-3);
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    .stg-bar__fill {
+      display: block;
+      width: 38%;
+      height: 100%;
+      border-radius: 999px;
+      background: var(--text-3);
+      animation: stg-slide 1.6s ease-in-out infinite;
+    }
+    @keyframes stg-slide {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(280%); }
+    }
+
+    .stg-card--wide { grid-column: 1 / -1; }
+    .stg-card--wide .stg-actions { width: auto; }
+
+    .stg-foot {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--text-3);
+    }
+
+    [data-theme="dark"] .stg-card { border-color: var(--border); box-shadow: none; }
+
+    @media (max-width: 1000px) {
+      .stg-grid { grid-template-columns: minmax(0, 1fr); }
+      .stg-card--wide { grid-column: auto; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .stg-bar__fill { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="stg">
+    <div class="stg-inner">
+      <a class="stg-brand" href="{{ home_href }}" aria-label="orbit — overview">
+        <img class="stg-brand__mark" src="{{ url_for('static', filename='orbit-mark.svg') }}" alt="" aria-hidden="true" />
+        <span class="stg-brand__word">orbit</span>
+      </a>
+
+      <header class="stg-head">
+        <h1>A little guidance, in every state.</h1>
+        <p>Responsive state patterns / Clear starting points. Honest progress. A calm way back.</p>
+      </header>
+
+      <div class="stg-grid">
+
+        {# The real Projects empty state (a brand-new account), with the
+           frame's one copper starting point and the real destinations. #}
+        <section class="stg-card" aria-label="Empty state">
+          <svg class="o-orbit-arc" width="64" height="64" viewBox="0 0 72 72" aria-hidden="true">
+            <path d="M58 18a24 24 0 1 0 4 26" />
+            <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+          </svg>
+          <p class="stg-eyebrow">Projects / Empty</p>
+          <h2 class="stg-title">No projects yet.</h2>
+          <p class="stg-text">Start one with a name and, if you like, a sentence about it — its Project Map and Main Agent are ready as soon as it exists. Already have something? The import screen says exactly what is and isn't connected yet.</p>
+          <div class="stg-actions">
+            <a class="o-btn o-btn--primary" href="/create">New project</a>
+            <p class="stg-link">Or import an existing project <a href="/projects/import">↗</a></p>
+          </div>
+        </section>
+
+        {# The real Projects loading skeleton: same geometry as the page,
+           nothing but a wait. #}
+        <section class="stg-card" aria-label="Loading state">
+          <svg class="o-orbit-arc" width="64" height="64" viewBox="0 0 72 72" aria-hidden="true">
+            <path d="M58 18a24 24 0 1 0 4 26" />
+            <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+          </svg>
+          <p class="stg-eyebrow">Projects / Loading</p>
+          <h2 class="stg-title">Getting our bearings.</h2>
+          <p class="stg-text">We're reading your workspace and organizing your Project Map.</p>
+          <div class="stg-bar" aria-hidden="true"><span class="stg-bar__fill"></span></div>
+          <p class="stg-note">No files are being changed. You can safely leave this page.</p>
+          <div class="stg-actions">
+            <a class="o-btn o-btn--secondary" href="/projects?view=loading">See the live state</a>
+          </div>
+        </section>
+
+        {# The real Projects failure panel, with its two real ways out. #}
+        <section class="stg-card" aria-label="Error state">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="stg-eyebrow">
+            <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+            <path d="M14 3v5h5" />
+            <path d="M12 11v3" />
+            <path d="M12 17h.01" />
+          </svg>
+          <p class="stg-eyebrow">Projects / Error</p>
+          <h2 class="stg-title">We couldn't load your projects.</h2>
+          <p class="stg-text">Nothing has changed and no files were touched. Reload this page, or open your workspace overview and come back.</p>
+          <div class="stg-actions">
+            <a class="o-btn o-btn--secondary" href="/projects">Try again</a>
+            <a class="o-btn o-btn--secondary" href="/dashboard">Open Overview</a>
+          </div>
+        </section>
+
+        {# The real "nothing matches this search" panel — distinct from a
+           new account — with its real way back. #}
+        <section class="stg-card stg-card--wide" aria-label="No search results">
+          <p class="stg-eyebrow">Projects / Search</p>
+          <h2 class="stg-title">Nothing matches</h2>
+          <p class="stg-text">No project matches this view. Try a different name, or clear the status filter to see all your projects.</p>
+          <div class="stg-actions">
+            <a class="o-btn o-btn--secondary" href="/projects">Clear the filters</a>
+          </div>
+        </section>
+
+      </div>
+
+      <p class="stg-foot">These are the states the app really renders on the Projects screen — copy and destinations taken from the live templates, not drawn from a mock.</p>
+    </div>
+  </main>
+</body>
+</html>

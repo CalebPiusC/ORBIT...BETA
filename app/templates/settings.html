@@ -1,314 +1,482 @@
-{% extends "layout.html" %}
+{% extends "app_shell.html" %}
 {#
-  Profile & account. Structure notes:
-    * Registration asks for name/email/password only; everything optional lives
-      here or in /onboarding — never in the sign-up wall.
-    * Every control either works or says exactly why it can't yet. Integration
-      rows that aren't built are visible but visibly disabled, same honesty
-      rule as /create's import section.
-    * Privacy text states only what's true of this build.
+  Settings, from Settings · Light/Dark · Desktop (1440) and Mobile (390).
+
+  Only options that really work (the group's behavioural rule, which wins
+  over the frame's mock here): Full name and Workspace name save through
+  the real /settings/profile handler, the Product updates checkbox is the
+  real account preference, the theme choice is the real per-browser
+  setting, the password and session controls are the real handlers, and
+  Delete account is the real one. The frame's "Approval reminders" and
+  "Weekly progress note" checkboxes promise notifications this build
+  cannot send and are omitted entirely (flagged in the report); the
+  Language and Time zone rows display the real values and say what they
+  cannot do; "Explore plans" and "Export workspace" are disabled with
+  "Coming soon".
+
+  The Notifications and Privacy tabs are derived — the frame draws only
+  General. They carry the heartbeat's real notification settings and the
+  real password/session/delete controls. Copper is the General tab's
+  "Save preferences" alone.
 #}
-{% block title %}orbit — Profile &amp; settings{% endblock %}
-{% block body_class %}v2{% endblock %}
-{% block body %}
-<div class="screen screen--active" id="screen-settings">
-{% include "_sidebar.html" %}
+{% block title %}orbit — Settings{% endblock %}
+{% block head %}
+<style>
+  .st-page { display: flex; flex-direction: column; gap: clamp(16px, 2.4vh, 24px); }
 
-  <main class="page-main">
-    {% include "_topbar.html" %}
-    <div class="page-wrap settings-wrap">
+  .st-head { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .st-head h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(28px, 3vw, 40px);
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    color: var(--text-1);
+  }
+  .st-head__sub { margin: 0; font-size: 15px; line-height: 1.6; color: var(--text-2); }
 
-      <div class="page-topline">
-        <nav class="page-crumb" aria-label="Breadcrumb"><a href="/dashboard">Dashboard</a><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-here">Settings</span></nav>
-        <button type="button" class="appearance-btn" data-appearance aria-label="Toggle light or dark appearance" title="Toggle light or dark appearance"></button>
-      </div>
+  .st-tabs { display: flex; gap: 24px; }
+  .st-tabs a {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-3);
+    text-decoration: none;
+    padding-bottom: 6px;
+  }
+  .st-tabs a:hover { color: var(--text-1); }
+  .st-tabs a.is-active { color: var(--text-1); box-shadow: 0 1px 0 0 var(--text-3); }
 
-      <header class="page-head-block">
-        <p class="page-eyebrow">Your account</p>
-        <h1 class="page-title">Profile &amp; settings</h1>
-        <p class="page-sub">{{ account.email }} · signed in via {{ provider_label }}{% if account.email_verified %} · verified{% endif %}</p>
-      </header>
+  .st-notice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-1);
+  }
+  .st-notice--error { border-color: var(--danger); color: var(--danger); }
 
-      {% if saved_message %}
-      <div class="notice-bar notice-ok" role="status">
-        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 5-5.5"/></svg>
-        <span>{{ saved_message }}</span>
-      </div>
-      {% endif %}
-      {% if error_message %}
-      <div class="notice-bar notice-error" role="alert">
-        <svg class="oi" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 8v5M12 16h.01"/></svg>
-        <span>{{ error_message }}</span>
-      </div>
-      {% endif %}
+  .st-cols { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: start; }
+  .st-main { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+  .st-rail { display: flex; flex-direction: column; gap: 24px; }
 
-      <div class="settings-grid">
-        <nav class="settings-nav" aria-label="Settings sections">
-          {% for key, label in tabs %}
-          <a href="/settings?tab={{ key }}#{{ key }}" class="settings-nav-link{% if active_tab == key %} active{% endif %}">{{ label }}</a>
-          {% endfor %}
-        </nav>
+  .st-card {
+    padding: clamp(20px, 3vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
 
-        <div class="settings-sections">
+  .st-card__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 1.9vw, 23px);
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--text-1);
+  }
+  .st-card__text { margin: 0; font-size: 14px; line-height: 1.65; color: var(--text-2); }
+  .st-card__foot { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-3); }
 
-          {# ============ Profile ============ #}
-          <section class="settings-card" id="profile" aria-labelledby="profileHead">
-            <div class="settings-card-head">
-              <div>
-                <h2 class="settings-card-title" id="profileHead">Profile</h2>
-                <p class="settings-card-sub">Shown across your workspace. Sign-up only ever asked for a name and email — everything else here is optional.</p>
-              </div>
-              <span class="settings-avatar" aria-hidden="true">{{ account.name[:2] | upper }}</span>
-            </div>
-            <form method="post" action="/settings/profile" class="settings-form">
-              <div class="field">
-                <label class="field-label" for="setName">Display name</label>
-                <input class="text-input" id="setName" name="name" type="text" maxlength="60" value="{{ account.name }}" required />
-              </div>
-              <div class="field">
-                <label class="field-label" for="setWorkspace">Workspace name <span class="field-hint">it sits at the top of your sidebar</span></label>
-                <input class="text-input" id="setWorkspace" name="workspace" type="text" maxlength="60" value="{{ account.workspace }}" />
-              </div>
-              <div class="field">
-                <span class="field-label">Email</span>
-                <div class="settings-static-row">
-                  <span>{{ account.email }}</span>
-                  <span class="settings-verified{% if not account.email_verified %} pending{% endif %}">{{ 'Verified' if account.email_verified else 'Pending verification' }}</span>
-                </div>
-                <p class="field-hint" style="margin-top:6px;">The sign-in method for this account: {{ provider_label }}.</p>
-              </div>
-              <div class="settings-actions">
-                <button class="btn-primary" type="submit">Save profile</button>
-              </div>
-            </form>
-          </section>
+  /* ---------------- fields ---------------- */
+  .st-field {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+  }
+  .st-field__label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+  .st-field__input {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    font-size: 15px;
+    color: var(--text-1);
+    width: 100%;
+  }
+  .st-field__input:focus { outline: 2px solid var(--border); outline-offset: 2px; }
+  .st-field__value { font-size: 15px; color: var(--text-1); overflow-wrap: anywhere; }
+  .st-field__note { font-size: 12px; color: var(--text-3); }
 
-          {# ============ Preferences (development + AI assistance) ============ #}
-          <section class="settings-card" id="preferences" aria-labelledby="prefsHead">
-            <div class="settings-card-head">
-              <div>
-                <h2 class="settings-card-title" id="prefsHead">Preferences</h2>
-                <p class="settings-card-sub">The same answers the optional onboarding wizard collects — edit them any time. They tune suggestions; they never gate features.</p>
-              </div>
-            </div>
-            <form method="post" action="/settings/preferences" class="settings-form">
-              <div class="field">
-                <span class="field-label">What best describes you?</span>
-                <div class="chip-grid">
-                  {% for role in roles %}
-                  <label class="pick-chip">
-                    <input type="radio" name="role" value="{{ role }}"{% if profile.get('role') == role %} checked{% endif %} />
-                    <span class="chip-face">{{ role }}</span>
-                  </label>
-                  {% endfor %}
-                </div>
-              </div>
-              <div class="field">
-                <span class="field-label">Experience level</span>
-                <div class="chip-grid">
-                  {% for level in experiences %}
-                  <label class="pick-chip">
-                    <input type="radio" name="experience" value="{{ level }}"{% if profile.get('experience') == level %} checked{% endif %} />
-                    <span class="chip-face">{{ level }}</span>
-                  </label>
-                  {% endfor %}
-                </div>
-              </div>
-              <div class="field">
-                <span class="field-label">What do you like building?</span>
-                <div class="chip-grid">
-                  {% for item in interests %}
-                  <label class="pick-chip">
-                    <input type="checkbox" name="interests" value="{{ item }}"{% if item in (profile.get('interests') or []) %} checked{% endif %} />
-                    <span class="chip-face">{{ item }}</span>
-                  </label>
-                  {% endfor %}
-                </div>
-              </div>
-              <div class="field">
-                <span class="field-label">Languages &amp; technologies you reach for</span>
-                <div class="chip-grid">
-                  {% for item in languages %}
-                  <label class="pick-chip">
-                    <input type="checkbox" name="languages" value="{{ item }}"{% if item in (profile.get('languages') or []) %} checked{% endif %} />
-                    <span class="chip-face">{{ item }}</span>
-                  </label>
-                  {% endfor %}
-                </div>
-              </div>
-              <div class="field">
-                <span class="field-label">AI assistance <span class="field-hint">default response depth for new sessions</span></span>
-                <div class="chip-grid">
-                  <label class="pick-chip">
-                    <input type="radio" name="default_depth" value="quick"{% if prefs.get('default_depth', 'quick') == 'quick' %} checked{% endif %} />
-                    <span class="chip-face">Quick — fast, everyday answers</span>
-                  </label>
-                  <label class="pick-chip">
-                    <input type="radio" name="default_depth" value="deep"{% if prefs.get('default_depth') == 'deep' %} checked{% endif %} />
-                    <span class="chip-face">Deep — thinks harder before replying</span>
-                  </label>
-                </div>
-                <p class="field-hint" style="margin-top:6px;">You can still flip Quick/Deep any time from the top of the home screen.</p>
-              </div>
-              <div class="settings-actions">
-                <button class="btn-primary" type="submit">Save preferences</button>
-              </div>
-            </form>
-          </section>
+  /* ---------------- theme choices ---------------- */
+  .st-choices { display: flex; gap: 10px; flex-wrap: wrap; }
+  .st-choice {
+    padding: 8px 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .st-choice:hover { color: var(--text-1); }
+  .st-choice[aria-pressed="true"] {
+    border-color: var(--text-1);
+    color: var(--text-1);
+    font-weight: 600;
+  }
 
-          {# ============ Integrations ============ #}
-          <section class="settings-card" id="integrations" aria-labelledby="integrationsHead">
-            <div class="settings-card-head">
-              <div>
-                <h2 class="settings-card-title" id="integrationsHead">Integrations</h2>
-                <p class="settings-card-sub">What ORBIT can reach. Connected means connected; "not connected" is exactly that — we never fake a live integration.</p>
-              </div>
-            </div>
-            <div class="integration-rows">
-              {% for conn in connections %}
-              <div class="integration-row">
-                <span class="integration-dot {{ 'on' if conn.status == 'connected' else '' }}" aria-hidden="true"></span>
-                <span class="integration-body">
-                  <span class="integration-name">{{ conn.name }}</span>
-                  <span class="integration-note">
-                    {% if conn.status == 'connected' %}Connected to your workspace.{% else %}Not connected — the integration isn't built yet.{% endif %}
-                  </span>
-                </span>
-                <span class="repo-badge{% if conn.status == 'connected' %} live{% endif %}">{{ 'Connected' if conn.status == 'connected' else 'Not connected' }}</span>
-              </div>
-              {% endfor %}
-            </div>
-            <div class="settings-note">
-              <h3 class="settings-note-title">About Git provider sign-in</h3>
-              <p>{{ scope_note_github }}</p>
-              <p style="margin-bottom:0;">Import entry points (GitHub, GitLab, Bitbucket, local folders, ZIP files) live on <a href="/create#import">the import page</a> and stay honestly disabled until the integration is real.</p>
-            </div>
-          </section>
+  .st-form { width: 100%; display: flex; flex-direction: column; gap: 14px; }
+  .st-card__title--spaced { margin-top: 8px; }
 
-          {# ============ Notifications ============ #}
-          <section class="settings-card" id="notifications" aria-labelledby="notifHead">
-            <div class="settings-card-head">
-              <div>
-                <h2 class="settings-card-title" id="notifHead">Notifications</h2>
-                <p class="settings-card-sub">What taps you on the shoulder. Each control here is real — off means off.</p>
-              </div>
-            </div>
-            <div class="integration-rows" style="margin-bottom:16px;">
-              <div class="integration-row">
-                <span class="integration-body">
-                  <span class="integration-name">Reminders (daily plan &amp; check-ins)</span>
-                  <span class="integration-note">Managed from the sidebar — the switch there pauses or resumes them immediately. Quiet hours 22:00–08:00 (Africa/Lagos) always hold notices back.</span>
-                </span>
-                <span class="repo-badge live">Sidebar control</span>
-              </div>
-            </div>
-            <form method="post" action="/settings/notifications" class="settings-form">
-              <label class="switch-row">
-                <input type="checkbox" name="beta_updates"{% if prefs.get('beta_updates', True) %} checked{% endif %} />
-                <span class="switch-face" aria-hidden="true"></span>
-                <span class="switch-text">
-                  <span class="switch-name">In-product beta notes</span>
-                  <span class="switch-note">The "you're early" card on your dashboard. Turn it off and it stays off — no email marketing exists in this beta to opt out of.</span>
-                </span>
-              </label>
-              <div class="settings-actions">
-                <button class="btn-primary" type="submit">Save notification preferences</button>
-              </div>
-            </form>
-          </section>
+  .st-check {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-1);
+    cursor: pointer;
+    width: 100%;
+  }
+  .st-check input { margin: 3px 0 0; flex: 0 0 auto; accent-color: var(--text-1); }
+  .st-check__body { display: flex; flex-direction: column; gap: 2px; }
+  .st-check__sub { font-size: 12px; color: var(--text-3); }
 
-          {# ============ Privacy & security ============ #}
-          <section class="settings-card" id="security" aria-labelledby="securityHead">
-            <div class="settings-card-head">
-              <div>
-                <h2 class="settings-card-title" id="securityHead">Privacy &amp; security</h2>
-                <p class="settings-card-sub">What's stored, and the locks on your account.</p>
-              </div>
-            </div>
+  .st-sessions { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+  .st-session {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  .st-session strong { color: var(--text-1); font-weight: 500; }
 
-            <div class="settings-note" style="margin-top:0;">
-              <h3 class="settings-note-title">Your privacy, in plain terms</h3>
-              <ul class="privacy-list">
-                <li>Conversations, projects and feedback live in this workspace's local store — not on an ORBIT server.</li>
-                <li>Voice clips are processed locally for transcription and discarded; they are never stored.</li>
-                <li>When you talk to a model, the request goes to your configured provider (Gemini, or your OpenRouter chain) and nowhere else.</li>
-                <li>Passwords are salted and hashed (PBKDF2); verification codes expire after ten minutes.</li>
-              </ul>
-            </div>
+  /* ---------------- rail ---------------- */
+  .st-rail__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 1.9vw, 23px);
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--text-1);
+  }
+  .st-rail__text { margin: 0; font-size: 14px; line-height: 1.65; color: var(--text-2); }
+  .st-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-2);
+    background: var(--surface-2);
+  }
+  .st-rail__actions { display: flex; flex-direction: column; gap: 12px; width: 100%; }
+  .st-rail__actions .o-btn { width: 100%; }
 
-            <h3 class="settings-subhead">Change password</h3>
-            <form method="post" action="/settings/password" class="settings-form">
-              {% if has_password %}
-              <div class="field">
-                <label class="field-label" for="pwCurrent">Current password</label>
-                <input class="text-input" id="pwCurrent" name="current" type="password" autocomplete="current-password" required />
-              </div>
-              {% else %}
-              <p class="field-hint" style="margin:0 0 12px;">You signed up via {{ provider_label }} and don't have a password yet — set one to also enable email sign-in.</p>
-              {% endif %}
-              <div class="settings-2col">
-                <div class="field">
-                  <label class="field-label" for="pwNew">New password</label>
-                  <input class="text-input" id="pwNew" name="new" type="password" autocomplete="new-password" minlength="8" required />
-                </div>
-                <div class="field">
-                  <label class="field-label" for="pwConfirm">Confirm new password</label>
-                  <input class="text-input" id="pwConfirm" name="confirm" type="password" autocomplete="new-password" required />
-                </div>
-              </div>
-              <div class="settings-actions">
-                <button class="btn-primary" type="submit">Update password</button>
-              </div>
-              <p class="field-hint">Changing your password signs every other session out.</p>
-            </form>
+  .st-soon {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--text-3);
+    white-space: nowrap;
+  }
 
-            <h3 class="settings-subhead">Sessions</h3>
-            <div class="integration-rows">
-              {% for s in sessions %}
-              <div class="integration-row">
-                <span class="integration-dot {{ 'on' if s.current else '' }}" aria-hidden="true"></span>
-                <span class="integration-body">
-                  <span class="integration-name">{{ s.label }}{% if s.current %} <span class="settings-verified">This device</span>{% endif %}</span>
-                  <span class="integration-note">Signed in {{ s.created_at }}</span>
-                </span>
-              </div>
-              {% endfor %}
-            </div>
-            <form method="post" action="/settings/sessions/revoke-others" class="settings-form">
-              <div class="settings-actions">
-                <button class="btn-ghost" type="submit"{% if sessions|length <= 1 %} disabled title="No other sessions to sign out"{% endif %}>Sign out everywhere else</button>
-              </div>
-            </form>
-          </section>
+  .st-error-line { margin: 0; font-size: 13px; line-height: 1.55; color: var(--danger); }
 
-          {# ============ Account ============ #}
-          <section class="settings-card" id="account" aria-labelledby="accountHead">
-            <div class="settings-card-head">
-              <div>
-                <h2 class="settings-card-title" id="accountHead">Account</h2>
-                <p class="settings-card-sub">The doors in and out.</p>
-              </div>
-            </div>
-            <div class="settings-actions" style="gap:12px;">
-              <a class="btn-ghost" href="/dashboard?tour=1" onclick="return true;">Replay the 60-second tour</a>
-              <a class="btn-ghost" href="/auth/logout">Sign out</a>
-            </div>
-            <div class="settings-note danger">
-              <h3 class="settings-note-title">Delete this account</h3>
-              <p>Removes your sign-in, personalization, preferences and feedback history, immediately. The shared local demo workspace on this machine (conversations and projects) is not tied to your account and stays put.</p>
-              <form method="post" action="/settings/delete" class="settings-form" data-confirm-form>
-                <div class="field">
-                  <label class="field-label" for="deleteConfirm">Type <strong>{{ account.email }}</strong> to confirm</label>
-                  <input class="text-input" id="deleteConfirm" name="confirm" type="text" autocomplete="off" spellcheck="false" data-confirm-match="{{ account.email }}" />
-                </div>
-                <button class="btn-danger" type="submit" disabled data-confirm-button>Delete my account</button>
-              </form>
-            </div>
-          </section>
+  /* ---------------- states ---------------- */
+  .st-state {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: clamp(24px, 4vh, 40px) clamp(20px, 3vw, 32px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+  .st-state__title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(22px, 2.4vw, 28px);
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+  .st-state__text { margin: 0; font-size: 15px; line-height: 1.65; color: var(--text-2); max-width: 56ch; }
+  .st-state__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
 
-        </div>
-      </div>
+  .st-skel {
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    animation: st-pulse 1.4s ease-in-out infinite;
+  }
+  .st-skel--title { width: min(520px, 100%); height: 44px; }
+  .st-skel--line { width: min(360px, 100%); height: 18px; margin-top: 16px; }
+  .st-skel--card { min-height: clamp(120px, 18vh, 180px); margin-top: 24px; }
+  @keyframes st-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  /* ---------------- dark edges ---------------- */
+  [data-theme="dark"] .st-card,
+  [data-theme="dark"] .st-state { border-color: var(--border); box-shadow: none; }
+
+  /* ---------------- phone ---------------- */
+  @media (max-width: 1000px) {
+    .st-cols { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .st-skel { animation: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="st-page">
+
+  {% if view == 'loading' %}
+  <div role="status" aria-live="polite">
+    <span class="o-visually-hidden">Loading your settings…</span>
+    <div class="st-skel st-skel--title" aria-hidden="true"></div>
+    <div class="st-skel st-skel--line" aria-hidden="true"></div>
+    <div class="st-skel st-skel--card" aria-hidden="true"></div>
+    <div class="st-skel st-skel--card" aria-hidden="true"></div>
+  </div>
+
+  {% elif view == 'error' %}
+  <section class="st-state" role="alert">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="st-state__title">We couldn't load your settings.</h1>
+    <p class="st-state__text">Nothing was saved or changed while this page failed. Reload the page to try again.</p>
+    <div class="st-state__actions">
+      <a class="o-btn o-btn--primary" href="/settings">Try again</a>
     </div>
-  </main>
+  </section>
+
+  {% else %}
+
+  <header class="st-head">
+    <h1>Make Orbit feel like yours.</h1>
+    <p class="st-head__sub">Thoughtful defaults, and room to choose your own.</p>
+  </header>
+
+  <nav class="st-tabs" aria-label="Settings sections">
+    {% for key, label in tabs %}
+    <a href="/settings?tab={{ key }}" class="{% if active_tab == key %}is-active{% endif %}"{% if active_tab == key %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+
+  {% if saved_message %}<p class="st-notice" role="status">{{ saved_message }}</p>{% endif %}
+  {% if error_message %}<p class="st-notice st-notice--error" role="alert">{{ error_message }}</p>{% endif %}
+
+  <div class="st-cols">
+    <div class="st-main">
+
+      {% if active_tab == 'general' %}
+      <form method="post" action="/settings/profile" id="stGeneral">
+        <div class="st-main" >
+          <section class="st-card">
+            <div class="st-field">
+              <label class="st-field__label" for="stName">Full name</label>
+              <input class="st-field__input" id="stName" name="name" type="text" required
+                     value="{{ account.name }}" />
+            </div>
+            <div class="st-field">
+              <span class="st-field__label">Email address</span>
+              <span class="st-field__value">{{ account.email }}</span>
+              <span class="st-field__note">Signed in via {{ provider_label }}. Changing your email is not built yet.</span>
+            </div>
+            <div class="st-field">
+              <label class="st-field__label" for="stWorkspace">Workspace name</label>
+              <input class="st-field__input" id="stWorkspace" name="workspace" type="text"
+                     value="{{ account.workspace }}" />
+            </div>
+            <a class="o-btn o-btn--secondary" href="/settings?tab=privacy#signin">Manage password &amp; sign-in</a>
+          </section>
+
+          <section class="st-card">
+            <h2 class="st-card__title">Your surroundings</h2>
+            <p class="st-card__text">Choose the workspace that's easiest on your eyes.</p>
+            <div class="st-choices" id="stTheme" role="group" aria-label="Appearance">
+              <button type="button" class="st-choice" data-theme-choice="light" aria-pressed="false">Light</button>
+              <button type="button" class="st-choice" data-theme-choice="dark" aria-pressed="false">Dark</button>
+              <button type="button" class="st-choice" data-theme-choice="system" aria-pressed="false">System</button>
+            </div>
+            <div class="st-field">
+              <span class="st-field__label">Language</span>
+              <span class="st-field__value">English</span>
+              <span class="st-field__note">More languages are not built yet — English is the only one this build speaks.</span>
+            </div>
+            <div class="st-field">
+              <span class="st-field__label">Time zone</span>
+              <span class="st-field__value">{{ timezone_label }}</span>
+              <span class="st-field__note">The heartbeat and reminder checks run on this clock. Changing it is not built yet.</span>
+            </div>
+          </section>
+
+          <section class="st-card">
+            <h2 class="st-card__title">Only the useful nudges</h2>
+            <label class="st-check">
+              <input type="checkbox" name="beta_updates"{% if prefs.get('beta_updates', True) %} checked{% endif %} />
+              <span class="st-check__body">
+                <span>Product updates</span>
+                <span class="st-check__sub">Saved to your account. Orbit sends no mail in this build yet.</span>
+              </span>
+            </label>
+            <p class="st-card__foot">Quiet hours · {{ quiet_label }} · reminders never start agents, apply changes, or approve proposals.</p>
+          </section>
+        </div>
+      </form>
+      {% if active_tab == 'general' %}
+      <div>
+        <button type="submit" class="o-btn o-btn--primary" form="stGeneral">Save preferences</button>
+      </div>
+      {% endif %}
+
+      {% elif active_tab == 'notifications' %}
+      <section class="st-card">
+        <h2 class="st-card__title">Reminders, when they matter</h2>
+        <p class="st-card__text">Two checks run on your clock: a missing daily plan, and days without a check-in. They only ever add a reminder here.</p>
+        <label class="st-check">
+          <input type="checkbox" id="stPause"{% if heartbeat and heartbeat.paused %} checked{% endif %}{% if not heartbeat %} disabled{% endif %} />
+          <span class="st-check__body">
+            <span>Pause reminders</span>
+            <span class="st-check__sub">{% if heartbeat %}Saved the moment you change it.{% else %}The reminder service is not running in this launch.{% endif %}</span>
+          </span>
+        </label>
+        <div class="st-field">
+          <span class="st-field__label">Delivery</span>
+          <span class="st-field__value">In-app, in Orbit{% if heartbeat and heartbeat.push_enabled %} · phone push on{% else %} · phone push off{% endif %}</span>
+        </div>
+        <div class="st-field">
+          <span class="st-field__label">Quiet hours</span>
+          <span class="st-field__value">{{ quiet_label }}</span>
+        </div>
+        {% if heartbeat %}
+        <div class="st-field">
+          <span class="st-field__label">The two checks</span>
+          <span class="st-field__value">A missing plan after {{ '%02d:00' % heartbeat.plan_hour }} · a check-in gap of {{ heartbeat.checkin_gap_days }} day{{ '' if heartbeat.checkin_gap_days == 1 else 's' }}</span>
+        </div>
+        {% endif %}
+        <p class="st-error-line" id="stError" hidden></p>
+        <a class="o-btn o-btn--secondary" href="/reminders">Open Reminders</a>
+      </section>
+
+      {% else %}
+      <section class="st-card" id="signin">
+        <h2 class="st-card__title">Password &amp; sign-in</h2>
+        <p class="st-card__text">Signed in via {{ provider_label }}.{% if has_password %} A password is set.{% else %} No password is set yet — the fields below set one.{% endif %}</p>
+        <form method="post" action="/settings/password" class="st-form">
+          {% if has_password %}
+          <div class="st-field">
+            <label class="st-field__label" for="stCurrent">Current password</label>
+            <input class="st-field__input" id="stCurrent" name="current" type="password" autocomplete="current-password" />
+          </div>
+          {% endif %}
+          <div class="st-field">
+            <label class="st-field__label" for="stNew">New password</label>
+            <input class="st-field__input" id="stNew" name="new" type="password" autocomplete="new-password" />
+          </div>
+          <div class="st-field">
+            <label class="st-field__label" for="stConfirm">Confirm new password</label>
+            <input class="st-field__input" id="stConfirm" name="confirm" type="password" autocomplete="new-password" />
+          </div>
+          <div><button type="submit" class="o-btn o-btn--secondary">Update password</button></div>
+        </form>
+        <h2 class="st-card__title st-card__title--spaced">Signed-in browsers</h2>
+        <div class="st-sessions">
+          {% for item in sessions %}
+          <div class="st-session">
+            <strong>{{ item.label }}</strong>
+            <span>since {{ item.created_at }}</span>
+            {% if item.current %}<span>· this browser</span>{% endif %}
+          </div>
+          {% else %}
+          <p class="st-card__text">No other browser is signed in.</p>
+          {% endfor %}
+        </div>
+        <form method="post" action="/settings/sessions/revoke-others">
+          <button type="submit" class="o-btn o-btn--secondary">Sign out everywhere else</button>
+        </form>
+      </section>
+
+      <section class="st-card" id="delete">
+        <h2 class="st-card__title">Delete your account</h2>
+        <p class="st-card__text">This signs you out and removes your account, your sessions, and your feedback. Type your email address to confirm.</p>
+        <form method="post" action="/settings/delete" class="st-form">
+          <div class="st-field">
+            <label class="st-field__label" for="stDeleteConfirm">Type {{ account.email }} to confirm</label>
+            <input class="st-field__input" id="stDeleteConfirm" name="confirm" type="text" />
+          </div>
+          <div><button type="submit" class="o-btn o-btn--secondary">Delete account…</button></div>
+        </form>
+      </section>
+      {% endif %}
+
+    </div>
+
+    <aside class="st-rail">
+      <section class="st-card">
+        <h2 class="st-rail__title">Your approval is the rule.</h2>
+        <p class="st-rail__text">Every agent-proposed change requires your review. This protection is always on and can't be disabled.</p>
+        <span class="st-pill">Always requires approval</span>
+      </section>
+
+      <section class="st-card">
+        <h2 class="st-rail__title">Personal · Free</h2>
+        <p class="st-rail__text">{{ plan_card.active_projects }} active project{{ '' if plan_card.active_projects == 1 else 's' }} · {{ plan_card.specialists }} specialists · Complete approval history</p>
+        <div class="st-rail__actions">
+          <button type="button" class="o-btn o-btn--secondary" disabled aria-disabled="true"
+                  title="Plans and billing open in a later build">Explore plans<span class="st-soon">Coming soon</span></button>
+        </div>
+      </section>
+
+      <section class="st-card">
+        <h2 class="st-rail__title">Your data, your choice.</h2>
+        <p class="st-rail__text">Export your workspace or delete your account. We'll ask you to confirm before anything is removed.</p>
+        <div class="st-rail__actions">
+          <button type="button" class="o-btn o-btn--secondary" disabled aria-disabled="true"
+                  title="Workspace export opens in a later build">Export workspace<span class="st-soon">Coming soon</span></button>
+          <a class="o-btn o-btn--secondary" href="/settings?tab=privacy#delete">Delete account…</a>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="{{ url_for('static', filename='settings.js') }}"></script>
 {% endblock %}

@@ -27,7 +27,7 @@ import logging
 import os
 import sys
 from collections.abc import Iterable, Iterator
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -412,7 +412,12 @@ def create_app(
     welcome → dashboard flow.
     """
     app = Flask(__name__, template_folder="templates")
-    app.secret_key = os.environ.get(SECRET_KEY_ENV_VAR, DEFAULT_SECRET_KEY)
+    # A blank ORBIT_SECRET_KEY (the untouched .env.example copy that setup.sh
+    # makes) is the same as unset here: the factory falls back to the committed
+    # default so pages render and the offline suite can run. run_app still
+    # refuses that default and a blank value alike — see
+    # _require_real_secret_key, which checks the effective secret, not this.
+    app.secret_key = os.environ.get(SECRET_KEY_ENV_VAR) or DEFAULT_SECRET_KEY
     app.config["MAX_CONTENT_LENGTH"] = MAX_VOICE_UPLOAD_BYTES
     app.config["PROVIDER"] = provider
     app.config["STORE"] = store or Store()
@@ -468,6 +473,7 @@ def create_app(
         payload["activity"] = [{"text": a.text, "time": a.time} for a in task_obj.activity]
         payload["approved"] = bool(task_obj.approved)
         payload["applied"] = bool(task_obj.applied)
+        payload["rejected"] = bool(getattr(task_obj, "rejected", False))
         # A planned-but-not-started run is not yet working on anything.
         payload["running"] = run.status == RUNNING and run.started
         return payload
@@ -523,8 +529,11 @@ def create_app(
 
         The Analytics view reads back exactly these lines, so a rating or a sent
         message is recorded here rather than in a second store. Fields are ids,
-        counts and labels -- never message text.
+        counts and labels -- never message text. Every line carries the account
+        it happened to (unless the caller named one), so the file-backed reader
+        can keep accounts as separate as the SQLite rows do.
         """
+        fields.setdefault("account_id", _current_account_id())
         audit = _audit_for_account(fields.get("account_id"))
         if audit is None:
             return
@@ -772,12 +781,19 @@ def create_app(
             "beta_updates_off": bool(account) and not prefs.get("beta_updates", True),
         }
         if raw_store is None or raw_projects is None:
-            return {**base, "sidebar_projects": [], "active_project_id": ""}
-        recent = raw_projects.for_account(_current_account_id()).list()[:3]
+            return {**base, "sidebar_projects": [], "active_project_id": "", "approvals_count": 0}
+        account_id = _current_account_id()
+        recent = raw_projects.for_account(account_id).list()[:3]
+        # The rail's Approvals count is the real queue: finished drafts this
+        # account has not decided yet (app.projectmap.proposal_ready).
+        approvals_count = sum(
+            1 for t in raw_store.for_account(account_id).tasks_for() if proposal_ready(t)
+        )
         return {
             **base,
             "sidebar_projects": [{"id": p.id, "name": p.name} for p in recent],
             "active_project_id": "",
+            "approvals_count": approvals_count,
         }
 
     def _sidebar_context() -> dict[str, Any]:
@@ -2088,32 +2104,514 @@ def create_app(
         )
         return _json({"message_id": message_id, "rating": rating})
 
-    @app.get("/analytics")
-    def analytics() -> str:
-        """The Analytics view: audit.log read back, nothing tracked separately."""
+    # ----- Approvals: the change review ------------------------------------
+
+    @app.get("/approvals")
+    @ownership_checked("task (query)")
+    def approvals() -> str | Response:
+        """The change review screen: one draft at a time, from real state.
+
+        The queue is exactly what ``proposal_ready`` says waits on this
+        account — a finished run nobody approved, applied or rejected. The
+        screen shows the task's request in plain language, the before/after
+        the gate really guarantees (nothing applied vs. marked applied in
+        orbit), the files the run named, and the task it belongs to. Approve
+        and Reject are decisions against ``/api/task/<id>/approve`` · ``/apply``
+        · ``/reject`` — the same endpoints, same ownership checks, same
+        "approve: true" gate. ``?view=loading`` / ``?view=error`` are
+        presentation-only switches derived from the dashboard's own set.
+        """
+        st = _scoped_store()
+        project_store = _scoped_projects()
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
+        proposals = [t for t in st.tasks_for() if proposal_ready(t)]
+        selected = None
+        selected_id = request.args.get("task", "").strip()
+        if selected_id:
+            # Another account's task answers exactly like an unknown id.
+            selected, not_owned = _owned_task_or_404(selected_id, template=True)
+            if not_owned is not None:
+                return not_owned
+        elif proposals:
+            selected = proposals[0]
+
+        review: dict[str, Any] | None = None
+        queue_index = 0
+        if selected is not None:
+            queue_index = next(
+                (i for i, t in enumerate(proposals) if t.id == selected.id), -1
+            )
+            run = selected.run
+            steps = list(run.steps) if run is not None else []
+            files = list(run.files) if run is not None else []
+            speaker = ""
+            for message in reversed(selected.chat):
+                if message.is_orbit and message.speaker:
+                    speaker = message.speaker
+                    break
+            if speaker and not speaker.endswith("Agent"):
+                agent_label = f"{speaker} agent"
+            else:
+                agent_label = speaker or "Orbit"
+            proposed_at = ""
+            for entry in selected.activity:
+                if entry.text.startswith("Turn finished"):
+                    proposed_at = entry.time
+                    break
+            project = (
+                project_store.get(selected.project_id) if selected.project_id else None
+            )
+            review = {
+                "id": selected.id,
+                "title": selected.title,
+                "description": selected.description,
+                "has_run": run is not None,
+                "agent_label": agent_label,
+                "proposed_at": proposed_at,
+                "middle_crumb": project.name if project is not None else selected.breadcrumb,
+                "task_href": f"/task/{selected.id}",
+                "pending": queue_index >= 0,
+                "approved": bool(selected.approved),
+                "applied": bool(selected.applied),
+                "rejected": bool(getattr(selected, "rejected", False)),
+                "done": bool(selected.done),
+                "steps": [
+                    {
+                        "title": step.title,
+                        "status": step.status,
+                        "evidence": step.evidence,
+                    }
+                    for step in steps
+                ],
+                "checked": [
+                    {"title": step.title, "evidence": step.evidence}
+                    for step in steps
+                    if step.status == "done"
+                ],
+                "files": [
+                    {
+                        "name": item.name,
+                        "source": item.source,
+                        "source_label": (
+                            "named in your request"
+                            if item.source == "request"
+                            else "mentioned by Orbit"
+                        ),
+                    }
+                    for item in files
+                ],
+                "planned_count": sum(1 for step in steps if step.status != "done"),
+            }
+
+        return render_template(
+            "approvals.html",
+            view=view,
+            review=review,
+            proposals_count=len(proposals),
+            queue_index=queue_index,
+            prev_id=(
+                proposals[queue_index - 1].id
+                if review is not None and review["pending"] and queue_index > 0
+                else ""
+            ),
+            next_id=(
+                proposals[queue_index + 1].id
+                if review is not None
+                and review["pending"]
+                and 0 <= queue_index < len(proposals) - 1
+                else ""
+            ),
+            approvals_active=True,
+            projects_active=False,
+            agents_active=False,
+            settings_active=False,
+            dashboard_active=False,
+            **_sidebar_context(),
+        )
+
+    # ----- Analytics ---------------------------------------------------------
+
+    def _analytics_report(*, window_days: int, compare: bool = False):
+        """The report for one window, from the same log the app writes to."""
         st = _scoped_store()
         audit: AuditLog | None = app.config["MODEL_AUDIT"]
-        # The same file the rest of the app logs to, so the view cannot drift
-        # onto a different path from the records it counts.
         store_obj = app.config.get("STORE")
         database = getattr(store_obj, "database", None)
         if database is not None and not app.config.get("MODEL_AUDIT_INJECTED"):
-            report = build_analytics(database, account_id=st.account_id)
+            return build_analytics(
+                database,
+                account_id=st.account_id,
+                window_days=window_days,
+                compare=compare,
+            )
+        log_path = audit.path if audit is not None else DEFAULT_AUDIT_LOG_PATH
+        return build_analytics(
+            log_path, window_days=window_days, compare=compare, account_id=st.account_id
+        )
+
+    # The "All time" probe: wide enough to hold any recorded history, trimmed
+    # to the real span before it reaches the page. Nothing is invented when
+    # the log is younger than the tab claims.
+    ALL_TIME_DAYS = 365 * 5
+
+    def _analytics_view_data(window: str) -> dict[str, Any]:
+        """Everything the Analytics screen renders — store state and log."""
+        st = _scoped_store()
+        if window == "week":
+            report = _analytics_report(window_days=7, compare=True)
+            compare_label = "last week"
+        elif window == "month":
+            report = _analytics_report(window_days=30, compare=True)
+            compare_label = "last month"
         else:
-            log_path = audit.path if audit is not None else DEFAULT_AUDIT_LOG_PATH
-            report = build_analytics(log_path)
+            window = "all"
+            report = _analytics_report(window_days=ALL_TIME_DAYS, compare=False)
+            compare_label = ""
+
+        # Trim the all-time lists to the real recorded span.
+        completion_days = list(report.completions_per_day)
+        if window == "all":
+            first = next((d for d in completion_days if d.count), None)
+            if first is not None:
+                completion_days = [d for d in completion_days if d.date >= first.date]
+
+        done_total = sum(1 for t in st.tasks_for() if t.done)
+        approved_total = sum(
+            1 for t in st.tasks_for() if getattr(t, "approved", False) or t.applied
+        )
+        rejected_total = sum(
+            1 for t in st.tasks_for() if getattr(t, "rejected", False)
+        )
+        pending_total = sum(1 for t in st.tasks_for() if proposal_ready(t))
+        decided_total = approved_total + rejected_total + pending_total
+        approved_share = (
+            round(approved_total * 100 / decided_total) if decided_total else 0
+        )
+
+        projects_rows = []
+        for project in _scoped_projects().list():
+            tasks = st.tasks_for_project(project.id)
+            complete, total = progress(tasks)
+            stage = ""
+            for t in tasks:
+                if not t.done and getattr(t, "stage", ""):
+                    stage = t.stage
+                    break
+            if not stage:
+                for t in reversed(tasks):
+                    if getattr(t, "stage", ""):
+                        stage = t.stage
+                        break
+            projects_rows.append(
+                {
+                    "name": project.name,
+                    "stage": stage,
+                    "complete": complete,
+                    "total": total,
+                    "percent": round(complete * 100 / total) if total else 0,
+                }
+            )
+
+        today = date.today()
+        if completion_days:
+            start = completion_days[0].date
+            end = completion_days[-1].date
+            if window == "all":
+                range_label = f"Since {_month_day(start)} · All projects"
+            elif start.month == end.month and start.year == end.year:
+                range_label = (
+                    f"{start.strftime('%B').upper()} {start.day}–{end.day}, {end.year}"
+                    " · All projects"
+                )
+            else:
+                range_label = f"{_month_day(start)} – {_month_day(end)} · All projects"
+        else:
+            range_label = f"{today.strftime('%B').upper()} · All projects"
+
+        return {
+            "report": report,
+            "window": window,
+            "compare_label": compare_label,
+            "completion_days": completion_days,
+            "day_caption": (
+                " · ".join(f"{d.weekday} {d.count}" for d in completion_days)
+                if len(completion_days) <= 7
+                else ""
+            ),
+            "done_total": done_total,
+            "approved_total": approved_total,
+            "rejected_total": rejected_total,
+            "pending_total": pending_total,
+            "approved_share": approved_share,
+            "projects_rows": projects_rows,
+            "range_label": range_label,
+        }
+
+    def _month_day(day: Any) -> str:
+        return f"{day.strftime('%B').upper()} {day.day}, {day.year}"
+
+    # ----- Reminders: the heartbeat's real notices and settings --------------
+
+    def _notice_row(notice: dict[str, Any]) -> dict[str, Any]:
+        """One reminder card from one stored notice — dates included."""
+        kind = str(notice.get("kind") or "")
+        kind_label = {
+            "plan_missing": "No plan for today",
+            "checkin_gap": "Check-in gap",
+        }.get(kind, "Reminder")
+        created = _parse_iso(str(notice.get("created_at") or ""))
+        if created is not None:
+            local = created.astimezone(_heartbeat_tz())
+            today = datetime.now(_heartbeat_tz()).date()
+            day = local.date()
+            if day == today:
+                when = "Today"
+            elif day == today - timedelta(days=1):
+                when = "Yesterday"
+            else:
+                when = f"{day.strftime('%b')} {day.day}, {day.year}"
+            stamp = f"{when} · {local.strftime('%H:%M')}"
+        else:
+            stamp = "Undated"
+        push = str(notice.get("push") or "")
+        push_label = {
+            "sent": "Pushed to your phone",
+            "failed": "Phone push failed",
+        }.get(push, "In-app only")
+        return {
+            "id": str(notice.get("id") or ""),
+            "kind_label": kind_label,
+            "text": str(notice.get("text") or ""),
+            "stamp": stamp,
+            "push_label": push_label,
+            "open": notice.get("dismissed_at") is None,
+        }
+
+    def _parse_iso(text: str) -> datetime | None:
+        if not text:
+            return None
+        try:
+            value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+    def _heartbeat_tz() -> Any:
+        from heartbeat.schedule import LAGOS
+
+        return LAGOS
+
+    @app.get("/reminders")
+    def reminders() -> str | Response:
+        """The Reminders screen: this account's heartbeat notices, with dates.
+
+        Everything here is the heartbeat's own: the notices it fired (each
+        with its real date and delivery), the quiet hours and check rules it
+        runs by, and the pause switch that really pauses it. ``Mark done``
+        dismisses through the existing API; ``Snooze`` and custom reminders
+        are not built and say so. ``?view=loading`` / ``?view=error`` are
+        presentation-only switches.
+        """
+        st = _scoped_store()
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
+        tab = request.args.get("tab", "upcoming").strip()
+        if tab not in ("upcoming", "completed", "all"):
+            tab = "upcoming"
+        hb = _heartbeat_or_none()
+        checked = request.args.get("checked", "").strip()
+
+        notices: list[dict[str, Any]] = []
+        settings_view: dict[str, Any] | None = None
+        running = hb is not None
+        if running:
+            snap = hb.snapshot()
+            history = hb.history()
+            open_rows = [_notice_row(n) for n in snap["notices"]]
+            completed_rows = [_notice_row(n) for n in history if n.get("dismissed_at")]
+            all_rows = [_notice_row(n) for n in history]
+            notices = {
+                "upcoming": open_rows,
+                "completed": completed_rows,
+                "all": all_rows,
+            }[tab]
+            from config import HEARTBEAT_TIMEZONE
+            from heartbeat.schedule import QUIET_END_HOUR, QUIET_START_HOUR
+
+            settings_view = {
+                "push_enabled": bool(snap["push_enabled"]),
+                "plan_hour": snap["plan_hour"],
+                "checkin_gap_days": snap["checkin_gap_days"],
+                "quiet_label": f"{QUIET_START_HOUR:02d}:00 – {QUIET_END_HOUR:02d}:00",
+                "timezone_label": HEARTBEAT_TIMEZONE,
+                "paused": bool(snap["paused"]),
+                "open_count": len(open_rows),
+                "completed_count": len(completed_rows),
+            }
+
+        return render_template(
+            "reminders.html",
+            view=view,
+            tab=tab,
+            notices=notices,
+            settings_view=settings_view,
+            running=running,
+            checked=checked,
+            reminders_active=True,
+            projects_active=False,
+            agents_active=False,
+            analytics_active=False,
+            settings_active=False,
+            dashboard_active=False,
+            **_sidebar_context(),
+        )
+
+    # ----- States gallery ---------------------------------------------------
+
+    @app.get("/states")
+    def states() -> str:
+        """The Empty, loading & error states screen.
+
+        A pattern sheet in the frame's own shape (wordmark, no rail): the
+        four states the app really renders, with the live copy and real
+        destinations of each. Not in the rail — the frame has no rail.
+        """
+        return render_template(
+            "states.html",
+            home_href="/dashboard" if _accounts() is not None else "/",
+        )
+
+    # ----- Connected apps ---------------------------------------------------
+
+    @app.get("/connected")
+    def connected_apps() -> str:
+        """The Connected apps screen: one honest status row per integration.
+
+        The rows come from the store's connections, never from the template.
+        No integration is built in this build, so every status reads
+        "Not connected" and every connect button is disabled with
+        "Coming soon" — the same honesty rule the provider buttons follow.
+        ``?view=loading`` / ``?view=error`` are presentation-only switches.
+        """
+        st = _scoped_store()
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
+        rows = [
+            {
+                "name": item.name,
+                "blurb": item.blurb,
+                "scope": item.scope,
+                "connected": item.status == "connected",
+                "status_label": (
+                    "Connected" if item.status == "connected" else "Not connected"
+                ),
+            }
+            for item in st.connections
+        ]
+        return render_template(
+            "connected_apps.html",
+            view=view,
+            rows=rows,
+            connected_apps_active=True,
+            projects_active=False,
+            agents_active=False,
+            analytics_active=False,
+            reminders_active=False,
+            settings_active=False,
+            dashboard_active=False,
+            **_sidebar_context(),
+        )
+
+    @app.get("/analytics")
+    def analytics() -> str:
+        """The Analytics view: what the log recorded and the store holds.
+
+        Every figure on the page is read back from real records — the audit
+        log (or its per-account SQLite rows) for dated counts, the store for
+        the decision state — and ``?window=week|month|all`` selects the real
+        span. ``?view=loading`` / ``?view=error`` are presentation-only.
+        """
+        st = _scoped_store()
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
+        window = request.args.get("window", "week").strip()
+        if window not in ("week", "month", "all"):
+            window = "week"
+        data = _analytics_view_data(window)
         return render_template(
             "analytics.html",
-            report=report,
-            user=st.user,
-            mode=st.mode,
-            thinking_level=st.thinking_level,
-            conversations=st.conversations_grouped(),
-            active_conversation_id=st.active_conversation_id,
-            active_conversation_title=PLACEHOLDER_TITLE,
-            connections=st.connections,
-            connected_count=st.connected_count(),
-            heartbeat=_heartbeat_view(),
+            view=view,
+            analytics_active=True,
+            projects_active=False,
+            agents_active=False,
+            settings_active=False,
+            dashboard_active=False,
+            **data,
+            **_sidebar_context(),
+        )
+
+    @app.get("/analytics/export")
+    def analytics_export() -> Response:
+        """A plain-text summary of exactly what the screen shows. Real file."""
+        window = request.args.get("window", "week").strip()
+        if window not in ("week", "month", "all"):
+            window = "week"
+        data = _analytics_view_data(window)
+        report = data["report"]
+        lines = [
+            "orbit — activity summary",
+            f"Window: {window} ({report.window_days} days) · {data['range_label']}",
+            "",
+            f"Tasks completed (in window): {report.completions_total}",
+            f"Changes approved (all time): {data['approved_total']}",
+            f"Pending proposals: {data['pending_total']}",
+            f"Rejected drafts: {data['rejected_total']}",
+            "",
+            "Completions per day:",
+        ]
+        for day in data["completion_days"]:
+            lines.append(f"  {day.date.isoformat()} ({day.weekday}): {day.count}")
+        lines += [
+            "",
+            "Decisions, not autopilot:",
+            f"  {data['approved_total']} approved",
+            f"  {data['pending_total']} pending",
+            f"  {data['rejected_total']} rejected",
+            "",
+            "The bigger picture:",
+        ]
+        for row in data["projects_rows"]:
+            stage = f" · {row['stage']}" if row["stage"] else ""
+            lines.append(
+                f"  {row['name']}{stage} · {row['percent']}%"
+                f" ({row['complete']} of {row['total']} tasks complete)"
+            )
+        lines += [
+            "",
+            "Messages in window: "
+            f"{report.messages_total} (models: "
+            + (
+                ", ".join(f"{name} ×{count}" for _m, name, count in report.models)
+                if report.models
+                else "none recorded"
+            )
+            + ")",
+            f"Ratings: {report.ratings_up} up, {report.ratings_down} down",
+            f"Reminders fired: {report.heartbeat_fired}"
+            f" (dismissed {report.heartbeat_dismissed}) · check-ins {report.checkins}",
+            "",
+            "Progress reflects completed tasks, not agent messages or unapproved proposals.",
+        ]
+        filename = f"orbit-summary-{date.today().isoformat()}.txt"
+        return Response(
+            "\n".join(lines) + "\n",
+            mimetype="text/plain",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
     @app.post("/api/task/<task_id>/stream")
@@ -2287,6 +2785,9 @@ def create_app(
                 finish_run(run.steps)
                 run.status = IDLE
                 run.operation = "Waiting for your input"
+                # A completed turn is a fresh draft to review: a rejection of
+                # the previous draft does not carry over to this one.
+                task_obj.rejected = False
                 _note(task_obj, "Turn finished · waiting for your input.")
             return [("task_state", json.dumps(_panel_state(task_obj), sort_keys=True))]
 
@@ -2316,7 +2817,28 @@ def create_app(
             )
         st.approve_task(task_id)
         task_obj.activity.insert(0, Activity(text="You approved the proposed changes.", time="just now"))
+        _record_event("task_approval_decided", task_id=task_id, decision="approved")
         return Response(json.dumps({"approved": True}), mimetype="application/json")
+
+    @app.post("/api/task/<task_id>/reject")
+    @ownership_checked("task_id")
+    def api_reject(task_id: str) -> Response:
+        """Reject the proposed draft. The decision is recorded; files are not.
+
+        There is no gate to weaken here: rejecting is the opposite of applying,
+        and this endpoint never touches ``applied`` — the same "reject leaves
+        your project unchanged" rule the review screen states. A later finished
+        turn on the task proposes a fresh draft.
+        """
+        st = _scoped_store()
+        task_obj, not_owned = _owned_task_or_404(task_id)
+        if not_owned is not None:
+            return not_owned
+        assert task_obj is not None
+        st.reject_task(task_id)
+        task_obj.activity.insert(0, Activity(text="You rejected the proposed changes.", time="just now"))
+        _record_event("task_approval_decided", task_id=task_id, decision="rejected")
+        return Response(json.dumps({"rejected": True, "approved": False}), mimetype="application/json")
 
     @app.post("/api/task/<task_id>/apply")
     @ownership_checked("task_id")
@@ -2334,6 +2856,7 @@ def create_app(
                 status=403,
                 mimetype="application/json",
             )
+        _record_event("task_approval_decided", task_id=task_id, decision="applied")
         return Response(json.dumps({"applied": True, "approved": True}), mimetype="application/json")
 
     def _sse_response(
@@ -2854,12 +3377,9 @@ def create_app(
     # ----- profile & settings ------------------------------------------------------
 
     SETTINGS_TABS = (
-        ("profile", "Profile"),
-        ("preferences", "Preferences"),
-        ("integrations", "Integrations"),
+        ("general", "General"),
         ("notifications", "Notifications"),
-        ("security", "Privacy & security"),
-        ("account", "Account"),
+        ("privacy", "Privacy"),
     )
 
     @app.get("/settings")
@@ -2880,7 +3400,7 @@ def create_app(
                 }
             )
         saved_labels = {
-            "profile": "Profile saved.",
+            "profile": "Preferences saved.",
             "preferences": "Preferences saved.",
             "notifications": "Notification preferences saved.",
             "password": "Password updated — other sessions were signed out.",
@@ -2893,25 +3413,44 @@ def create_app(
             "delete-confirm": "Type your email address exactly to confirm deletion.",
             "name": "A name is required.",
         }
+        # The plan card's counts are the real ones: active (not archived)
+        # projects and the specialists catalog. Nothing here is a tier claim
+        # the build cannot back.
+        active_projects = sum(
+            1 for p in _scoped_projects().list() if p.status != "archived"
+        )
+        plan_card = {
+            "active_projects": active_projects,
+            "specialists": len(agent_types()),
+        }
+        from config import HEARTBEAT_TIMEZONE
+        from heartbeat.schedule import QUIET_END_HOUR, QUIET_START_HOUR
+
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
         return render_template(
             "settings.html",
+            view=view,
             tabs=SETTINGS_TABS,
-            active_tab=request.args.get("tab", "profile").strip() or "profile",
+            timezone_label=HEARTBEAT_TIMEZONE,
+            quiet_label=f"{QUIET_START_HOUR:02d}:00 – {QUIET_END_HOUR:02d}:00",
+            active_tab=request.args.get("tab", "general").strip() or "general",
             saved_message=saved_labels.get(saved, ""),
             error_message=error_labels.get(error, ""),
-            roles=ROLES,
-            experiences=EXPERIENCE_LEVELS,
-            interests=INTERESTS,
-            languages=LANGUAGES,
             profile=account.get("profile") or {},
             prefs=account.get("prefs") or {},
             provider_label=PROVIDER_LABELS.get(account.get("provider", "email"), "Email and password"),
             has_password=bool(account.get("password_hash")),
             sessions=sessions,
-            scope_note_github=OAUTH_SCOPE_COPY.format(provider="GitHub"),
+            plan_card=plan_card,
             settings_active=True,
             projects_active=False,
             agents_active=False,
+            dashboard_active=False,
+            analytics_active=False,
+            reminders_active=False,
+            connected_apps_active=False,
             **_sidebar_context(),
         )
 
@@ -2923,7 +3462,7 @@ def create_app(
             args["error"] = error
         if tab:
             args["tab"] = tab
-        return redirect(url_for("settings_page", **args) + f"#{tab or 'profile'}", code=303)
+        return redirect(url_for("settings_page", **args) + f"#{tab or 'general'}", code=303)
 
     @app.post("/settings/profile")
     def settings_profile() -> Response:
@@ -2933,9 +3472,12 @@ def create_app(
             return redirect(url_for("home"))
         name = request.form.get("name", "").strip()
         if not name:
-            return _settings_redirect(error="name", tab="profile")
+            return _settings_redirect(error="name", tab="general")
         store.update_profile(account["id"], name=name, workspace=request.form.get("workspace", ""))
-        return _settings_redirect(saved="profile", tab="profile")
+        # The General form's one button saves the preferences on it too —
+        # an unchecked checkbox posts nothing, and False is a real answer.
+        store.set_pref(account["id"], "beta_updates", request.form.get("beta_updates") == "on")
+        return _settings_redirect(saved="profile", tab="general")
 
     @app.post("/settings/preferences")
     def settings_preferences() -> Response:
@@ -2955,7 +3497,7 @@ def create_app(
         st = _scoped_store()
         if depth in ("quick", "deep") and depth != st.thinking_level:
             st.set_thinking_level(depth)
-        return _settings_redirect(saved="preferences", tab="preferences")
+        return _settings_redirect(saved="preferences", tab="general")
 
     @app.post("/settings/notifications")
     def settings_notifications() -> Response:
@@ -2977,16 +3519,16 @@ def create_app(
         new = request.form.get("new", "")
         confirm = request.form.get("confirm", "")
         if new != confirm:
-            return _settings_redirect(error="password-mismatch", tab="security")
+            return _settings_redirect(error="password-mismatch", tab="privacy")
         if account.get("password_hash") and not store.check_password(account["id"], current):
-            return _settings_redirect(error="password-current", tab="security")
+            return _settings_redirect(error="password-current", tab="privacy")
         if store.set_password(account["id"], new) != "ok":
-            return _settings_redirect(error="password-weak", tab="security")
+            return _settings_redirect(error="password-weak", tab="privacy")
         # set_password cleared every session; re-open only this browser's.
         sid = store.start_session(account["id"], user_agent=request.headers.get("User-Agent", ""))
         session["sid"] = sid
         _record_event("account_password_changed", account_id=account["id"])
-        return _settings_redirect(saved="password", tab="security")
+        return _settings_redirect(saved="password", tab="privacy")
 
     @app.post("/settings/sessions/revoke-others")
     def settings_revoke_sessions() -> Response:
@@ -2996,7 +3538,7 @@ def create_app(
             return redirect(url_for("home"))
         store.revoke_other_sessions(account["id"], session.get("sid", ""))
         _record_event("account_sessions_revoked", account_id=account["id"])
-        return _settings_redirect(saved="sessions", tab="security")
+        return _settings_redirect(saved="sessions", tab="privacy")
 
     @app.post("/settings/tour-replay")
     def settings_tour_replay() -> Response:
@@ -3014,7 +3556,7 @@ def create_app(
         if store is None or account is None:
             return redirect(url_for("home"))
         if request.form.get("confirm", "").strip().lower() != account.get("email", "").lower():
-            return _settings_redirect(error="delete-confirm", tab="account")
+            return _settings_redirect(error="delete-confirm", tab="privacy")
         _record_event("account_deleted", account_id=account["id"])
         account_id, sid = account["id"], session.get("sid", "")
         store.delete_account(account_id)
@@ -3035,6 +3577,26 @@ def create_app(
         account = _require_account()
         if store is None or account is None:
             return redirect(url_for("home"))
+
+        def _page(**overrides: Any) -> str:
+            view = request.args.get("view", "").strip()
+            if view not in ("loading", "error"):
+                view = ""
+            return render_template(
+                "feedback.html",
+                kinds=FEEDBACK_KINDS,
+                view=view,
+                projects_active=False,
+                agents_active=False,
+                settings_active=False,
+                dashboard_active=False,
+                analytics_active=False,
+                reminders_active=False,
+                connected_apps_active=False,
+                **_sidebar_context(),
+                **overrides,
+            )
+
         if request.method == "POST":
             kind = request.form.get("kind", "")
             title = request.form.get("title", "")
@@ -3042,29 +3604,19 @@ def create_app(
             try:
                 entry = store.add_feedback(account["id"], kind, title, body, page=request.form.get("page", "/feedback"))
             except ValueError as exc:
-                return render_template(
-                    "feedback.html",
-                    kinds=FEEDBACK_KINDS,
+                return _page(
                     error=str(exc),
                     values={"kind": kind, "title": title, "body": body},
                     entries=store.feedback_for(account["id"]),
                     sent=False,
-                    projects_active=False,
-                    agents_active=False,
-                    **_sidebar_context(),
                 ), 422
             _record_event("beta_feedback_submitted", account_id=account["id"], kind=kind, feedback_id=entry["id"])
             return redirect(url_for("feedback_page", sent="1"), code=303)
-        return render_template(
-            "feedback.html",
-            kinds=FEEDBACK_KINDS,
+        return _page(
             error="",
             values={},
             entries=store.feedback_for(account["id"]),
             sent=request.args.get("sent") == "1",
-            projects_active=False,
-            agents_active=False,
-            **_sidebar_context(),
         )
 
     @app.post("/api/feedback")

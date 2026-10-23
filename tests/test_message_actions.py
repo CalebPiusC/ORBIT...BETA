@@ -320,13 +320,18 @@ class RegenerateTests(AppCase):
 
 class SidebarCollapseTests(AppCase):
     def test_every_screen_has_the_collapse_toggle_and_the_analytics_entry(self) -> None:
-        for path in ("/", "/task/T1", "/analytics"):
+        for path in ("/", "/task/T1"):
             with self.subTest(path=path):
                 body = self.client.get(path).get_data(as_text=True)
                 self.assertIn('id="sidebarToggle"', body)
                 self.assertIn('aria-label="Collapse sidebar"', body)
                 self.assertIn('id="analyticsLink"', body)
                 self.assertIn('href="/analytics"', body)
+        # The analytics screen itself lives on the app shell now: the rail
+        # is its entry, named and active.
+        body = self.client.get("/analytics").get_data(as_text=True)
+        self.assertIn('href="/analytics" aria-current="page"', body)
+        self.assertIn(">Analytics<", body)
 
     def test_collapsed_controls_keep_a_tooltip_with_the_full_label(self) -> None:
         body = self.client.get("/").get_data(as_text=True)
@@ -574,13 +579,16 @@ class AnalyticsRouteTests(AppCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.get_data(as_text=True)
-        self.assertIn("Messages per day", body)
-        self.assertIn("Which model answered", body)
-        self.assertIn("Reminders", body)
-        self.assertIn("Message ratings", body)
-        self.assertIn("1 message today", body)
-        # Thumbs up counted from the line the rating wrote.
-        self.assertIn("<span class=\"key\">Thumbs up</span><span class=\"value\">1</span>", body)
+        # The screen's real figures: the decision state and the window line.
+        self.assertIn("See how far you've come.", body)
+        self.assertIn("/ Tasks completed", body)
+        self.assertIn("/ Changes approved", body)
+        self.assertIn("/ Pending proposals", body)
+        # The log's own counts ride in the summary export: one message, one
+        # thumbs up — counted from the lines those actions wrote.
+        export = self.client.get("/analytics/export?window=all").get_data(as_text=True)
+        self.assertIn("Messages in window: 1", export)
+        self.assertIn("Ratings: 1 up, 0 down", export)
 
     def test_every_sent_message_is_audited_for_the_daily_count(self) -> None:
         self.send("One")

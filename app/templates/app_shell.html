@@ -9,12 +9,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
 <script>
-  // Theme before first paint: a saved choice wins, otherwise the system setting.
+  // Theme before first paint: an explicit saved choice ("light"/"dark") wins;
+  // "system" or nothing saved follows the device setting.
   (function () {
     try {
       var saved = window.localStorage.getItem("orbit.theme");
       var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-      document.documentElement.dataset.theme = saved || (dark ? "dark" : "light");
+      var choice = (saved === "light" || saved === "dark") ? saved : (dark ? "dark" : "light");
+      document.documentElement.dataset.theme = choice;
     } catch (_error) {
       document.documentElement.dataset.theme = "light";
     }
@@ -161,6 +163,15 @@
     text-transform: uppercase;
     color: var(--text-3);
   }
+
+  .app-nav__count {
+    margin-left: 2px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-3);
+  }
+
+  .app-nav__item.is-active .app-nav__count { color: var(--text-2); }
 
   .app-side__foot {
     display: flex;

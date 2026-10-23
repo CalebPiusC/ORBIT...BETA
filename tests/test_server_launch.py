@@ -109,6 +109,24 @@ class ServerLaunchTests(unittest.TestCase):
 
         self.addCleanup(restore)
 
+    def test_a_blank_secret_key_is_treated_as_unset_by_the_factory(self) -> None:
+        """setup.sh's untouched .env copy sets ORBIT_SECRET_KEY= (blank).
+
+        The factory must fall back to the committed default so the offline
+        suite and a bare render work; the launch guard still refuses that
+        default, so nothing serves on it.
+        """
+        from app.server import create_app
+
+        with patch.dict(os.environ, {"ORBIT_SECRET_KEY": ""}):
+            app = create_app()
+        self.assertEqual(app.secret_key, DEFAULT_SECRET_KEY)
+        guard_app = RecordingFlaskApp()
+        guard_app.secret_key = app.secret_key
+        with patch.dict(os.environ, {"ORBIT_SECRET_KEY": ""}):
+            with self.assertRaisesRegex(RuntimeError, "ORBIT_SECRET_KEY is not set"):
+                run_app(guard_app)  # type: ignore[arg-type]
+
     def test_run_app_starts_scheduler_for_the_attached_heartbeat(self) -> None:
         app = RecordingFlaskApp()
         heartbeat = app.config["HEARTBEAT"]

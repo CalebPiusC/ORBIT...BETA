@@ -1808,8 +1808,13 @@
       if (window.localStorage.getItem("orbit.sidebar.collapsed") === "1") {
         document.documentElement.classList.add("sidebar-collapsed-pending");
       }
-      if (window.localStorage.getItem(THEME_KEY) === "light") {
+      // Explicit choice wins; "system" (or nothing saved) follows the device.
+      var theme = window.localStorage.getItem(THEME_KEY);
+      if (theme === "light") {
         document.documentElement.dataset.theme = "light";
+      } else if (theme !== "dark") {
+        var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        if (!prefersDark) document.documentElement.dataset.theme = "light";
       }
     } catch (_error) {
       // Private mode or a blocked store: defaults (expanded, dark) stand.

@@ -576,21 +576,29 @@ class SettingsPageTests(unittest.TestCase):
 
     def test_settings_renders_every_section(self) -> None:
         text = self.client.get("/settings").get_data(as_text=True)
-        for section in ("Profile", "Preferences", "Integrations", "Notifications", "Privacy &amp; security", "Account"):
+        # The frame's three tabs, and the real sections under them.
+        for section in ("General", "Notifications", "Privacy",
+                        "Your surroundings", "Only the useful nudges",
+                        "Your approval is the rule.", "Your data, your choice."):
             self.assertIn(section, text)
-        self.assertIn("This device", text)
-        self.assertIn("does not grant access to any repository", text.replace("&#39;", "'"))
+        privacy = self.client.get("/settings?tab=privacy").get_data(as_text=True)
+        self.assertIn("Password &amp; sign-in", privacy)
+        self.assertIn("Signed-in browsers", privacy)
+        self.assertIn("Delete your account", privacy)
+        self.assertIn("this browser", privacy)
 
     def test_integrations_reports_nothing_as_connected(self) -> None:
         """No integration is built, so none may read as connected.
 
         GitHub used to be seeded as "connected" here while no GitHub code
-        existed anywhere in the app.
+        existed anywhere in the app. Settings now hands integrations to the
+        Connected apps screen — and that screen keeps the honesty.
         """
         text = self.client.get("/settings").get_data(as_text=True)
-        self.assertIn("Not connected — the integration isn't built yet.", text)
         self.assertNotIn("Connected to your workspace.", text)
-        self.assertEqual(text.count(">Not connected<"), 3)  # GitHub, Linear, Vercel
+        connected = self.client.get("/connected").get_data(as_text=True)
+        self.assertEqual(connected.count(">Not connected<"), 0)  # rendered as meta text
+        self.assertEqual(connected.count("Not connected"), 4)  # GitHub, Figma, Notion, Slack
 
     def test_profile_and_preferences_save(self) -> None:
         self.client.post("/settings/profile", data={"name": "Grace M. Hopper", "workspace": "Compiler crew"})
@@ -647,7 +655,7 @@ class FeedbackTests(unittest.TestCase):
     def test_page_form_posts_and_lists(self) -> None:
         resp = self.client.post("/feedback", data={"kind": "feature", "title": "ZIP import", "body": "Let me drop a zip"})
         self.assertIn("sent=1", resp.headers["Location"])
-        text = self.client.get("/feedback").get_data(as_text=True)
+        text = self.client.get("/feedback?sent=1").get_data(as_text=True)
         self.assertIn("ZIP import", text)
         self.assertIn("Thank you", text)
 
@@ -1037,14 +1045,15 @@ class DashboardDesignTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertIn('class="app-nav__item is-active" href="/dashboard" aria-current="page"', rail)
 
-    def test_unbuilt_destinations_are_disabled_not_dead_links(self) -> None:
+    def test_every_rail_destination_is_a_real_link(self) -> None:
         _, client, _ = self._active()
         page = client.get("/dashboard").get_data(as_text=True)
+        # Every rail destination is built and linked now — including the
+        # three group-3 screens. Nothing lingers as a dead "Soon" row.
         for path in ("/approvals", "/reminders", "/connected"):
-            self.assertNotIn(f'href="{path}"', page)
-        self.assertEqual(page.count('class="app-nav__item is-soon"'), 3)  # rail
-        self.assertEqual(page.count("app-nav__item app-nav__item--drawer is-soon"), 3)  # drawer
-        self.assertIn('aria-disabled="true"', page)
+            self.assertIn(f'href="{path}"', page)
+        self.assertEqual(page.count('class="app-nav__item is-soon"'), 0)  # rail
+        self.assertEqual(page.count("app-nav__item app-nav__item--drawer is-soon"), 0)  # drawer
 
     def test_the_phone_menu_is_a_real_dialog_with_the_same_rail(self) -> None:
         _, client, _ = self._active()
@@ -1087,7 +1096,7 @@ class DashboardDesignTests(unittest.TestCase):
             if href.startswith("/projects/") or href.startswith("/static/"):
                 continue
             self.assertIn(
-                href, {"/dashboard", "/projects", "/agents", "/analytics", "/settings", "/create", "/", "/onboarding"},
+                href, {"/dashboard", "/projects", "/agents", "/approvals", "/analytics", "/reminders", "/connected", "/settings", "/create", "/", "/onboarding"},
                 href,
             )
 
