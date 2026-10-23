@@ -576,21 +576,29 @@ class SettingsPageTests(unittest.TestCase):
 
     def test_settings_renders_every_section(self) -> None:
         text = self.client.get("/settings").get_data(as_text=True)
-        for section in ("Profile", "Preferences", "Integrations", "Notifications", "Privacy &amp; security", "Account"):
+        # The frame's three tabs, and the real sections under them.
+        for section in ("General", "Notifications", "Privacy",
+                        "Your surroundings", "Only the useful nudges",
+                        "Your approval is the rule.", "Your data, your choice."):
             self.assertIn(section, text)
-        self.assertIn("This device", text)
-        self.assertIn("does not grant access to any repository", text.replace("&#39;", "'"))
+        privacy = self.client.get("/settings?tab=privacy").get_data(as_text=True)
+        self.assertIn("Password &amp; sign-in", privacy)
+        self.assertIn("Signed-in browsers", privacy)
+        self.assertIn("Delete your account", privacy)
+        self.assertIn("this browser", privacy)
 
     def test_integrations_reports_nothing_as_connected(self) -> None:
         """No integration is built, so none may read as connected.
 
         GitHub used to be seeded as "connected" here while no GitHub code
-        existed anywhere in the app.
+        existed anywhere in the app. Settings now hands integrations to the
+        Connected apps screen — and that screen keeps the honesty.
         """
         text = self.client.get("/settings").get_data(as_text=True)
-        self.assertIn("Not connected — the integration isn't built yet.", text)
         self.assertNotIn("Connected to your workspace.", text)
-        self.assertEqual(text.count(">Not connected<"), 4)  # GitHub, Figma, Notion, Slack
+        connected = self.client.get("/connected").get_data(as_text=True)
+        self.assertEqual(connected.count(">Not connected<"), 0)  # rendered as meta text
+        self.assertEqual(connected.count("Not connected"), 4)  # GitHub, Figma, Notion, Slack
 
     def test_profile_and_preferences_save(self) -> None:
         self.client.post("/settings/profile", data={"name": "Grace M. Hopper", "workspace": "Compiler crew"})

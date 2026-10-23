@@ -3362,12 +3362,9 @@ def create_app(
     # ----- profile & settings ------------------------------------------------------
 
     SETTINGS_TABS = (
-        ("profile", "Profile"),
-        ("preferences", "Preferences"),
-        ("integrations", "Integrations"),
+        ("general", "General"),
         ("notifications", "Notifications"),
-        ("security", "Privacy & security"),
-        ("account", "Account"),
+        ("privacy", "Privacy"),
     )
 
     @app.get("/settings")
@@ -3388,7 +3385,7 @@ def create_app(
                 }
             )
         saved_labels = {
-            "profile": "Profile saved.",
+            "profile": "Preferences saved.",
             "preferences": "Preferences saved.",
             "notifications": "Notification preferences saved.",
             "password": "Password updated — other sessions were signed out.",
@@ -3401,25 +3398,44 @@ def create_app(
             "delete-confirm": "Type your email address exactly to confirm deletion.",
             "name": "A name is required.",
         }
+        # The plan card's counts are the real ones: active (not archived)
+        # projects and the specialists catalog. Nothing here is a tier claim
+        # the build cannot back.
+        active_projects = sum(
+            1 for p in _scoped_projects().list() if p.status != "archived"
+        )
+        plan_card = {
+            "active_projects": active_projects,
+            "specialists": len(agent_types()),
+        }
+        from config import HEARTBEAT_TIMEZONE
+        from heartbeat.schedule import QUIET_END_HOUR, QUIET_START_HOUR
+
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
         return render_template(
             "settings.html",
+            view=view,
             tabs=SETTINGS_TABS,
-            active_tab=request.args.get("tab", "profile").strip() or "profile",
+            timezone_label=HEARTBEAT_TIMEZONE,
+            quiet_label=f"{QUIET_START_HOUR:02d}:00 – {QUIET_END_HOUR:02d}:00",
+            active_tab=request.args.get("tab", "general").strip() or "general",
             saved_message=saved_labels.get(saved, ""),
             error_message=error_labels.get(error, ""),
-            roles=ROLES,
-            experiences=EXPERIENCE_LEVELS,
-            interests=INTERESTS,
-            languages=LANGUAGES,
             profile=account.get("profile") or {},
             prefs=account.get("prefs") or {},
             provider_label=PROVIDER_LABELS.get(account.get("provider", "email"), "Email and password"),
             has_password=bool(account.get("password_hash")),
             sessions=sessions,
-            scope_note_github=OAUTH_SCOPE_COPY.format(provider="GitHub"),
+            plan_card=plan_card,
             settings_active=True,
             projects_active=False,
             agents_active=False,
+            dashboard_active=False,
+            analytics_active=False,
+            reminders_active=False,
+            connected_apps_active=False,
             **_sidebar_context(),
         )
 
@@ -3431,7 +3447,7 @@ def create_app(
             args["error"] = error
         if tab:
             args["tab"] = tab
-        return redirect(url_for("settings_page", **args) + f"#{tab or 'profile'}", code=303)
+        return redirect(url_for("settings_page", **args) + f"#{tab or 'general'}", code=303)
 
     @app.post("/settings/profile")
     def settings_profile() -> Response:
@@ -3441,9 +3457,12 @@ def create_app(
             return redirect(url_for("home"))
         name = request.form.get("name", "").strip()
         if not name:
-            return _settings_redirect(error="name", tab="profile")
+            return _settings_redirect(error="name", tab="general")
         store.update_profile(account["id"], name=name, workspace=request.form.get("workspace", ""))
-        return _settings_redirect(saved="profile", tab="profile")
+        # The General form's one button saves the preferences on it too —
+        # an unchecked checkbox posts nothing, and False is a real answer.
+        store.set_pref(account["id"], "beta_updates", request.form.get("beta_updates") == "on")
+        return _settings_redirect(saved="profile", tab="general")
 
     @app.post("/settings/preferences")
     def settings_preferences() -> Response:
@@ -3463,7 +3482,7 @@ def create_app(
         st = _scoped_store()
         if depth in ("quick", "deep") and depth != st.thinking_level:
             st.set_thinking_level(depth)
-        return _settings_redirect(saved="preferences", tab="preferences")
+        return _settings_redirect(saved="preferences", tab="general")
 
     @app.post("/settings/notifications")
     def settings_notifications() -> Response:
@@ -3485,16 +3504,16 @@ def create_app(
         new = request.form.get("new", "")
         confirm = request.form.get("confirm", "")
         if new != confirm:
-            return _settings_redirect(error="password-mismatch", tab="security")
+            return _settings_redirect(error="password-mismatch", tab="privacy")
         if account.get("password_hash") and not store.check_password(account["id"], current):
-            return _settings_redirect(error="password-current", tab="security")
+            return _settings_redirect(error="password-current", tab="privacy")
         if store.set_password(account["id"], new) != "ok":
-            return _settings_redirect(error="password-weak", tab="security")
+            return _settings_redirect(error="password-weak", tab="privacy")
         # set_password cleared every session; re-open only this browser's.
         sid = store.start_session(account["id"], user_agent=request.headers.get("User-Agent", ""))
         session["sid"] = sid
         _record_event("account_password_changed", account_id=account["id"])
-        return _settings_redirect(saved="password", tab="security")
+        return _settings_redirect(saved="password", tab="privacy")
 
     @app.post("/settings/sessions/revoke-others")
     def settings_revoke_sessions() -> Response:
@@ -3504,7 +3523,7 @@ def create_app(
             return redirect(url_for("home"))
         store.revoke_other_sessions(account["id"], session.get("sid", ""))
         _record_event("account_sessions_revoked", account_id=account["id"])
-        return _settings_redirect(saved="sessions", tab="security")
+        return _settings_redirect(saved="sessions", tab="privacy")
 
     @app.post("/settings/tour-replay")
     def settings_tour_replay() -> Response:
@@ -3522,7 +3541,7 @@ def create_app(
         if store is None or account is None:
             return redirect(url_for("home"))
         if request.form.get("confirm", "").strip().lower() != account.get("email", "").lower():
-            return _settings_redirect(error="delete-confirm", tab="account")
+            return _settings_redirect(error="delete-confirm", tab="privacy")
         _record_event("account_deleted", account_id=account["id"])
         account_id, sid = account["id"], session.get("sid", "")
         store.delete_account(account_id)
