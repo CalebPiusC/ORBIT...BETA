@@ -412,7 +412,12 @@ def create_app(
     welcome → dashboard flow.
     """
     app = Flask(__name__, template_folder="templates")
-    app.secret_key = os.environ.get(SECRET_KEY_ENV_VAR, DEFAULT_SECRET_KEY)
+    # A blank ORBIT_SECRET_KEY (the untouched .env.example copy that setup.sh
+    # makes) is the same as unset here: the factory falls back to the committed
+    # default so pages render and the offline suite can run. run_app still
+    # refuses that default and a blank value alike — see
+    # _require_real_secret_key, which checks the effective secret, not this.
+    app.secret_key = os.environ.get(SECRET_KEY_ENV_VAR) or DEFAULT_SECRET_KEY
     app.config["MAX_CONTENT_LENGTH"] = MAX_VOICE_UPLOAD_BYTES
     app.config["PROVIDER"] = provider
     app.config["STORE"] = store or Store()
