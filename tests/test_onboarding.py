@@ -1040,10 +1040,11 @@ class DashboardDesignTests(unittest.TestCase):
     def test_unbuilt_destinations_are_disabled_not_dead_links(self) -> None:
         _, client, _ = self._active()
         page = client.get("/dashboard").get_data(as_text=True)
-        for path in ("/approvals", "/reminders", "/connected"):
+        self.assertIn('href="/approvals"', page)  # Approvals is live now
+        for path in ("/reminders", "/connected"):
             self.assertNotIn(f'href="{path}"', page)
-        self.assertEqual(page.count('class="app-nav__item is-soon"'), 3)  # rail
-        self.assertEqual(page.count("app-nav__item app-nav__item--drawer is-soon"), 3)  # drawer
+        self.assertEqual(page.count('class="app-nav__item is-soon"'), 2)  # rail
+        self.assertEqual(page.count("app-nav__item app-nav__item--drawer is-soon"), 2)  # drawer
         self.assertIn('aria-disabled="true"', page)
 
     def test_the_phone_menu_is_a_real_dialog_with_the_same_rail(self) -> None:
@@ -1087,7 +1088,7 @@ class DashboardDesignTests(unittest.TestCase):
             if href.startswith("/projects/") or href.startswith("/static/"):
                 continue
             self.assertIn(
-                href, {"/dashboard", "/projects", "/agents", "/analytics", "/settings", "/create", "/", "/onboarding"},
+                href, {"/dashboard", "/projects", "/agents", "/approvals", "/analytics", "/settings", "/create", "/", "/onboarding"},
                 href,
             )
 

@@ -641,7 +641,9 @@ EXPECTED_OWNERSHIP_CHECKED = {
     "task",                  # task_id
     "api_task_stream",       # task_id
     "api_approve",           # task_id
+    "api_reject",            # task_id
     "api_apply",             # task_id
+    "approvals",             # ?task= (query id)
     "api_message_rating",    # message_id
     "api_action_decide",     # action_id
     "api_chat",              # message_id in the body (regenerate)

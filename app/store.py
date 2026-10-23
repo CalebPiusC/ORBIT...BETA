@@ -132,6 +132,11 @@ class Task:
     run: TaskRun | None = None
     approved: bool = False
     applied: bool = False
+    # The person rejected this draft. Like ``approved``, only an explicit
+    # decision sets it — and a later finished turn clears it, because that
+    # turn is a fresh proposal to review. It never touches files: it only
+    # decides whether the draft is still waiting.
+    rejected: bool = False
     last_turn_prompt: str | None = None
     last_turn_initial: bool = False
     # The project this task belongs to, if any. Tasks created from a project's
@@ -681,6 +686,20 @@ class Store:
         task.approved = True
         return True
 
+    def reject_task(self, task_id: str, *, account_id: str) -> bool:
+        """Explicitly reject a task's proposed draft.
+
+        The decision is recorded and the draft stops waiting — but no file is
+        touched and nothing is applied: a rejected draft is the opposite of an
+        applied one. Like approval, only this explicit call flips it, and a
+        later finished turn proposes a fresh draft (the flag clears there).
+        """
+        task = self.get_task(task_id, account_id=account_id)
+        if task is None:
+            return False
+        task.rejected = True
+        return True
+
     def apply_changes(self, task_id: str, *, account_id: str) -> Task:
         """Apply/push the proposed changes — but ONLY if explicitly approved.
 
@@ -870,6 +889,9 @@ class AccountView:
 
     def approve_task(self, task_id: str) -> bool:
         return self.store.approve_task(task_id, account_id=self.account_id)
+
+    def reject_task(self, task_id: str) -> bool:
+        return self.store.reject_task(task_id, account_id=self.account_id)
 
     def apply_changes(self, task_id: str) -> Task:
         return self.store.apply_changes(task_id, account_id=self.account_id)

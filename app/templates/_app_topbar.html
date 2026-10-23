@@ -24,7 +24,7 @@
     {% endif %}
     <a class="app-nav__item app-nav__item--drawer{% if projects_active %} is-active{% endif %}" href="/projects">Projects</a>
     <a class="app-nav__item app-nav__item--drawer{% if agents_active %} is-active{% endif %}" href="/agents">Agents</a>
-    <span class="app-nav__item app-nav__item--drawer is-soon" aria-disabled="true">Approvals<span class="app-nav__soon">Soon</span></span>
+    <a class="app-nav__item app-nav__item--drawer{% if approvals_active %} is-active{% endif %}" href="/approvals">Approvals{% if approvals_count %} <span class="app-nav__count">{{ approvals_count }}</span>{% endif %}</a>
     <a class="app-nav__item app-nav__item--drawer{% if analytics_active %} is-active{% endif %}" href="/analytics">Analytics</a>
     <span class="app-nav__item app-nav__item--drawer is-soon" aria-disabled="true">Reminders<span class="app-nav__soon">Soon</span></span>
     <span class="app-nav__item app-nav__item--drawer is-soon" aria-disabled="true">Connected apps<span class="app-nav__soon">Soon</span></span>

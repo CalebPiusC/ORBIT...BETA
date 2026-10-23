@@ -1,0 +1,611 @@
+{% extends "app_shell.html" %}
+{#
+  Approval review, from Approval review · Light/Dark · Desktop (1440) and
+  Mobile (390) in design/ORBIT UI___2.
+
+  The screen shows one draft at a time: what the task asked for in plain
+  language, the before/after the gate really guarantees, the files the run
+  named, and the task it belongs to. Every figure and name comes from the
+  store — the frames' sample copy (code diffs, “Saved on this device”,
+  preview checklists) has no data behind it in this build and is replaced by
+  what the run actually recorded, flagged in the group's report.
+
+  Approve wires to the existing /api/task/<id>/approve then /apply endpoints
+  (approvals.js); Reject to /api/task/<id>/reject. The "approve: true" gate
+  and the ownership 404s are unchanged — the buttons are a client for those
+  endpoints, nothing more. Copper is the Approve button alone.
+#}
+{% block title %}orbit — Approvals{% endblock %}
+{% block head %}
+<style>
+  /* ---------------- page frame ---------------- */
+  .ar-page { display: flex; flex-direction: column; gap: clamp(16px, 2.4vh, 24px); }
+
+  .ar-crumb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .ar-crumb a { color: var(--text-3); text-decoration: none; }
+  .ar-crumb a:hover { color: var(--text-1); text-decoration: underline; text-underline-offset: 3px; }
+  .ar-crumb__sep { color: var(--text-3); }
+  .ar-crumb__here { color: var(--text-2); }
+  .ar-crumb__nav { display: inline-flex; gap: 14px; margin-left: 4px; }
+  .ar-crumb__nav a {
+    letter-spacing: 0.04em;
+    text-transform: none;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-2);
+  }
+
+  .ar-head { display: flex; flex-direction: column; gap: 10px; }
+  .ar-head h1 {
+    font-family: var(--font-display);
+    font-size: clamp(28px, 3vw, 40px);
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    color: var(--text-1);
+  }
+  .ar-head__sub { font-size: 15px; line-height: 1.6; color: var(--text-2); }
+
+  /* ---------------- status card ---------------- */
+  .ar-status {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+    padding: clamp(20px, 3vw, 32px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .ar-status__title {
+    font-family: var(--font-display);
+    font-size: clamp(20px, 2vw, 26px);
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--text-1);
+  }
+
+  .ar-status__text { font-size: 15px; line-height: 1.6; color: var(--text-2); max-width: 62ch; }
+
+  /* ---------------- two-column body ---------------- */
+  .ar-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 24px;
+    align-items: start;
+  }
+
+  .ar-main { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+  .ar-rail { display: flex; flex-direction: column; gap: 24px; }
+
+  .ar-card {
+    padding: clamp(20px, 3vw, 32px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .ar-card__title {
+    font-family: var(--font-display);
+    font-size: clamp(20px, 2vw, 26px);
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--text-1);
+  }
+
+  .ar-card__text { margin-top: 14px; font-size: 15px; line-height: 1.65; color: var(--text-2); }
+  .ar-card__text + .ar-card__text { margin-top: 12px; }
+
+  .ar-card__why {
+    margin-top: 18px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .ar-card__foot { margin-top: 18px; font-size: 13px; line-height: 1.5; color: var(--text-3); }
+
+  /* ---------------- before / after ---------------- */
+  .ar-ba { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+
+  .ar-ba__card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: clamp(20px, 3vw, 28px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .ar-ba__label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .ar-ba__claim {
+    font-family: var(--font-display);
+    font-size: clamp(19px, 1.8vw, 23px);
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--text-1);
+  }
+
+  .ar-ba__text { font-size: 15px; line-height: 1.65; color: var(--text-2); }
+  .ar-ba__meta { margin-top: auto; font-size: 13px; color: var(--text-3); }
+
+  /* ---------------- files and steps ---------------- */
+  .ar-list { margin-top: 18px; display: flex; flex-direction: column; gap: 12px; }
+
+  .ar-file {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+  }
+
+  .ar-file__name { font-size: 14px; font-weight: 500; color: var(--text-1); overflow-wrap: anywhere; }
+  .ar-file__src { font-size: 12px; color: var(--text-3); }
+
+  .ar-steps { margin-top: 18px; display: flex; flex-direction: column; gap: 14px; }
+
+  .ar-step { display: flex; gap: 12px; align-items: flex-start; }
+  .ar-step__mark {
+    flex: 0 0 20px;
+    width: 20px;
+    height: 20px;
+    margin-top: 1px;
+    color: var(--text-3);
+  }
+  .ar-step__mark svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+  .ar-step__body { display: flex; flex-direction: column; gap: 3px; }
+  .ar-step__title { font-size: 14px; line-height: 1.5; color: var(--text-1); }
+  .ar-step__evidence { font-size: 12px; line-height: 1.55; color: var(--text-3); }
+  .ar-step--pending .ar-step__title { color: var(--text-2); }
+
+  .ar-note {
+    padding: 16px 18px;
+    border: 1px dashed var(--border);
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-2);
+  }
+
+  /* ---------------- rail ---------------- */
+  .ar-rail__title {
+    font-family: var(--font-display);
+    font-size: 19px;
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--text-1);
+  }
+
+  .ar-call__mark { margin-bottom: 14px; }
+
+  .ar-rail__crumb { margin-top: 12px; font-size: 13px; line-height: 1.55; color: var(--text-2); }
+
+  .ar-rail__caps {
+    margin-top: 16px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .ar-rail__files { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .ar-rail__file { font-size: 13px; line-height: 1.5; color: var(--text-1); overflow-wrap: anywhere; }
+  .ar-rail__file em { font-style: normal; color: var(--text-3); }
+
+  .ar-rail__facts { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+  .ar-rail__fact { font-size: 13px; line-height: 1.55; color: var(--text-2); }
+
+  .ar-rail__foot { margin-top: 16px; font-size: 12px; line-height: 1.55; color: var(--text-3); }
+
+  .ar-call__text { margin-top: 12px; font-size: 14px; line-height: 1.65; color: var(--text-2); }
+
+  .ar-check {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-top: 18px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .ar-check input { margin: 2px 0 0; flex: 0 0 auto; accent-color: var(--text-1); }
+
+  .ar-actions { margin-top: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .ar-actions .o-btn { width: 100%; }
+
+  .ar-fine { margin-top: 16px; font-size: 12px; line-height: 1.6; color: var(--text-3); }
+
+  .ar-error-line {
+    margin-top: 12px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--danger);
+  }
+
+  /* ---------------- states ---------------- */
+  .ar-state {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: clamp(24px, 4vh, 40px) clamp(20px, 3vw, 32px);
+    border: 1px solid transparent;
+    border-radius: var(--r-card);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .ar-state__title {
+    font-family: var(--font-display);
+    font-size: clamp(22px, 2.4vw, 28px);
+    font-weight: 500;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+  }
+
+  .ar-state__text { font-size: 15px; line-height: 1.65; color: var(--text-2); max-width: 56ch; }
+  .ar-state__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+
+  .ar-skel {
+    border-radius: var(--r-control);
+    background: var(--surface-2);
+    animation: ar-pulse 1.4s ease-in-out infinite;
+  }
+  .ar-skel--title { width: min(520px, 100%); height: 44px; }
+  .ar-skel--line { width: min(360px, 100%); height: 18px; margin-top: 16px; }
+  .ar-skel--card { min-height: clamp(120px, 18vh, 180px); margin-top: 24px; }
+  .ar-skel--wide { min-height: clamp(160px, 24vh, 240px); margin-top: 24px; }
+
+  @keyframes ar-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  /* ---------------- dark edges ---------------- */
+  [data-theme="dark"] .ar-status,
+  [data-theme="dark"] .ar-card,
+  [data-theme="dark"] .ar-ba__card,
+  [data-theme="dark"] .ar-state { border-color: var(--border); box-shadow: none; }
+
+  /* ---------------- phone ---------------- */
+  @media (max-width: 1000px) {
+    .ar-cols { grid-template-columns: minmax(0, 1fr); }
+    .ar-rail { order: 2; }
+  }
+
+  @media (max-width: 700px) {
+    .ar-ba { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ar-skel { animation: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ar-page">
+
+  {% if view == 'loading' %}
+  {# Derived from the dashboard's loading state: same geometry, so the real
+     page does not jump when it arrives. #}
+  <div role="status" aria-live="polite">
+    <span class="o-visually-hidden">Loading the change review…</span>
+    <div class="ar-skel ar-skel--title" aria-hidden="true"></div>
+    <div class="ar-skel ar-skel--line" aria-hidden="true"></div>
+    <div class="ar-skel ar-skel--card" aria-hidden="true"></div>
+    <div class="ar-skel ar-skel--wide" aria-hidden="true"></div>
+    <div class="ar-skel ar-skel--card" aria-hidden="true"></div>
+  </div>
+
+  {% elif view == 'error' %}
+  {# Derived from the dashboard's failure state: say what is safe, offer a
+     real way back. #}
+  <section class="ar-state" role="alert">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="ar-state__title">We couldn't load the change review.</h1>
+    <p class="ar-state__text">Nothing has been applied and no files were touched. Reload the page to try again.</p>
+    <div class="ar-state__actions">
+      <a class="o-btn o-btn--primary" href="/approvals">Try again</a>
+    </div>
+  </section>
+
+  {% elif review is none %}
+  {# An honest empty state: the queue really has nothing in it. #}
+  <section class="ar-state">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="ar-state__title">Nothing waits for your approval.</h1>
+    <p class="ar-state__text">When an agent finishes a draft, its review lands here — before anything is applied. Nothing runs without your yes.</p>
+    <div class="ar-state__actions">
+      <a class="o-btn o-btn--primary" href="/projects">Open projects</a>
+      <a class="o-btn o-btn--secondary" href="/agents">Open Agents</a>
+    </div>
+  </section>
+
+  {% elif not review.has_run %}
+  {# Owned task, but no run means no draft: there is nothing to review. #}
+  <section class="ar-state">
+    <svg class="o-orbit-arc" width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">
+      <path d="M58 18a24 24 0 1 0 4 26" />
+      <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+    </svg>
+    <h1 class="ar-state__title">This task has no draft yet.</h1>
+    <p class="ar-state__text">“{{ review.title }}” has not produced a proposal to review. When a turn finishes on it, the draft lands here.</p>
+    <div class="ar-state__actions">
+      <a class="o-btn o-btn--primary" href="{{ review.task_href }}">Open the task</a>
+      {% if proposals_count %}<a class="o-btn o-btn--secondary" href="/approvals">Back to the queue</a>{% endif %}
+    </div>
+  </section>
+
+  {% else %}
+
+  <nav class="ar-crumb" aria-label="Breadcrumb">
+    <a href="/approvals">Approvals</a>
+    <span class="ar-crumb__sep" aria-hidden="true">/</span>
+    <span class="ar-crumb__here">{{ review.middle_crumb }}</span>
+    <span class="ar-crumb__sep" aria-hidden="true">/</span>
+    <span class="ar-crumb__here">
+      {%- if review.pending -%}
+      Proposal {{ queue_index + 1 }} of {{ proposals_count }}
+      {%- else -%}
+      Decision recorded
+      {%- endif -%}
+    </span>
+    {% if review.pending and (prev_id or next_id) %}
+    <span class="ar-crumb__nav">
+      {% if prev_id %}<a href="/approvals?task={{ prev_id }}" rel="prev">Previous</a>{% endif %}
+      {% if next_id %}<a href="/approvals?task={{ next_id }}" rel="next">Next</a>{% endif %}
+    </span>
+    {% endif %}
+  </nav>
+
+  <header class="ar-head">
+    <h1>A clear look before you say yes.</h1>
+    <p class="ar-head__sub">Your {{ review.agent_label }} has a proposal for “{{ review.title }}”. Take your time.</p>
+  </header>
+
+  <section class="ar-status" aria-labelledby="arStatusTitle">
+    {% if review.pending %}
+    <span class="o-capsule"><span class="o-capsule__dot" aria-hidden="true"></span>Needs your approval</span>
+    <h2 class="ar-status__title" id="arStatusTitle">Nothing changes until you approve.</h2>
+    <p class="ar-status__text">This is a proposal, not an applied change. Your project files are exactly as you left them.</p>
+    {% elif review.applied %}
+    <span class="o-capsule">Applied</span>
+    <h2 class="ar-status__title" id="arStatusTitle">You approved these changes.</h2>
+    <p class="ar-status__text">The draft is marked applied in orbit. Nothing was committed, pushed or published — this build has no connected repositories.</p>
+    {% elif review.approved %}
+    <span class="o-capsule">Approved</span>
+    <h2 class="ar-status__title" id="arStatusTitle">You approved these changes.</h2>
+    <p class="ar-status__text">The draft is marked approved. Applying it is the separate step below — nothing is applied before then.</p>
+    {% elif review.rejected %}
+    <span class="o-capsule">Rejected</span>
+    <h2 class="ar-status__title" id="arStatusTitle">You rejected this proposal.</h2>
+    <p class="ar-status__text">Your project files are exactly as you left them. A later turn on this task can propose a fresh draft.</p>
+    {% else %}
+    <span class="o-capsule">Turn finished</span>
+    <h2 class="ar-status__title" id="arStatusTitle">This turn ended without a decision.</h2>
+    <p class="ar-status__text">The run stopped before it could propose anything to apply. Nothing has changed.</p>
+    {% endif %}
+  </section>
+
+  <div class="ar-cols">
+    <div class="ar-main">
+
+      <section class="ar-card">
+        <h2 class="ar-card__title">{{ review.title }}</h2>
+        <p class="ar-card__text">{{ review.description }}</p>
+        {% set evidence = review.steps | selectattr('evidence') | map(attribute='evidence') | list %}
+        {% if evidence %}
+        <p class="ar-card__why">Why this approach?</p>
+        {% for line in evidence %}
+        <p class="ar-card__text">{{ line }}</p>
+        {% endfor %}
+        {% endif %}
+        <p class="ar-card__foot">{{ review.agent_label | capitalize }} · Proposed{% if review.proposed_at %} at {{ review.proposed_at }}{% endif %}</p>
+      </section>
+
+      <div class="ar-ba">
+        <section class="ar-ba__card">
+          <p class="ar-ba__label">Before / current</p>
+          <p class="ar-ba__claim">Your project, exactly as it is now.</p>
+          <p class="ar-ba__text">Nothing has been applied. {% if review.files %}The {{ review.files | length }} file{{ '' if review.files | length == 1 else 's' }} named below {{ 'is' if review.files | length == 1 else 'are' }} untouched.{% else %}No file has been touched.{% endif %}</p>
+          <p class="ar-ba__meta">Not applied</p>
+        </section>
+        <section class="ar-ba__card">
+          <p class="ar-ba__label">After / proposed</p>
+          <p class="ar-ba__claim">{{ review.title }}</p>
+          <p class="ar-ba__text">{{ review.description }}</p>
+          <p class="ar-ba__meta">{% if review.files %}{{ review.files | length }} file{{ '' if review.files | length == 1 else 's' }} · {% endif %}nothing is pushed or published</p>
+        </section>
+      </div>
+
+      <section class="ar-card">
+        <h2 class="ar-card__title">A small, focused change</h2>
+        {% if review.files %}
+        <p class="ar-card__text">{{ review.files | length }} file{{ '' if review.files | length == 1 else 's' }} named · {{ review.steps | length }} plan step{{ '' if review.steps | length == 1 else 's' }}. Every line below is what the agent recorded — this build stores no diffs.</p>
+        <div class="ar-list">
+          {% for item in review.files %}
+          <div class="ar-file">
+            <span class="ar-file__name">{{ item.name }}</span>
+            <span class="ar-file__src">· {{ item.source_label }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% elif review.steps %}
+        <p class="ar-card__text">{{ review.steps | length }} plan step{{ '' if review.steps | length == 1 else 's' }}, and no file named yet. Files appear when your request names them or the agent mentions them — never guessed.</p>
+        {% else %}
+        <p class="ar-note">Nothing is recorded for this draft yet: no plan steps and no named files.</p>
+        {% endif %}
+        {% if review.steps %}
+        <div class="ar-steps">
+          {% for step in review.steps %}
+          <div class="ar-step{% if step.status != 'done' %} ar-step--pending{% endif %}">
+            <span class="ar-step__mark" aria-hidden="true">
+              {% if step.status == 'done' %}
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 5-5.5"/></svg>
+              {% else %}
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/></svg>
+              {% endif %}
+            </span>
+            <span class="ar-step__body">
+              <span class="ar-step__title">{{ step.title }}</span>
+              {% if step.evidence %}<span class="ar-step__evidence">{{ step.evidence }}</span>{% endif %}
+            </span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </section>
+
+      <section class="ar-card">
+        <h2 class="ar-card__title">What has been checked</h2>
+        {% if review.checked %}
+        <div class="ar-steps">
+          {% for item in review.checked %}
+          <div class="ar-step">
+            <span class="ar-step__mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.5l2.5 2.5 5-5.5"/></svg>
+            </span>
+            <span class="ar-step__body">
+              <span class="ar-step__title">{{ item.title }}</span>
+              {% if item.evidence %}<span class="ar-step__evidence">{{ item.evidence }}</span>{% endif %}
+            </span>
+          </div>
+          {% endfor %}
+        </div>
+        <p class="ar-card__foot">These are the agent's own records of its narration — not a run against your live project. This build cannot run or preview code.</p>
+        {% else %}
+        <p class="ar-note">Nothing has been checked yet. Orbit records a check only when its narration says one happened — no preview was run.</p>
+        {% endif %}
+      </section>
+
+    </div>
+
+    <aside class="ar-rail">
+      <section class="ar-card">
+        <h2 class="ar-rail__title">What this touches</h2>
+        <p class="ar-rail__crumb">{{ review.middle_crumb }}{% if review.steps %} / Build{% endif %} / {{ review.title }}</p>
+        {% if review.files %}
+        <p class="ar-rail__caps">{{ review.files | length }} project file{{ '' if review.files | length == 1 else 's' }}</p>
+        <div class="ar-rail__files">
+          {% for item in review.files %}
+          <span class="ar-rail__file">{{ item.name }} <em>· {{ item.source_label }}</em></span>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="ar-rail__caps">No project files named</p>
+        {% endif %}
+        <div class="ar-rail__facts">
+          <span class="ar-rail__fact">Nothing is applied until you approve</span>
+          <span class="ar-rail__fact">Nothing is committed, pushed or published</span>
+          <span class="ar-rail__fact">No other task or project is touched</span>
+        </div>
+        <p class="ar-rail__foot">Your other projects are unaffected.</p>
+      </section>
+
+      <section class="ar-card">
+        <h2 class="ar-rail__title">One thing to know</h2>
+        <p class="ar-call__text">This review reads what the agent recorded: your request, its plan, and the files it named. It does not run or preview code — ask in the task chat if anything is unclear.</p>
+        <p class="ar-rail__foot">You can ask questions in the task chat before deciding.</p>
+      </section>
+
+      <section class="ar-card">
+        <svg class="o-orbit-arc ar-call__mark" width="56" height="56" viewBox="0 0 72 72" aria-hidden="true">
+          <path d="M58 18a24 24 0 1 0 4 26" />
+          <circle class="o-satellite" cx="60" cy="20" r="2.2" />
+        </svg>
+        <h2 class="ar-rail__title">Your call.</h2>
+        <p class="ar-call__text">Approve only if the explanation and scope feel right. You can always ask a question first.</p>
+
+        {% if review.pending %}
+        <label class="ar-check" for="arConfirm">
+          <input type="checkbox" id="arConfirm" />
+          <span>I've reviewed what changes and what stays the same.</span>
+        </label>
+        <div class="ar-actions" id="arActions"
+             data-approve-url="/api/task/{{ review.id }}/approve"
+             data-apply-url="/api/task/{{ review.id }}/apply"
+             data-reject-url="/api/task/{{ review.id }}/reject">
+          <button type="button" class="o-btn o-btn--primary" id="arApprove" disabled>
+            {%- if review.files -%}
+            Approve {{ review.files | length }}-file change
+            {%- else -%}
+            Approve this draft
+            {%- endif -%}
+          </button>
+          <button type="button" class="o-btn o-btn--secondary" id="arReject">Reject proposal</button>
+          <a class="o-btn o-btn--secondary" href="{{ review.task_href }}">Ask for a revision</a>
+          <p class="ar-error-line" id="arError" hidden></p>
+        </div>
+        <p class="ar-fine">Approving marks this draft applied in orbit. Rejecting leaves your project unchanged. Nothing is committed, pushed or published.</p>
+        <noscript>
+          <p class="ar-fine">Recording a decision needs JavaScript — or an API call to <code>/api/task/{{ review.id }}/approve</code> and <code>/apply</code>.</p>
+        </noscript>
+
+        {% elif review.approved and not review.applied %}
+        <div class="ar-actions" id="arActions"
+             data-approve-url="/api/task/{{ review.id }}/approve"
+             data-apply-url="/api/task/{{ review.id }}/apply"
+             data-reject-url="/api/task/{{ review.id }}/reject">
+          <button type="button" class="o-btn o-btn--primary" id="arApply">Apply these changes</button>
+          <p class="ar-error-line" id="arError" hidden></p>
+        </div>
+        <p class="ar-fine">Applying is the separate step after approval — the same gate, the same endpoints. Nothing is committed, pushed or published.</p>
+
+        {% else %}
+        <div class="ar-actions">
+          <a class="o-btn o-btn--primary" href="{{ review.task_href }}">Open the task</a>
+          {% if proposals_count %}<a class="o-btn o-btn--secondary" href="/approvals">Next proposal</a>{% endif %}
+        </div>
+        {% endif %}
+      </section>
+    </aside>
+  </div>
+
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script src="{{ url_for('static', filename='approvals.js') }}"></script>
+{% endblock %}

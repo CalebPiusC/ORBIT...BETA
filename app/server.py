@@ -473,6 +473,7 @@ def create_app(
         payload["activity"] = [{"text": a.text, "time": a.time} for a in task_obj.activity]
         payload["approved"] = bool(task_obj.approved)
         payload["applied"] = bool(task_obj.applied)
+        payload["rejected"] = bool(getattr(task_obj, "rejected", False))
         # A planned-but-not-started run is not yet working on anything.
         payload["running"] = run.status == RUNNING and run.started
         return payload
@@ -777,12 +778,19 @@ def create_app(
             "beta_updates_off": bool(account) and not prefs.get("beta_updates", True),
         }
         if raw_store is None or raw_projects is None:
-            return {**base, "sidebar_projects": [], "active_project_id": ""}
-        recent = raw_projects.for_account(_current_account_id()).list()[:3]
+            return {**base, "sidebar_projects": [], "active_project_id": "", "approvals_count": 0}
+        account_id = _current_account_id()
+        recent = raw_projects.for_account(account_id).list()[:3]
+        # The rail's Approvals count is the real queue: finished drafts this
+        # account has not decided yet (app.projectmap.proposal_ready).
+        approvals_count = sum(
+            1 for t in raw_store.for_account(account_id).tasks_for() if proposal_ready(t)
+        )
         return {
             **base,
             "sidebar_projects": [{"id": p.id, "name": p.name} for p in recent],
             "active_project_id": "",
+            "approvals_count": approvals_count,
         }
 
     def _sidebar_context() -> dict[str, Any]:
@@ -2093,6 +2101,133 @@ def create_app(
         )
         return _json({"message_id": message_id, "rating": rating})
 
+    # ----- Approvals: the change review ------------------------------------
+
+    @app.get("/approvals")
+    @ownership_checked("task (query)")
+    def approvals() -> str | Response:
+        """The change review screen: one draft at a time, from real state.
+
+        The queue is exactly what ``proposal_ready`` says waits on this
+        account — a finished run nobody approved, applied or rejected. The
+        screen shows the task's request in plain language, the before/after
+        the gate really guarantees (nothing applied vs. marked applied in
+        orbit), the files the run named, and the task it belongs to. Approve
+        and Reject are decisions against ``/api/task/<id>/approve`` · ``/apply``
+        · ``/reject`` — the same endpoints, same ownership checks, same
+        "approve: true" gate. ``?view=loading`` / ``?view=error`` are
+        presentation-only switches derived from the dashboard's own set.
+        """
+        st = _scoped_store()
+        project_store = _scoped_projects()
+        view = request.args.get("view", "").strip()
+        if view not in ("loading", "error"):
+            view = ""
+        proposals = [t for t in st.tasks_for() if proposal_ready(t)]
+        selected = None
+        selected_id = request.args.get("task", "").strip()
+        if selected_id:
+            # Another account's task answers exactly like an unknown id.
+            selected, not_owned = _owned_task_or_404(selected_id, template=True)
+            if not_owned is not None:
+                return not_owned
+        elif proposals:
+            selected = proposals[0]
+
+        review: dict[str, Any] | None = None
+        queue_index = 0
+        if selected is not None:
+            queue_index = next(
+                (i for i, t in enumerate(proposals) if t.id == selected.id), -1
+            )
+            run = selected.run
+            steps = list(run.steps) if run is not None else []
+            files = list(run.files) if run is not None else []
+            speaker = ""
+            for message in reversed(selected.chat):
+                if message.is_orbit and message.speaker:
+                    speaker = message.speaker
+                    break
+            if speaker and not speaker.endswith("Agent"):
+                agent_label = f"{speaker} agent"
+            else:
+                agent_label = speaker or "Orbit"
+            proposed_at = ""
+            for entry in selected.activity:
+                if entry.text.startswith("Turn finished"):
+                    proposed_at = entry.time
+                    break
+            project = (
+                project_store.get(selected.project_id) if selected.project_id else None
+            )
+            review = {
+                "id": selected.id,
+                "title": selected.title,
+                "description": selected.description,
+                "has_run": run is not None,
+                "agent_label": agent_label,
+                "proposed_at": proposed_at,
+                "middle_crumb": project.name if project is not None else selected.breadcrumb,
+                "task_href": f"/task/{selected.id}",
+                "pending": queue_index >= 0,
+                "approved": bool(selected.approved),
+                "applied": bool(selected.applied),
+                "rejected": bool(getattr(selected, "rejected", False)),
+                "done": bool(selected.done),
+                "steps": [
+                    {
+                        "title": step.title,
+                        "status": step.status,
+                        "evidence": step.evidence,
+                    }
+                    for step in steps
+                ],
+                "checked": [
+                    {"title": step.title, "evidence": step.evidence}
+                    for step in steps
+                    if step.status == "done"
+                ],
+                "files": [
+                    {
+                        "name": item.name,
+                        "source": item.source,
+                        "source_label": (
+                            "named in your request"
+                            if item.source == "request"
+                            else "mentioned by Orbit"
+                        ),
+                    }
+                    for item in files
+                ],
+                "planned_count": sum(1 for step in steps if step.status != "done"),
+            }
+
+        return render_template(
+            "approvals.html",
+            view=view,
+            review=review,
+            proposals_count=len(proposals),
+            queue_index=queue_index,
+            prev_id=(
+                proposals[queue_index - 1].id
+                if review is not None and review["pending"] and queue_index > 0
+                else ""
+            ),
+            next_id=(
+                proposals[queue_index + 1].id
+                if review is not None
+                and review["pending"]
+                and 0 <= queue_index < len(proposals) - 1
+                else ""
+            ),
+            approvals_active=True,
+            projects_active=False,
+            agents_active=False,
+            settings_active=False,
+            dashboard_active=False,
+            **_sidebar_context(),
+        )
+
     @app.get("/analytics")
     def analytics() -> str:
         """The Analytics view: audit.log read back, nothing tracked separately."""
@@ -2292,6 +2427,9 @@ def create_app(
                 finish_run(run.steps)
                 run.status = IDLE
                 run.operation = "Waiting for your input"
+                # A completed turn is a fresh draft to review: a rejection of
+                # the previous draft does not carry over to this one.
+                task_obj.rejected = False
                 _note(task_obj, "Turn finished · waiting for your input.")
             return [("task_state", json.dumps(_panel_state(task_obj), sort_keys=True))]
 
@@ -2321,7 +2459,28 @@ def create_app(
             )
         st.approve_task(task_id)
         task_obj.activity.insert(0, Activity(text="You approved the proposed changes.", time="just now"))
+        _record_event("task_approval_decided", task_id=task_id, decision="approved")
         return Response(json.dumps({"approved": True}), mimetype="application/json")
+
+    @app.post("/api/task/<task_id>/reject")
+    @ownership_checked("task_id")
+    def api_reject(task_id: str) -> Response:
+        """Reject the proposed draft. The decision is recorded; files are not.
+
+        There is no gate to weaken here: rejecting is the opposite of applying,
+        and this endpoint never touches ``applied`` — the same "reject leaves
+        your project unchanged" rule the review screen states. A later finished
+        turn on the task proposes a fresh draft.
+        """
+        st = _scoped_store()
+        task_obj, not_owned = _owned_task_or_404(task_id)
+        if not_owned is not None:
+            return not_owned
+        assert task_obj is not None
+        st.reject_task(task_id)
+        task_obj.activity.insert(0, Activity(text="You rejected the proposed changes.", time="just now"))
+        _record_event("task_approval_decided", task_id=task_id, decision="rejected")
+        return Response(json.dumps({"rejected": True, "approved": False}), mimetype="application/json")
 
     @app.post("/api/task/<task_id>/apply")
     @ownership_checked("task_id")
@@ -2339,6 +2498,7 @@ def create_app(
                 status=403,
                 mimetype="application/json",
             )
+        _record_event("task_approval_decided", task_id=task_id, decision="applied")
         return Response(json.dumps({"applied": True, "approved": True}), mimetype="application/json")
 
     def _sse_response(

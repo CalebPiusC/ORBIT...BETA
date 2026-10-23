@@ -144,6 +144,8 @@ def proposal_ready(task: Any) -> bool:
         return False
     if getattr(task, "approved", False) or getattr(task, "applied", False):
         return False
+    if getattr(task, "rejected", False):
+        return False
     run = getattr(task, "run", None)
     if run is None:
         return False
@@ -160,6 +162,11 @@ def workspace_state(task: Any) -> tuple[str, str]:
         return ("done", "Done")
     if proposal_ready(task):
         return ("needs_approval", "Needs approval")
+    if getattr(task, "rejected", False):
+        # A refused draft is not "Planned" and not "Needs approval": the
+        # person said no to this one. It needs new work — that is the
+        # attention state, named for what actually happened.
+        return ("needs_attention", "Declined")
     run = getattr(task, "run", None)
     if run is not None and getattr(run, "status", IDLE) == RUNNING:
         return ("in_progress", "In progress")
